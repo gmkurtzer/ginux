@@ -4,9 +4,6 @@ set -eu
 state_root=/var/lib/ginux
 runtime=/usr/local/libexec/ginux-runtime
 image_tools=/usr/local/libexec/ginux-image
-image_config=$image_tools/rocky-systemd-oci.env
-image_cache=$state_root/images/rocky-10-ubi-init-amd64
-image_tar=$image_cache/rocky-10-ubi-init-amd64-rootfs.tar
 default_recipe=/etc/ginux/examples/rocky-systemd.toml
 
 usage() {
@@ -36,6 +33,31 @@ validate_name() {
 
 instance_dir() {
     printf '%s/instances/%s' "$state_root" "$1"
+}
+
+root_path_is_executable() {
+    executable_root=$(realpath -e -- "$1") || return 1
+    executable_path=$executable_root$2
+    executable_hops=0
+    while test "$executable_hops" -lt 16; do
+        executable_path=$(realpath -sm -- "$executable_path") || return 1
+        case $executable_path in
+            "$executable_root"/*) ;;
+            *) return 1 ;;
+        esac
+        if test -L "$executable_path"; then
+            executable_target=$(readlink -- "$executable_path") || return 1
+            case $executable_target in
+                /*) executable_path=$executable_root$executable_target ;;
+                *) executable_path=$(dirname -- "$executable_path")/$executable_target ;;
+            esac
+            executable_hops=$((executable_hops + 1))
+            continue
+        fi
+        test -f "$executable_path" && test -x "$executable_path"
+        return
+    done
+    return 1
 }
 
 supervisor_identity() {
@@ -346,8 +368,7 @@ prepare_root() {
     # Ginux maintains instance-visible credentials independently.
     chown -R 65534:65534 "$root"
     find "$root" -type d -exec chmod u+w {} +
-    chmod 600 "$root/etc/shadow"
-    test -x "$root/sbin/init"
+    test ! -e "$root/etc/shadow" || chmod 600 "$root/etc/shadow"
 }
 
 import_instance() {
@@ -400,7 +421,7 @@ $2"
     validate_name "$name"
     test -r "$config" || { printf 'configuration is not readable: %s\n' "$config" >&2; exit 66; }
     test -x "$runtime" || { printf '%s\n' 'Ginux runtime is not installed' >&2; exit 69; }
-    test -x "$image_tools/ensure-rocky-oci.sh" || {
+    test -x "$image_tools/ensure-oci-image.sh" || {
         printf '%s\n' 'Ginux image acquisition support is not installed' >&2
         exit 69
     }
@@ -438,12 +459,13 @@ $2"
     IFS=$old_ifs
     "$runtime" config-merge "$config" "$@" "instance.id=\"$name\"" >"$effective"
     configured_root=$(sed -n 's/^[[:space:]]*root[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$effective")
-    expected_root=docker.io/rockylinux/rockylinux@sha256:7a18ce2c9c1e0d8735f3e72685f9666150af25036e7f7b5ee4eede3754496f8c
-    if test "$configured_root" != "$expected_root"; then
-        printf 'unsupported configured image: %s\n' "$configured_root" >&2
-        exit 65
-    fi
+    configured_init=$(sed -n 's/^[[:space:]]*init[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$effective")
     if test "$replacing" = true; then
+        current_root=$(sed -n 's/^[[:space:]]*root[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$directory/config.toml")
+        if test "$configured_root" != "$current_root"; then
+            printf '%s\n' 'changing an existing instance root image is not supported; create a new instance' >&2
+            exit 65
+        fi
         candidate_config=$directory/config.toml.candidate.$$
         candidate_deployment=$directory/deployment.state.candidate.$$
         candidate_runtime=$directory/runtime.toml.candidate.$$
@@ -470,22 +492,43 @@ $2"
     else
         printf 'Importing instance "%s"\n' "$name"
     fi
-    GINUX_OCI_CONFIG_FILE=$image_config \
-        GINUX_OCI_CACHE_DIR_OVERRIDE=$image_cache \
-        GINUX_OCI_WORK_DIR_OVERRIDE=$state_root/work/oci \
-        GINUX_OCI_NATIVE_ROOTFS_ONLY=1 \
+    image_result=$(mktemp "$state_root/work/image-result.XXXXXX")
+    cleanup_image_result() {
+        rm -f "$image_result"
+    }
+    trap cleanup_image_result 0 HUP INT TERM
+    GINUX_OCI_RESULT_FILE=$image_result \
         GINUX_OCI_OUTPUT=human \
-        "$image_tools/ensure-rocky-oci.sh"
+        "$image_tools/ensure-oci-image.sh" \
+        "$configured_root" "$state_root/images" "$state_root/work/oci"
+    image_tar=$(sed -n '1p' "$image_result")
+    test -r "$image_tar" || {
+        printf 'prepared OCI root is unavailable: %s\n' "$configured_root" >&2
+        exit 65
+    }
     printf '  Preparing instance... '
-    mkdir -p "$directory/root"
-    install -m 600 "$effective" "$directory/config.toml"
-    write_deployment "$directory/deployment.state" "$create_network" "$create_forwards" locked
+    staging=$state_root/work/instance.$name.$$
+    cleanup_staging() {
+        rm -rf "$staging"
+        rm -f "$image_result"
+        rm -f "$effective"
+    }
+    trap cleanup_staging 0 HUP INT TERM
+    mkdir -p "$staging/root"
+    install -m 600 "$effective" "$staging/config.toml"
+    write_deployment "$staging/deployment.state" "$create_network" "$create_forwards" locked
     materialize_runtime_config \
-        "$directory/config.toml" "$directory/deployment.state" "$directory/runtime.toml"
-    tar -xf "$image_tar" -C "$directory/root"
-    prepare_root "$directory/root"
+        "$staging/config.toml" "$staging/deployment.state" "$staging/runtime.toml"
+    tar -xf "$image_tar" -C "$staging/root"
+    root_path_is_executable "$staging/root" "$configured_init" || {
+        printf '\nconfigured init is missing or not executable: %s\n' "$configured_init" >&2
+        exit 65
+    }
+    prepare_root "$staging/root"
+    mv "$staging" "$directory"
     printf 'done\n'
     trap - 0 HUP INT TERM
+    rm -f "$image_result"
     cleanup_effective
     if test "$import_action" = true; then
         printf 'Instance "%s" created.\n' "$name"

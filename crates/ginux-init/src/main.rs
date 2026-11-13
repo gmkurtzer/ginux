@@ -35,22 +35,21 @@ use crate::process_hooks::{
 };
 use crate::supervisor::{
     exit_process, install_trace_filter, line, managed_host_identity, ptrace, read_tracee_word,
-    stopped, syscall0, syscall1, syscall2, syscall3, syscall4, syscall5, syscall6, wait, write_all,
-    write_i64, write_u64, UserRegs, AT_FDCWD, CLOCK_MONOTONIC, CLOCK_PROCESS_CPUTIME_ID, EBADF,
-    ECHILD, EINVAL, EMFILE, ENOSYS, EPERM, ESRCH, O_RDONLY, O_RDWR, PR_SET_NO_NEW_PRIVS,
-    PTRACE_CONT, PTRACE_EVENT_EXEC, PTRACE_EVENT_FORK, PTRACE_EVENT_SECCOMP, PTRACE_GETEVENTMSG,
-    PTRACE_GETREGS, PTRACE_KILL, PTRACE_O_EXITKILL, PTRACE_O_TRACEEXEC, PTRACE_O_TRACEFORK,
-    PTRACE_O_TRACESECCOMP, PTRACE_O_TRACESYSGOOD, PTRACE_PEEKTEXT, PTRACE_POKETEXT,
-    PTRACE_SETOPTIONS, PTRACE_SETREGS, PTRACE_SYSCALL, PTRACE_SYSEMU, PTRACE_TRACEME, SIGCHLD,
-    SIGCONT, SIGINT, SIGKILL, SIGSTOP, SIGTERM, SIGTSTP, SIG_BLOCK, SYS_CHDIR, SYS_CHROOT,
-    SYS_CLOCK_GETTIME, SYS_CLOSE_HOST, SYS_EXECVE, SYS_EXIT_HOST, SYS_FORK, SYS_FSTAT, SYS_FSYNC,
-    SYS_KILL, SYS_OPENAT_HOST, SYS_PAUSE, SYS_PIDFD_GETFD, SYS_PIDFD_OPEN, SYS_PRCTL, SYS_PREAD64,
-    SYS_PTRACE, SYS_PWRITE64, SYS_READ_HOST, SYS_RT_SIGPROCMASK, SYS_SETGID, SYS_SETGROUPS,
-    SYS_SETUID, SYS_SIGNALFD4, SYS_WAIT4, SYS_WRITE_HOST, VIRTUAL_PID,
+    stopped, syscall0, syscall1, syscall2, syscall3, syscall4, syscall5, syscall6, virtual_sysinfo,
+    wait, write_all, write_i64, write_u64, UserRegs, AT_FDCWD, CLOCK_MONOTONIC,
+    CLOCK_PROCESS_CPUTIME_ID, EBADF, ECHILD, EINVAL, EMFILE, ENOSYS, EPERM, ESRCH, O_RDONLY,
+    O_RDWR, PR_SET_NO_NEW_PRIVS, PTRACE_CONT, PTRACE_EVENT_EXEC, PTRACE_EVENT_FORK,
+    PTRACE_EVENT_SECCOMP, PTRACE_GETEVENTMSG, PTRACE_GETREGS, PTRACE_KILL, PTRACE_O_EXITKILL,
+    PTRACE_O_TRACEEXEC, PTRACE_O_TRACEFORK, PTRACE_O_TRACESECCOMP, PTRACE_O_TRACESYSGOOD,
+    PTRACE_PEEKTEXT, PTRACE_POKETEXT, PTRACE_SETOPTIONS, PTRACE_SETREGS, PTRACE_SYSCALL,
+    PTRACE_SYSEMU, PTRACE_TRACEME, SIGCHLD, SIGCONT, SIGINT, SIGKILL, SIGSTOP, SIGTERM, SIGTSTP,
+    SIG_BLOCK, SYS_CHDIR, SYS_CHROOT, SYS_CLOCK_GETTIME, SYS_CLOSE_HOST, SYS_EXECVE, SYS_EXIT_HOST,
+    SYS_FORK, SYS_FSTAT, SYS_FSYNC, SYS_KILL, SYS_OPENAT_HOST, SYS_PAUSE, SYS_PIDFD_GETFD,
+    SYS_PIDFD_OPEN, SYS_PRCTL, SYS_PREAD64, SYS_PTRACE, SYS_PWRITE64, SYS_READ_HOST,
+    SYS_RT_SIGPROCMASK, SYS_SETGID, SYS_SETGROUPS, SYS_SETUID, SYS_SIGNALFD4, SYS_WAIT4,
+    SYS_WRITE_HOST, VIRTUAL_PID,
 };
-use crate::supervisor::{
-    fault_errno, poke_tracee_bytes, write_tracee_bytes as write_tracee_bytes_result, EFAULT,
-};
+use crate::supervisor::{fault_errno, write_tracee_bytes as write_tracee_bytes_result, EFAULT};
 use ginux_devices::{
     BlockBackend, DeviceError, DeviceKind, DeviceName, DeviceRegistry, DeviceView, IsolatedNetwork,
     Partition, IOCTL_CONSOLE_GET_SIZE,
@@ -1624,19 +1623,24 @@ fn supervise_process_native(root_host_pid: usize, instance: &mut Instance) -> ! 
                     registers.rax = virtual_pid as u64;
                     current.override_result = true;
                     if current.clone_ptid != 0 {
-                        if store_tracee_tid(host_pid, current.clone_ptid, virtual_pid).is_err() {
-                            killed_or_fail(
-                                &mut tasks,
-                                task_index,
-                                instance,
-                                root_host_pid,
-                                b"thread tid store failed",
-                            );
-                            continue;
+                        match store_tracee_tid(host_pid, current.clone_ptid, virtual_pid) {
+                            Err(()) => {
+                                killed_or_fail(
+                                    &mut tasks,
+                                    task_index,
+                                    instance,
+                                    root_host_pid,
+                                    b"thread tid store failed",
+                                );
+                                continue;
+                            }
+                            Ok(true) => {
+                                write_all(b"GINUX_NATIVE_PROCESS_AUDIT: thread-tid virtual-tid=");
+                                write_u64(virtual_pid as u64);
+                                write_all(b"\n");
+                            }
+                            Ok(false) => {}
                         }
-                        write_all(b"GINUX_NATIVE_PROCESS_AUDIT: thread-tid virtual-tid=");
-                        write_u64(virtual_pid as u64);
-                        write_all(b"\n");
                     }
                 }
                 current.thread_pending = false;
@@ -2537,7 +2541,7 @@ fn store_wait_results(
 ) -> Result<(), i64> {
     const RUSAGE_BYTES: usize = 144;
     if user_status != 0 {
-        store_tracee_status(host_pid, user_status, status)?;
+        store_tracee_u32(host_pid, user_status, status)?;
     }
     if user_rusage != 0 {
         write_tracee_bytes_result(host_pid, user_rusage, &[0; RUSAGE_BYTES])?;
@@ -2545,18 +2549,19 @@ fn store_wait_results(
     Ok(())
 }
 
-/// Store the status word all or nothing, as the kernel's single 4-byte
-/// store does. A word that crosses a page boundary is written in two parts,
-/// the second page first: if that part faults nothing is written, and if the
-/// first page then faults, the second part gets its previous bytes back.
-fn store_tracee_status(host_pid: usize, user_status: usize, status: u32) -> Result<(), i64> {
+/// Store a 4-byte word (a wait status or a clone tid) all or nothing, as
+/// the kernel's single 4-byte `put_user` does. A word that crosses a page
+/// boundary is written in two parts, the second page first: if that part
+/// faults nothing is written, and if the first page then faults, the second
+/// part gets its previous bytes back.
+fn store_tracee_u32(host_pid: usize, address: usize, value: u32) -> Result<(), i64> {
     const PAGE_SIZE: usize = 4096;
-    let bytes = status.to_le_bytes();
-    let head = PAGE_SIZE - (user_status & (PAGE_SIZE - 1));
+    let bytes = value.to_le_bytes();
+    let head = PAGE_SIZE - (address & (PAGE_SIZE - 1));
     if head >= bytes.len() {
-        return write_tracee_bytes_result(host_pid, user_status, &bytes);
+        return write_tracee_bytes_result(host_pid, address, &bytes);
     }
-    let Some(tail) = user_status.checked_add(head) else {
+    let Some(tail) = address.checked_add(head) else {
         return Err(-EFAULT);
     };
     // The page-aligned tail starts a ptrace word; a page that cannot be read
@@ -2572,7 +2577,7 @@ fn store_tracee_status(host_pid: usize, user_status: usize, status: u32) -> Resu
         return Err(fault_errno(read as i64));
     }
     write_tracee_bytes_result(host_pid, tail, &bytes[head..])?;
-    if let Err(error) = write_tracee_bytes_result(host_pid, user_status, &bytes[..head]) {
+    if let Err(error) = write_tracee_bytes_result(host_pid, address, &bytes[..head]) {
         let _ = write_tracee_bytes_result(
             host_pid,
             tail,
@@ -2591,17 +2596,33 @@ fn write_wait_fault(caller: u32, child: u32) {
     write_all(b"\n");
 }
 
-/// Publish the virtual tid into the tracee's parent-tid cell. The host
-/// kernel stored the host tid there during `clone` with
-/// `CLONE_PARENT_SETTID`; thread identity requires the parent to observe the
-/// virtual tid instead. A valid int pointer may straddle two ptrace words;
-/// [`poke_tracee_bytes`] preserves every neighboring byte.
-fn store_tracee_tid(host_pid: usize, user_tid: usize, tid: u32) -> Result<(), ()> {
-    poke_tracee_bytes(host_pid, user_tid, &tid.to_le_bytes()).map_err(|_| ())
+/// Publish the virtual tid into a `clone` tid cell: the parent's for
+/// `CLONE_PARENT_SETTID`, the child's for `CLONE_CHILD_SETTID`. The host
+/// kernel stored the host tid there; thread identity requires the virtual
+/// tid instead. The store goes through [`store_tracee_u32`] and so honors the
+/// page protections like the kernel's `put_user` (except on the ptrace
+/// fallback of [`write_tracee_bytes`], where only unmapped memory faults).
+/// The kernel ignores a failed tid store and `clone` still succeeds, so a
+/// fault is only audited here and returns `Ok(false)`; any other error, such
+/// as `ESRCH` for a tracee that is gone, is reported.
+fn store_tracee_tid(host_pid: usize, user_tid: usize, tid: u32) -> Result<bool, ()> {
+    match store_tracee_u32(host_pid, user_tid, tid) {
+        Ok(()) => Ok(true),
+        Err(error) if error == -EFAULT => {
+            write_all(b"GINUX_NATIVE_PROCESS_AUDIT: tid store fault virtual-tid=");
+            write_u64(tid as u64);
+            write_all(b"\n");
+            Ok(false)
+        }
+        Err(_) => Err(()),
+    }
 }
 
-fn process_native_fail(instance: &mut Instance, root_pid: usize, reason: &[u8]) -> ! {
-    let _ = ptrace(PTRACE_KILL, root_pid, 0, 0);
+fn process_native_fail(instance: &mut Instance, _root_pid: usize, reason: &[u8]) -> ! {
+    // Every caller runs after PTRACE_SETOPTIONS set PTRACE_O_EXITKILL, which
+    // fork, vfork and clone children inherit, so the exit below kills every
+    // tracee. No kill or reap of its own: the root may already be reaped (its
+    // pid free for reuse), and traced threads may still hold its group open.
     instance_fail(instance, reason)
 }
 
@@ -6405,6 +6426,27 @@ fn supervise_native(
             native_fail(instance, pid, b"native seccomp syscall identity mismatch");
         }
         task.syscall = syscall;
+        let transfer_limit = if mode != 3 {
+            match syscall {
+                0 | 17 => Some(1024 * 1024),
+                1 if matches!(registers.rdi, 1 | 2) => Some(4096),
+                _ => None,
+            }
+        } else {
+            None
+        };
+        if transfer_limit.is_some_and(|limit| registers.rdx > limit) {
+            registers.rdx = transfer_limit.unwrap_or(registers.rdx);
+            if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0 {
+                native_fail(instance, pid, b"native transfer clamp failed");
+            }
+        }
+        if syscall == 318 && registers.rsi > 256 {
+            registers.rsi = 256;
+            if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0 {
+                native_fail(instance, pid, b"native getrandom clamp failed");
+            }
+        }
         let shared_network =
             mode == 3 && instance.config().network_backend == NetworkBackend::Shared;
         let socket_table_full =
@@ -6995,6 +7037,23 @@ fn supervise_native(
         };
         write_all(b" action=");
         match decision.action {
+            Action::Mediate if syscall == 99 => {
+                let result =
+                    write_tracee_bytes_result(host_pid, registers.rdi as usize, &virtual_sysinfo())
+                        .map_or_else(|error| error, |_| 0);
+                write_all(b"emulate surface=virtual-system result=");
+                write_i64(result);
+                write_all(b"\n");
+                registers.orig_rax = u64::MAX;
+                task.awaiting_exit = true;
+                task.override_exit = true;
+                task.override_result = result;
+                if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+                {
+                    native_fail(instance, pid, b"native sysinfo emulation failed");
+                }
+            }
             Action::Mediate if socket_table_full => {
                 write_all(b"deny surface=virtual-network result=-");
                 write_u64(EMFILE as u64);
@@ -8034,6 +8093,58 @@ fn supervise_native(
                     native_fail(instance, pid, b"native virtual setsid failed");
                 }
             }
+            Action::Emulate if mode == 3 && syscall == 124 => {
+                let target = u32::try_from(registers.rdi).ok();
+                let result = match target {
+                    Some(0) => processes
+                        .view(task.virtual_id)
+                        .map(|view| i64::from(view.session))
+                        .unwrap_or(-ESRCH),
+                    Some(target) => processes
+                        .lookup(target)
+                        .map(|view| i64::from(view.session))
+                        .unwrap_or(-ESRCH),
+                    None => -ESRCH,
+                };
+                write_all(b"emulate surface=virtual-session-query result=");
+                write_i64(result);
+                write_all(b"\n");
+                registers.orig_rax = u64::MAX;
+                task.awaiting_exit = true;
+                task.override_exit = true;
+                task.override_result = result;
+                if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+                {
+                    native_fail(instance, pid, b"native virtual getsid failed");
+                }
+            }
+            Action::Emulate if mode == 3 && syscall == 121 => {
+                let target = u32::try_from(registers.rdi).ok();
+                let result = match target {
+                    Some(0) => processes
+                        .view(task.virtual_id)
+                        .map(|view| i64::from(view.process_group))
+                        .unwrap_or(-ESRCH),
+                    Some(target) => processes
+                        .lookup(target)
+                        .map(|view| i64::from(view.process_group))
+                        .unwrap_or(-ESRCH),
+                    None => -ESRCH,
+                };
+                write_all(b"emulate surface=virtual-process-group-query result=");
+                write_i64(result);
+                write_all(b"\n");
+                registers.orig_rax = u64::MAX;
+                task.awaiting_exit = true;
+                task.override_exit = true;
+                task.override_result = result;
+                if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+                {
+                    native_fail(instance, pid, b"native virtual getpgid failed");
+                }
+            }
             Action::Emulate if mode == 3 && syscall == 109 => {
                 let changed_task = u32::try_from(registers.rdi)
                     .ok()
@@ -8572,7 +8683,9 @@ fn supervise_native(
                     && syscall == ginux_core::SYS_READLINKAT
                     && tracee_decimal_fd_path(host_pid, registers.rsi as usize) =>
             {
-                let target = b"/memfd:ginux-instance";
+                let target: &[u8] = tracee_proc_self_fd_number(host_pid, registers.rsi as usize)
+                    .filter(|fd| native_fd_contains(&task.console_fds, *fd))
+                    .map_or(b"/memfd:ginux-instance", |_| b"/dev/console");
                 let count = core::cmp::min(target.len(), registers.r10 as usize);
                 let allowed =
                     write_tracee_bytes(host_pid, registers.rdx as usize, &target[..count]);
@@ -8934,17 +9047,39 @@ fn supervise_native(
             }
             Action::Mediate
                 if mode == 3
-                    && syscall == 257
-                    && (tracee_string_equals(host_pid, registers.rsi as usize, b"/dev/null")
-                        || tracee_string_equals(
-                            host_pid,
-                            registers.rsi as usize,
-                            b"/dev/console",
-                        )
-                        || tracee_string_equals(host_pid, registers.rsi as usize, b"/dev/tty")) =>
+                    && matches!(syscall, 2 | 257)
+                    && (tracee_string_equals(
+                        host_pid,
+                        if syscall == 2 {
+                            registers.rdi as usize
+                        } else {
+                            registers.rsi as usize
+                        },
+                        b"/dev/null",
+                    ) || tracee_string_equals(
+                        host_pid,
+                        if syscall == 2 {
+                            registers.rdi as usize
+                        } else {
+                            registers.rsi as usize
+                        },
+                        b"/dev/console",
+                    ) || tracee_string_equals(
+                        host_pid,
+                        if syscall == 2 {
+                            registers.rdi as usize
+                        } else {
+                            registers.rsi as usize
+                        },
+                        b"/dev/tty",
+                    )) =>
             {
-                let null_device =
-                    tracee_string_equals(host_pid, registers.rsi as usize, b"/dev/null");
+                let path_address = if syscall == 2 {
+                    registers.rdi as usize
+                } else {
+                    registers.rsi as usize
+                };
+                let null_device = tracee_string_equals(host_pid, path_address, b"/dev/null");
                 let source = if null_device {
                     INSTANCE_NULL_FD
                 } else {
@@ -9601,10 +9736,38 @@ fn native_sockaddr_with_source(word: u64, source: [u8; 4]) -> u64 {
 }
 
 fn native_fail(instance: &mut Instance, pid: usize, reason: &[u8]) -> ! {
-    let _ = ptrace(PTRACE_KILL, pid, 0, 0);
-    let mut status = 0;
-    let _ = wait(pid, &mut status);
+    kill_tracee(pid);
     instance_fail(instance, reason)
+}
+
+/// Ends a traced child with `kill(2)` and `SIGKILL` and reaps it, as
+/// `launch_fail` does. `PTRACE_KILL` only as a fallback: a seccomp policy that
+/// refuses ptrace requests may refuse it as well, and the reap would then block
+/// with the tracee left in its stop (and running on, untraced, once the
+/// supervisor is gone before `PTRACE_O_EXITKILL` is set).
+///
+/// Some callers have already reaped the child with the wait that reported it
+/// gone. A nonblocking wait first tells them apart: it fails once the child is
+/// reaped and reaps it if it has exited, so `kill(2)` only targets a child that
+/// is still ours and whose pid cannot have been reused.
+fn kill_tracee(pid: usize) {
+    let mut status = 0i32;
+    let reaped = unsafe {
+        syscall4(
+            SYS_WAIT4,
+            pid,
+            &mut status as *mut _ as usize,
+            WNOHANG as usize,
+            0,
+        )
+    };
+    if reaped < 0 || (reaped as usize == pid && !stopped(status)) {
+        return;
+    }
+    if unsafe { syscall2(SYS_KILL, pid, SIGKILL) } < 0 {
+        let _ = ptrace(PTRACE_KILL, pid, 0, 0);
+    }
+    let _ = wait(pid, &mut status);
 }
 
 fn config_main(config_path: *const u8) -> ! {
@@ -10143,11 +10306,7 @@ fn tracee() -> ! {
 }
 
 fn supervise_setup_fail(pid: usize, reason: &[u8]) -> ! {
-    // kill(2) instead of PTRACE_KILL: the same policy that failed the ptrace
-    // setup may also refuse PTRACE_KILL, and the reap below would then block.
-    let _ = unsafe { syscall2(SYS_KILL, pid, SIGKILL) };
-    let mut status = 0i32;
-    let _ = wait(pid, &mut status);
+    kill_tracee(pid);
     fail(reason)
 }
 
@@ -10220,8 +10379,7 @@ fn supervise(pid: usize) -> ! {
             }
             Action::Emulate if decision.syscall == SYS_EXIT => {
                 let success = regs.rdi == 0 && saw_getpid && saw_write && saw_uname;
-                let _ = ptrace(PTRACE_KILL, pid, 0, 0);
-                let _ = wait(pid, &mut status);
+                kill_tracee(pid);
                 if success {
                     line(b"GINUX: direct-host-syscall bypass=not-observed");
                     line(b"GATE1: PASS");

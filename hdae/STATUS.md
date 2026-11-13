@@ -202,6 +202,14 @@
 - Gate 16's kernel-module enforcement direction was abandoned by human
   decision on 2026-11-11. Pull request 258 was closed without merging, and no
   Gate 16 implementation is present on `main`.
+- Gate 17 concurrent-instance isolation was accepted after pull request 259
+  merged on 2026-11-11. Its authoritative record is in `gates-done/`.
+- Gates 18 and 19 were explicitly accepted and closed by the human on
+  2026-11-12. Pull requests 260, 261, and the Gate 18 documentation-check
+  follow-up 262 are merged; their authoritative records are in `gates-done/`.
+- Gates 20, 21, and 22 were explicitly accepted and closed by the human on
+  2026-11-12. Pull requests 263 and 264 are merged, and pull request 265 is the
+  accepted Gate 22 delivery; their authoritative records are in `gates-done/`.
 
 ## Governing outcome and invariants
 
@@ -220,16 +228,15 @@ scope, threat model, and invariants.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 17, concurrent-instance isolation, is approved and active
-  on `hdae/concurrent-instance-isolation`. It is technically passed and
-  delivered in https://github.com/gmkurtzer/ginux/pull/259 for human acceptance.
-  Gate 11 remains partial, Gate 14 is deferred, and Gate 16 is abandoned.
-- Last evidence: `make test-multi-instance` boots two Rocky systemd instances
-  concurrently and passes independent identity, virtual PID, root, contract,
-  audit, console, shared/translated network, cross-signal, supervisor-loss,
-  restart, stale-record, and cleanup assertions.
-- Exact next action: create the separately approved Gate 18 documentation
-  branch from synchronized `main`; Gate 17 remains at its human checkpoint.
+- Active gate: none. Gates 18 and 19 are accepted and closed. Gate 11 remains
+  partial, Gate 14 is deferred, and Gate 16 is abandoned.
+- Last evidence: `make test-generic-oci`, `make demo-gate-19`,
+  `make test-gate19-native-examples`, `make check`, `make test-config`,
+  `make test-gate975-hooks`, `make test-security`, `make test-systemd`, and
+  aggregate `make test` passed. Rocky and Ubuntu reached systemd
+  `multi-user.target`; Alpine reached its BusyBox init console login.
+- Exact next action: obtain human direction on whether to resume or defer the
+  partial Gate 11 performance target. Gate 14 remains deferred.
 - The final CLI correction makes required configuration files positional:
   `instance create NAME FILE`, `validate FILE`, `inspect FILE`, and
   `explain FILE OPERATION`. Fresh `make check`, `make test-contract`, and
@@ -618,20 +625,16 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Implement Gate 15 on `hdae/dispatch-performance-matrix`: add checked-in native,
-selective, paranoid, and suite templates; build paired collection, validation,
-reporting, graph, and deterministic test paths; update affected documentation;
-then run the bounded demonstration and full matrix before human review. Gate 14
-remains explicitly deferred.
+Obtain human direction on whether to resume or defer the partial Gate 11
+performance target. Gate 14 remains explicitly deferred.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 15 dispatch-mode performance matrix is approved and active
-  on `hdae/dispatch-performance-matrix`, based on merged Gate 13. It is a human
-  checkpoint and must not close without explicit acceptance.
+- Active gate: none. Gates 18 and 19 were accepted and closed on 2026-11-12.
+  Gate 11 remains partial and Gate 14 remains deferred.
 - Active work: Gate 12 is technically passed and delivered in pull request 251;
   Gate 12.1 is technically passed and delivered in pull request 252; Gate
   12.25 is technically passed and delivered in pull request 253. Gate 12.5 is
@@ -654,7 +657,11 @@ remains explicitly deferred.
   open from `hdae/contract-network-ux` against the Gate 11 branch.
 - Gate 12.1 delivery: pull request https://github.com/gmkurtzer/ginux/pull/252
   is open from `hdae/virtual-kernel-filesystems` against the Gate 12 branch.
-- Last evidence: Gate 12.1 passed `make check`, `make test-kernel-views`,
+- Last evidence: Gate 19 passed `make test-generic-oci`,
+  `make demo-gate-19`, `make test-gate19-native-examples`, `make check`,
+  `make test-config`, `make test-gate975-hooks`, `make test-security`,
+  `make test-systemd`, and aggregate `make test`. Gate 12.1 also passed `make
+  check`, `make test-kernel-views`,
   `make test-process`, the complete `make test-systemd` matrix, aggregate
   `make test`, and `make demo-gate-12.1`. The demo proved on-demand proc/sys
   access, live virtual-PID lifecycle, virtual metadata, no host leakage, empty

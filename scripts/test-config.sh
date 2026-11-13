@@ -115,7 +115,8 @@ grep -Fqx 'GINUX_CONFIG: PASS' "$gate975_log"
 grep -Fqx 'hostname = "gate975-demo"' "$gate975_log"
 grep -Fqx 'inbound = ["tcp:80"]' "$gate975_log"
 grep -Fqx 'outbound = ["tcp:443", "udp:53"]' "$gate975_log"
-grep -Fqx 'pre_boot = ["/usr/local/sbin/prepare-instance --safe"]' "$gate975_log"
+grep -Fqx 'pre_boot = [' "$gate975_log"
+grep -Fqx '  "/usr/local/sbin/prepare-instance --safe",' "$gate975_log"
 
 rocky_ssh '/var/tmp/ginux instance-plan /var/tmp/gate10-strict.toml' >"$contract_plan_log" 2>&1
 grep -Eq '^GINUX_CONTRACT: catalog=2 instance=gate10-strict profile=self-contained-v1 digest=[0-9a-f]{64} operations=[0-9]+$' "$contract_plan_log"
