@@ -70,3 +70,4 @@ jobs:
       - run: sudo make test-native-supervision
       - run: make test-process-native
       - run: sudo make test-gate1-setup
+      - run: sudo make test-tracee-kill

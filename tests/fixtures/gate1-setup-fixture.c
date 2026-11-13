@@ -1,10 +1,11 @@
 /* Freestanding x86-64 programs for the Gate 1 ptrace setup failure check.
  *
- * Built with -DDENY_PTRACE: `deny-ptrace <request> <program>` installs a
- * seccomp filter that fails ptrace(<request>, ...) with EPERM and executes
- * <program>; `deny-ptrace all <program>` fails every ptrace request except
- * PTRACE_TRACEME. The filter is inherited by Gate 1's tracee, which only uses
- * PTRACE_TRACEME, so only the supervisor's request fails.
+ * Built with -DDENY_PTRACE: `deny-ptrace <request> <program> [args...]`
+ * installs a seccomp filter that fails ptrace(<request>, ...) with EPERM and
+ * executes <program> with the remaining arguments; `deny-ptrace all ...` fails
+ * every ptrace request except PTRACE_TRACEME. The filter is inherited by
+ * Gate 1's tracee, which only uses PTRACE_TRACEME, so only the supervisor's
+ * request fails.
  *
  * Built without it: a payload that records that it ran by creating
  * /var/tmp/gate1-payload-ran. Installed as /var/tmp/ginux-managed-payload, it
@@ -53,7 +54,7 @@ static word parse(const char *text)
 
 long fixture_main(long argc, char **argv, char **envp)
 {
-    if (argc != 3) return 90;
+    if (argc < 3) return 90;
     static struct filter filter[] = {
         {0x20, 0, 0, 4},              /* ld seccomp_data.arch */
         {0x15, 0, 5, 0xc000003e},     /* jeq AUDIT_ARCH_X86_64 */
@@ -72,10 +73,9 @@ long fixture_main(long argc, char **argv, char **envp)
         filter[5].k = (unsigned int)parse(argv[1]);
     }
     struct program program = {sizeof filter / sizeof filter[0], filter};
-    char *child_argv[] = {argv[2], 0};
     /* PR_SET_NO_NEW_PRIVS, then PR_SET_SECCOMP with SECCOMP_MODE_FILTER. */
     if (prctl(38, 1, 0) < 0 || prctl(22, 2, (word)&program) < 0) return 91;
-    call3(59, (word)argv[2], (word)child_argv, (word)envp);
+    call3(59, (word)argv[2], (word)(argv + 2), (word)envp);
     return 92;
 }
 #else
