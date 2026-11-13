@@ -104,8 +104,9 @@ script.
 
 ## Remaining work
 
-- [ ] Obtain explicit authorization to push the dedicated branch and publish
-  its pull request.
+- [x] Pushed the dedicated branch and published pull request
+  https://github.com/gmkurtzer/ginux/pull/282 with explicit human
+  authorization.
 - [ ] Stop for human review and acceptance; technical passage does not close
   this checkpoint gate.
 
@@ -253,7 +254,7 @@ script.
 
 - Working branch: `hdae/rpm-packaging`
 - Intended base: `main` after Gate 25 is accepted and merged
-- Pull request: intended after implementation and verification
+- Pull request: https://github.com/gmkurtzer/ginux/pull/282
 - Planned commits: gate alignment and installed-file inventory; RPM source and
   spec implementation; canonical path and installation integration; package
   lifecycle tests; documentation and evidence reconciliation
