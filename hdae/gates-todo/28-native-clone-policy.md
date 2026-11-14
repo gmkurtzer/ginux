@@ -47,7 +47,8 @@ before any host `clone` or replayed `clone3` can create a child.
 - Current clone3 replay validates snapshot ownership but not process flags.
 - `make check` passed on macOS.
 - `make test-unit` passed on macOS.
-- The privileged Linux native-supervision regression is delegated to PR CI.
+- GitHub workflow 43552139427 passed `changes`, `static-and-unit`, and
+  `launch-integration`, including the privileged native-supervision regression.
 - Delivery: [PR #287](https://github.com/gmkurtzer/ginux/pull/287).
 - Source update:
   https://github.com/gmkurtzer/ginux/issues/284#issuecomment-6870951901
@@ -56,5 +57,5 @@ before any host `clone` or replayed `clone3` can create a child.
 
 ## Status
 
-- Implemented, locally verified, pushed, and delivered in PR #287; awaiting
-  Linux CI and pull-request review.
+- Implemented, locally and in Linux CI verified, pushed, and delivered in PR
+  #287; awaiting exact-head pull-request review.
