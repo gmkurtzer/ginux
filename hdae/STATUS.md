@@ -1,5 +1,19 @@
 # Ginux HDAE Status
 
+## Approved future gate records
+
+- On 2026-11-14 the human approved persisting Gates 32 through 37 for a strictly
+  defensive review of the project-owned Ginux codebase. The work excludes
+  exploit development, payload construction, offensive validation, and external
+  targets. Each gate remains an explicit human checkpoint and is not authorized
+  for implementation merely by being recorded.
+- Gates 38 through 42 record a conditional challoc-like allocator initiative.
+  Gate 38 must first compare support for upstream challoc with an independent or
+  Ginux-aware allocator and obtain a human architecture decision. Gates 39
+  through 42 may not begin unless that decision explicitly authorizes them.
+- These future records do not change the currently active gate, approve a batch,
+  or authorize pushing, merging, or closing a pull request.
+
 ## Current checkpoint
 
 ### Active implementation: Gate 26 Rocky Linux RPM packaging
