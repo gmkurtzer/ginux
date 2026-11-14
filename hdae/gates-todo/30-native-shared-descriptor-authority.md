@@ -47,8 +47,8 @@ descriptor-table semantics without a window in which tasks sharing
 - [x] Replace per-task copied console tracking with shared table authority and
       a mutation barrier.
 - [x] Add deterministic concurrent regressions.
-- [ ] Run local and Linux verification.
-- [ ] Deliver a corrective pull request and reciprocal links.
+- [x] Run local and Linux verification.
+- [x] Deliver a corrective pull request and reciprocal links.
 
 ## Acceptance criteria
 
@@ -87,6 +87,12 @@ descriptor-table semantics without a window in which tasks sharing
   `dup` cannot complete until the mutation barrier releases.
 - `make check` passed on macOS after rebasing onto `f5ee0402`.
 - `make test-unit` passed on macOS after rebasing onto `f5ee0402`.
+- GitHub Actions run `43556549976` passed `changes`, `static-and-unit`, and
+  `launch-integration` at implementation head `3e131b15`; the Linux launch job
+  passed `sudo make test-native-supervision`, including the forced descriptor
+  mutation-ordering regression.
+- GitHub Actions run `43556618581` passed all three required jobs at delivered
+  PR head `50ca4da2`.
 - Delivery: [PR #288](https://github.com/gmkurtzer/ginux/pull/288).
 - Source update:
   https://github.com/gmkurtzer/ginux/pull/279#issuecomment-6871665340
@@ -111,12 +117,13 @@ descriptor-table semantics without a window in which tasks sharing
   deterministic concurrency regression; evidence and delivery links.
 - Actual commits: `1a5f5a36` gate definition, `9dd04b94` attributed PR #279
   baseline, `7d4bf52f` shared authority and mutation barrier, `a1292986`
-  forced concurrency regression, and `3e131b15` local evidence; delivery
-  evidence commit pending.
+  forced concurrency regression, `3e131b15` local evidence, and `50ca4da2`
+  delivery evidence.
 
 ## Review policy and outcome
 
 Authorized for automatic implementation and pull-request delivery by the
-maintainer on 2026-11-13. Local static and unit evidence passes. Keep in
-`gates-todo/` pending exact-head review and fresh Linux integration before any
-merge.
+maintainer on 2026-11-13. Gate 30 is technically passed at exact PR head
+`50ca4da2`: local static/unit evidence and both implementation-head and
+delivered-head Linux CI pass. Keep in `gates-todo/` pending human review before
+any merge.
