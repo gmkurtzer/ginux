@@ -22,8 +22,8 @@ NR == 1 { next }
 }
 END {
     for (t = 1; t <= 4; t *= 2) {
-        for (a = 1; a <= 2; a++) {
-            name = a == 1 ? "native" : "ginux-guarded"
+        for (a = 1; a <= 3; a++) {
+            name = a == 1 ? "native" : (a == 2 ? "jemalloc" : "ginux-guarded")
             key = name SUBSEP t
             n = count[key]
             if (n == 0) exit 2
@@ -38,7 +38,7 @@ END {
 
 {
     printf '%s\n\n' '# Ginux allocator performance'
-    printf '%s\n\n' 'This matched Rocky Linux 10 x86-64 QEMU/TCG run compares the native distribution allocator with the opt-in Ginux allocator. Each row contains five retained samples from the same guest. Results characterize this fixture only; they are not a universal allocator claim.'
+    printf '%s\n\n' 'This matched Rocky Linux 10 x86-64 QEMU/TCG run compares the native distribution allocator, Rocky packaged jemalloc, and the opt-in Ginux allocator. Each row contains five retained samples from the same guest. Results characterize this fixture only; they are not a universal allocator claim.'
     printf '%s\n' '| Threads | Allocator | Samples | Mean ops/s | Stddev | Mean ns/op | Mean peak RSS KiB | Mean live RSS/requested | Versus native |'
     printf '%s\n' '|---:|---|---:|---:|---:|---:|---:|---:|---:|'
     for threads in 1 2 4; do
@@ -62,18 +62,25 @@ END {
     group=0
     for threads in 1 2 4; do
         native=$(awk -F '\t' -v t="$threads" '$1 == "native" && $2 == t { print $4 }' "$summary")
+        jemalloc=$(awk -F '\t' -v t="$threads" '$1 == "jemalloc" && $2 == t { print $4 }' "$summary")
         guarded=$(awk -F '\t' -v t="$threads" '$1 == "ginux-guarded" && $2 == t { print $4 }' "$summary")
+        jemalloc_ratio=$(awk -v value="$jemalloc" -v control="$native" 'BEGIN { printf "%.4f", value / control }')
         ratio=$(awk -v value="$guarded" -v control="$native" 'BEGIN { printf "%.4f", value / control }')
         base=$((130 + group * 210))
+        jemalloc_height=$(awk -v ratio="$jemalloc_ratio" 'BEGIN { h = 150 * ratio; if (h > 190) h = 190; printf "%d", h }')
         guarded_height=$(awk -v ratio="$ratio" 'BEGIN { h = 150 * ratio; if (h > 190) h = 190; printf "%d", h }')
+        jemalloc_y=$((240 - jemalloc_height))
         guarded_y=$((240 - guarded_height))
-        printf '<rect x="%s" y="90" width="55" height="150" fill="#64748b"/>\n' "$base"
-        printf '<rect x="%s" y="%s" width="55" height="%s" fill="#0f766e"/>\n' "$((base + 65))" "$guarded_y" "$guarded_height"
+        printf '<rect x="%s" y="90" width="45" height="150" fill="#64748b"/>\n' "$base"
+        printf '<rect x="%s" y="%s" width="45" height="%s" fill="#c2410c"/>\n' "$((base + 50))" "$jemalloc_y" "$jemalloc_height"
+        printf '<rect x="%s" y="%s" width="45" height="%s" fill="#0f766e"/>\n' "$((base + 100))" "$guarded_y" "$guarded_height"
         printf '<text x="%s" y="265" text-anchor="middle" font-family="sans-serif" font-size="14">%s threads</text>\n' "$((base + 60))" "$threads"
-        printf '<text x="%s" y="%s" text-anchor="middle" font-family="sans-serif" font-size="12">%.3fx</text>\n' "$((base + 92))" "$((guarded_y - 8))" "$ratio"
+        printf '<text x="%s" y="%s" text-anchor="middle" font-family="sans-serif" font-size="11">%.3fx</text>\n' "$((base + 72))" "$((jemalloc_y - 8))" "$jemalloc_ratio"
+        printf '<text x="%s" y="%s" text-anchor="middle" font-family="sans-serif" font-size="11">%.3fx</text>\n' "$((base + 122))" "$((guarded_y - 8))" "$ratio"
         group=$((group + 1))
     done
     printf '%s\n' '<rect x="70" y="20" width="18" height="18" fill="#64748b"/><text x="96" y="34" font-family="sans-serif" font-size="14">native</text>'
-    printf '%s\n' '<rect x="180" y="20" width="18" height="18" fill="#0f766e"/><text x="206" y="34" font-family="sans-serif" font-size="14">ginux-guarded</text>'
+    printf '%s\n' '<rect x="180" y="20" width="18" height="18" fill="#c2410c"/><text x="206" y="34" font-family="sans-serif" font-size="14">jemalloc</text>'
+    printf '%s\n' '<rect x="290" y="20" width="18" height="18" fill="#0f766e"/><text x="316" y="34" font-family="sans-serif" font-size="14">ginux-guarded</text>'
     printf '%s\n' '</svg>'
 } >"$svg"

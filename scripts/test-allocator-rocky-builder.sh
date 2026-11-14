@@ -33,7 +33,9 @@ rocky_ssh '
     RUSTFLAGS="-C link-arg=-Wl,-z,relro -C link-arg=-Wl,-z,now" \
         cargo build --offline --locked --release -p ginux-allocator
     allocator=/var/tmp/ginux-rpmbuild/CARGO_TARGET/release/libginux_allocator.so
+    jemalloc=/usr/lib64/libjemalloc.so.2
     test -r "$allocator"
+    test -r "$jemalloc"
     cc -O2 -Wall -Wextra -Werror -pthread /var/tmp/allocator-conformance.c \
         -ldl -o /var/tmp/allocator-conformance
     cc -O2 -Wall -Wextra -Werror -pthread /var/tmp/allocator-benchmark.c \
@@ -47,14 +49,37 @@ rocky_ssh '
         rustc --version
         cargo --version
         cc --version | sed -n "1p"
+        rpm -q jemalloc
+        sha256sum "$allocator" /var/tmp/allocator-benchmark
         printf "%s\n" "environment=Rocky Linux QEMU TCG"
     } >"$provenance"
     for threads in 1 2 4; do
         repetition=1
         while test "$repetition" -le 5; do
+            set +e
             native=$(/var/tmp/allocator-benchmark "$threads")
+            native_status=$?
+            jemalloc_result=$(LD_PRELOAD="$jemalloc" /var/tmp/allocator-benchmark "$threads")
+            jemalloc_status=$?
             guarded=$(LD_PRELOAD="$allocator" /var/tmp/allocator-benchmark "$threads")
-            for row in "native:$native" "ginux-guarded:$guarded"; do
+            guarded_status=$?
+            set -e
+            test "$native_status" -eq 0 || {
+                printf "allocator benchmark failed: allocator=native threads=%s status=%s\n" \
+                    "$threads" "$native_status" >&2
+                exit "$native_status"
+            }
+            test "$jemalloc_status" -eq 0 || {
+                printf "allocator benchmark failed: allocator=jemalloc threads=%s status=%s\n" \
+                    "$threads" "$jemalloc_status" >&2
+                exit "$jemalloc_status"
+            }
+            test "$guarded_status" -eq 0 || {
+                printf "allocator benchmark failed: allocator=ginux-guarded threads=%s status=%s\n" \
+                    "$threads" "$guarded_status" >&2
+                exit "$guarded_status"
+            }
+            for row in "native:$native" "jemalloc:$jemalloc_result" "ginux-guarded:$guarded"; do
                 kind=${row%%:*}
                 values=${row#*:}
                 operations=$(printf "%s\n" "$values" | sed -n "s/.*operations=\([0-9]*\).*/\1/p")
@@ -83,5 +108,7 @@ rocky_scp \
     .artifacts/allocator/rocky-benchmark.tsv
 rocky_scp \
     "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/allocator-provenance.txt" \
+    .artifacts/allocator/rocky-provenance.txt
+printf 'source_commit=%s\n' "$(git rev-parse HEAD)" >> \
     .artifacts/allocator/rocky-provenance.txt
 printf '%s\n' 'GINUX_ALLOCATOR_ROCKY: PASS'

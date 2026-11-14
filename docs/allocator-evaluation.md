@@ -27,9 +27,10 @@ A digest-pinned upstream binary comparison was not treated as a valid Rocky 10
 control because the upstream tested baseline requires a newer glibc than Rocky
 10 provides. Substituting an unvalidated binary would produce a misleading
 failure or compatibility claim. The retained matched controls are the native
-distribution allocator and the independently built Ginux library in the same
-Rocky QEMU environment. A future challoc row requires a supported upstream
-release for that environment or a separately reviewed compatible build.
+distribution allocator, Rocky's packaged jemalloc, and the independently built
+Ginux library in the same Rocky QEMU environment. A future challoc row requires
+a supported upstream release for that environment or a separately reviewed
+compatible build.
 
 ## Required interface
 
