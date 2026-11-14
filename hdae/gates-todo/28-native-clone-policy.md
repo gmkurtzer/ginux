@@ -48,7 +48,13 @@ before any host `clone` or replayed `clone3` can create a child.
 - `make check` passed on macOS.
 - `make test-unit` passed on macOS.
 - The privileged Linux native-supervision regression is delegated to PR CI.
+- Delivery: [PR #287](https://github.com/gmkurtzer/ginux/pull/287).
+- Source update:
+  https://github.com/gmkurtzer/ginux/issues/284#issuecomment-6870951901
+- Reciprocal PR update:
+  https://github.com/gmkurtzer/ginux/pull/287#issuecomment-6870952239
 
 ## Status
 
-- Implemented and locally verified; awaiting Linux CI and pull-request review.
+- Implemented, locally verified, pushed, and delivered in PR #287; awaiting
+  Linux CI and pull-request review.
