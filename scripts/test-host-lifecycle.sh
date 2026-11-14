@@ -27,4 +27,11 @@ if grep -Fq 'build/rocky-host-overlay.qcow2' scripts/clean-build.sh; then
     exit 1
 fi
 
-printf '%s\n' 'HOST_LIFECYCLE: PASS (ordinary cleanup preserves; explicit reset removes)'
+grep -Eq '^run-host:[[:space:]]+rpm$' Makefile
+grep -Eq '^host-run:[[:space:]]+run-host$' Makefile
+grep -Fq './scripts/run-host.sh' Makefile
+grep -Fq './scripts/install-ginux-host.sh' scripts/run-host.sh
+grep -Fq 'sudo dnf -y install /var/tmp/ginux.rpm' scripts/install-ginux-host.sh
+grep -Fq 'sudo rpm -V ginux' scripts/install-ginux-host.sh
+
+printf '%s\n' 'HOST_LIFECYCLE: PASS (RPM-backed run-host; ordinary cleanup preserves; explicit reset removes)'

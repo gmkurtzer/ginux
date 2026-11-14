@@ -210,7 +210,7 @@ make bench-modes        # native/selective/paranoid tables and graphs
 make demo-gate-15       # bounded reproducible three-way comparison
 make demo-gate-17       # operator-readable concurrent-instance isolation check
 make test-systemd-live  # shared network plus real upstream dnf -y update
-make host-run           # general interactive Rocky host with Ginux installed
+make run-host           # build RPM, boot Rocky, install it, then open a shell
 make host-reset         # discard that host's cache, instances, and writable state
 make demo-gate-9        # Gate 9 checkpoint through the same host workflow
 ```
@@ -247,13 +247,15 @@ samples, metadata, a Markdown table, and an SVG graph under `build/gate15/`.
 See [Reproducible performance measurement](docs/performance.md) for the exact
 protocol, customization workflow, output schema, and interpretation limits.
 
-`make host-run` boots the QEMU Rocky host and logs you into its ordinary shell.
-Ginux is installed in `PATH`. The first `create` or `import` downloads and verifies
-the pinned Rocky OCI image with live per-layer progress; later operations reuse the
-cache. The writable Rocky host overlay persists across `make host-run`, ordinary
+`make run-host` first builds the current Ginux RPM, boots the QEMU Rocky host,
+installs or upgrades that RPM through DNF, verifies it with `rpm -V`, and then
+logs you into the host's ordinary shell with `ginux` in `PATH`. The first
+`create` or `import` downloads and verifies the pinned Rocky OCI image with live
+per-layer progress; later operations reuse the cache. The writable Rocky host
+overlay persists across `make run-host`, ordinary
 cleanup, builds, and tests, so cached images, instance definitions, roots, and
 stopped status remain available. `make host-reset` is the explicit destructive
-operation that stops the host and removes that overlay; the next `make host-run`
+operation that stops the host and removes that overlay; the next `make run-host`
 starts from the pinned clean Rocky image.
 A complete first session is:
 

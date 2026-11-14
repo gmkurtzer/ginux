@@ -73,6 +73,11 @@ operator action and is never performed by the RPM.
 
 Run the complete clean Rocky package lifecycle test with `make test-rpm`.
 
+For an interactive development host, run `make run-host`. It builds the current
+RPM, boots the persistent Rocky Linux QEMU host, installs or upgrades the RPM
+through DNF, verifies the installed files, and then opens the host shell.
+`make host-reset` deliberately discards that host's persistent overlay.
+
 `rpmlint` intentionally suppresses only its static-binary error for
 `ginux-runtime`: that freestanding `no_std` program enters the instance root
 and cannot depend on host shared libraries. Its remaining warnings document

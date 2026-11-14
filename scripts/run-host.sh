@@ -7,7 +7,7 @@ if test -f "$ROCKY_PID_FILE"; then
     existing=$(cat "$ROCKY_PID_FILE")
     if kill -0 "$existing" 2>/dev/null; then
         printf 'A Rocky test host is already running with PID %s.\n' "$existing" >&2
-        printf '%s\n' 'Stop it with ./scripts/stop-rocky-host.sh before running make host-run.' >&2
+        printf '%s\n' 'Stop it with ./scripts/stop-rocky-host.sh before running make run-host.' >&2
         exit 1
     fi
 fi

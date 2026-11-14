@@ -101,6 +101,9 @@ script.
   retained state, and deliberate purge behavior.
 - [x] Ran the complete package and existing regression matrix and recorded fresh
   evidence below.
+- [x] Made `make run-host` build the current RPM, boot the persistent Rocky
+  host, install or upgrade and verify the RPM, and then open the interactive
+  host shell; retained `make host-run` as a compatibility alias.
 
 ## Remaining work
 
