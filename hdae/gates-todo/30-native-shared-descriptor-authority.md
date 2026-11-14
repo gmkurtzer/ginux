@@ -43,10 +43,10 @@ descriptor-table semantics without a window in which tasks sharing
 
 ## Remaining work
 
-- [ ] Rebase the useful PR #279 changes onto current `main`.
-- [ ] Replace per-task copied console tracking with shared table authority and
+- [x] Rebase the useful PR #279 changes onto current `main`.
+- [x] Replace per-task copied console tracking with shared table authority and
       a mutation barrier.
-- [ ] Add deterministic concurrent regressions.
+- [x] Add deterministic concurrent regressions.
 - [ ] Run local and Linux verification.
 - [ ] Deliver a corrective pull request and reciprocal links.
 
@@ -79,6 +79,14 @@ descriptor-table semantics without a window in which tasks sharing
   reaches the copied Ginux state.
 - The race can make a missed or stale entry durable after the sibling obtains
   a private descriptor table.
+- Current implementation stores console provenance once per descriptor table,
+  makes `CLONE_FILES` tasks reference that table, and defers sibling ptrace
+  stops while a descriptor mutation is unresolved.
+- The new Linux regression holds a conflicting host file lock so one
+  descriptor mutation remains in flight, then proves a sharing sibling's
+  `dup` cannot complete until the mutation barrier releases.
+- `make check` passed on macOS after rebasing onto `f5ee0402`.
+- `make test-unit` passed on macOS after rebasing onto `f5ee0402`.
 
 ## Decisions and limitations
 
@@ -96,10 +104,13 @@ descriptor-table semantics without a window in which tasks sharing
   PR #279.
 - Planned commits: gate and imported contributor baseline; shared-table barrier;
   deterministic concurrency regression; evidence and delivery links.
-- Actual commits: pending.
+- Actual commits: `1a5f5a36` gate definition, `9dd04b94` attributed PR #279
+  baseline, `7d4bf52f` shared authority and mutation barrier, and `a1292986`
+  forced concurrency regression; evidence commit pending.
 
 ## Review policy and outcome
 
 Authorized for automatic implementation and pull-request delivery by the
-maintainer on 2026-11-13. Keep in `gates-todo/` pending exact-head review and
-fresh Linux integration before any merge.
+maintainer on 2026-11-13. Local static and unit evidence passes. Keep in
+`gates-todo/` pending exact-head review and fresh Linux integration before any
+merge.
