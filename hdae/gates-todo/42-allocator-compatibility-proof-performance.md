@@ -98,7 +98,7 @@ performance evidence for the allocator without overstating its maturity.
 
 - Working branch: `hdae/security-allocator-initiative`
 - Intended base: `main`
-- Pull request: one combined Gates 32-42 pull request intended
+- Pull request: https://github.com/gmkurtzer/ginux/pull/292
 - Planned commits: compatibility matrix; distribution workloads; assurance;
   benchmark reports; packaging and final evidence
 - Actual commits: `19377734`, `48577ef8`, `76209bc8`, `6a66fc73`, `da24dff7`,

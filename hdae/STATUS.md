@@ -47,12 +47,13 @@
 - Final evidence passes `make check`, aggregate `make test`,
   `make test-security test-recovery`, `make test-multi-instance`,
   `make test-allocator-rocky`, and `make test-rpm-metadata test-rpm`.
+- Combined delivery pull request:
+  https://github.com/gmkurtzer/ginux/pull/292
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Exact next action: commit this final checkpoint, compare with `origin/main`,
-  rebase if needed, rerun the lightweight post-rebase checks, push the branch,
-  open the combined pull request, and stop for human testing.
+- Exact next action: stop for human testing and explicit acceptance of pull
+  request https://github.com/gmkurtzer/ginux/pull/292.
 
 ### Historical checkpoint: Gate 26 Rocky Linux RPM packaging
 
@@ -308,8 +309,8 @@ scope, threat model, and invariants.
 
 ### Current resumable checkpoint
 
-- Active batch: Gates 32-42, technically passed, awaiting one combined pull
-  request and final human testing.
+- Active batch: Gates 32-42, technically passed and delivered in pull request
+  https://github.com/gmkurtzer/ginux/pull/292, awaiting final human testing.
 - Working branch: `hdae/security-allocator-initiative`; intended base:
   `main`.
 - Latest implementation commits: `da24dff7` fixes allocator shard fallback;
@@ -318,8 +319,7 @@ scope, threat model, and invariants.
   Alpine/musl is outside the allocator preload claim; formal assurance is
   bounded to named model/property/fuzz evidence; the host kernel and loader
   remain trusted.
-- Exact next action: update delivery records with the combined PR URL and stop
-  for human testing and acceptance.
+- Exact next action: stop for human testing and acceptance of pull request 292.
 
 ### Historical checkpoints
 

@@ -90,7 +90,7 @@ allocator.
 
 - Working branch: `hdae/security-allocator-initiative`
 - Intended base: `main`
-- Pull request: one combined Gates 32-42 pull request intended
+- Pull request: https://github.com/gmkurtzer/ginux/pull/292
 - Planned commits: control harness; ABI and contract inventory; matched results;
   architecture decision
 - Actual commits: `2359a89d`, `3046ff27`, `19377734`, `6a66fc73`

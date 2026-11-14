@@ -77,7 +77,7 @@ errors cannot silently steer allocator state.
 
 - Working branch: `hdae/security-allocator-initiative`
 - Intended base: `main`
-- Pull request: one combined Gates 32-42 pull request intended
+- Pull request: https://github.com/gmkurtzer/ginux/pull/292
 - Planned commits: metadata model; hardening; concurrency; unsafe review and
   final evidence
 - Actual commits: `02ee1e57`, `36c742e5`, `48577ef8`, `da24dff7`

@@ -80,7 +80,7 @@ pressure state without exposing host-global memory information.
 
 - Working branch: `hdae/security-allocator-initiative`
 - Intended base: `main`
-- Pull request: one combined Gates 32-42 pull request intended
+- Pull request: https://github.com/gmkurtzer/ginux/pull/292
 - Planned commits: interface decision; virtual telemetry; allocator integration;
   isolation tests and documentation
 - Actual commits: `e5f7da76`, `36c742e5`, `94c4f4f4`

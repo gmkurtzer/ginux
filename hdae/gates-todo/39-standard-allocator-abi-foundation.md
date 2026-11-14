@@ -80,7 +80,7 @@ standard C allocation ABI and can run transparently inside a Ginux instance.
 
 - Working branch: `hdae/security-allocator-initiative`
 - Intended base: `main`
-- Pull request: one combined Gates 32-42 pull request intended
+- Pull request: https://github.com/gmkurtzer/ginux/pull/292
 - Planned commits: ABI specification; core allocator; conformance; Ginux loading
   and packaging; final evidence
 - Actual commits: `2359a89d`, `3046ff27`, `2b151a26`, `19377734`, `da24dff7`

@@ -81,7 +81,7 @@ resource-exhaustion, and formal-assurance evidence without offensive testing.
 
 - Working branch: `hdae/security-allocator-initiative`
 - Intended base: `main`
-- Pull request: one combined Gates 32-42 pull request intended
+- Pull request: https://github.com/gmkurtzer/ginux/pull/292
 - Planned commits: target selection; fuzz/property harnesses; proof pilot;
   findings and final evidence
 - Actual commits: `48577ef8`, `36c742e5`, `da24dff7`

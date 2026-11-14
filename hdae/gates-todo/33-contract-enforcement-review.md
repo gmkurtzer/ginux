@@ -85,7 +85,7 @@ handling of mutable inputs, unknown operations, and stale catalogs.
 
 - Working branch: `hdae/security-allocator-initiative`
 - Intended base: `main`
-- Pull request: one combined Gates 32-42 pull request intended
+- Pull request: https://github.com/gmkurtzer/ginux/pull/292
 - Planned commits: route inventory; decision mutations; remediation; final
   documentation and evidence
 - Actual commits: `36c742e5`, `2163caa3`

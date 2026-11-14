@@ -78,7 +78,7 @@ limitation, and security claim into one evidence-backed closure report.
 
 - Working branch: `hdae/security-allocator-initiative`
 - Intended base: `main`
-- Pull request: one combined Gates 32-42 pull request intended
+- Pull request: https://github.com/gmkurtzer/ginux/pull/292
 - Planned commits: finding reconciliation; documentation; final clean evidence
 - Actual commits: `36c742e5`, `94c4f4f4`, `2163caa3`, `da24dff7`
 

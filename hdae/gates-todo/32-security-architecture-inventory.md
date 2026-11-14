@@ -86,7 +86,7 @@ silently omit a host-effect path.
 
 - Working branch: `hdae/security-allocator-initiative`
 - Intended base: `main`
-- Pull request: one combined Gates 32-42 pull request intended
+- Pull request: https://github.com/gmkurtzer/ginux/pull/292
 - Planned commits: gate alignment; inventory and documentation; completeness
   checks; final evidence
 - Actual commits: `94c4f4f4`, `36c742e5`, `2163caa3`
