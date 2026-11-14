@@ -1289,6 +1289,13 @@ pub fn filesystem_operation(context: &CallContext) -> Result<&'static Operation,
         .ok_or(ENOSYS)
 }
 
+/// Shared fail-closed guard for every future filesystem hook. Inventory
+/// ownership, contract permission, capability completeness, and route-local
+/// confinement must all agree before a hook may perform or emulate an effect.
+pub fn filesystem_hook_authorized(context: &CallContext, confinement_permits: bool) -> bool {
+    confinement_permits && context.complete_for_path() && filesystem_operation(context).is_ok()
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
@@ -1511,5 +1518,16 @@ mod tests {
         let mut unknown = context;
         unknown.syscall = u64::MAX;
         assert_eq!(filesystem_operation(&unknown), Err(ENOSYS));
+
+        assert!(filesystem_hook_authorized(&context, true));
+        assert!(!filesystem_hook_authorized(&context, false));
+        assert!(!filesystem_hook_authorized(&denied, true));
+        assert!(!filesystem_hook_authorized(&unknown_abi, true));
+        assert!(!filesystem_hook_authorized(&wrong_owner, true));
+        assert!(!filesystem_hook_authorized(&unknown, true));
+
+        let mut stale = context;
+        stale.authority.descriptor_generation += 1;
+        assert!(!filesystem_hook_authorized(&stale, true));
     }
 }

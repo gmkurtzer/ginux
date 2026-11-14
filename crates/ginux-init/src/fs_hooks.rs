@@ -14,12 +14,11 @@ pub const fn claims(syscall: u64) -> bool {
 
 /// Emulated result when this lane handles the entry. `None` falls through to
 /// the shared balanced-contract decision. Reserved for G06+.
-pub fn claim(context: &CallContext) -> Option<i64> {
+pub fn claim(context: &CallContext, confinement_permits: bool) -> Option<i64> {
     // Do not let a partial context become authority. This remains deliberately
     // unreachable while `claims` is false, but is a fail-closed interlock for
     // the first operation-family gate.
-    if !context.complete_for_path()
-        || ginux_fs_policy::filesystem_operation(context).is_err()
+    if !ginux_fs_policy::filesystem_hook_authorized(context, confinement_permits)
         || !claims(context.syscall)
     {
         return None;

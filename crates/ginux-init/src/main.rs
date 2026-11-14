@@ -7637,7 +7637,7 @@ fn supervise_native(
                 })
             } else if mode == 3 {
                 if fs_hooks::claims(syscall) {
-                    match fs_hooks::claim(&call) {
+                    match fs_hooks::claim(&call, !local_policy_denied) {
                         Some(result) => NativeDecision::Hooked {
                             lane: Lane::Filesystem,
                             result,

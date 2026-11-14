@@ -266,7 +266,7 @@ check-security-doc: check-architecture-doc
 	@./scripts/check-security-boundary.sh
 
 test-security: check-security-doc
-	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/security cargo test -p ginux-contract -p ginux-instance -p ginux-devices -p ginux-runtime -p ginux-vfs -p ginux-kernel-views
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/security cargo test -p ginux-contract -p ginux-instance -p ginux-devices -p ginux-fs-policy -p ginux-runtime -p ginux-vfs -p ginux-kernel-views
 	@$(MAKE) fuzz-security
 	@$(MAKE) test-native-vfs
 	@$(MAKE) test-contract-runtime
