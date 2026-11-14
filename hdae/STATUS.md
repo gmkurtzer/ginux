@@ -32,15 +32,19 @@
   prohibited because a catalog change can alter wildcard meaning. Package
   upgrade/migration coverage is a recorded follow-up, not a weakened startup
   check.
+- A clean committed-source RPM build now passes metadata validation, DNF
+  install, `rpm -V`, packaged Alpine start/stop, packaged Rocky systemd boot to
+  its login prompt, offline cached reuse, reinstall, erase/reinstall, and
+  persistent instance-state checks.
 - Draft pull request https://github.com/gmkurtzer/ginux/pull/291 contains the
   bounded implementation and discloses the baseline blocker; it references but
   does not close issue #290.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Exact next action: rebuild and exercise the RPM installation path at the
-  final branch head, update pull request 291, and stop for human review. Do not
-  accept or close Gate 31 without explicit human acceptance.
+- Exact next action: push the final evidence to pull request 291 and stop for
+  human review. Do not accept or close Gate 31 without explicit human
+  acceptance.
 
 ### Prior checkpoint: Gate 26 Rocky Linux RPM packaging
 

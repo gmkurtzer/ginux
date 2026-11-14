@@ -79,10 +79,12 @@ before the native filesystem lane claims any syscall.
   and IPv6 sockets, while netlink and Unix sockets remain outside that path;
   namespace creation is denied with `EPERM` so systemd can use its documented
   optional-sandbox fallback without receiving host namespace authority.
+- [x] Rebuilt the exact committed RPM and exercised its metadata, clean DNF
+  install, verification, packaged Alpine lifecycle, packaged Rocky systemd
+  boot, offline cache reuse, reinstall, erase/reinstall, and state retention.
 
 ## Remaining work
 
-- [ ] Rebuild and exercise the installable RPM at the final branch head.
 - [ ] Update the dedicated pull request and stop for human review.
 
 ## Acceptance criteria
@@ -217,6 +219,12 @@ before the native filesystem lane claims any syscall.
   `contract-digest-mismatch`; explicit recompilation of the unchanged recipe
   restored its derived digest, and the corrected packaged runtime then reached
   `multi-user.target` and the Rocky login prompt.
+- `GINUX_RPM_SSH_PORT=22427 make rpm test-rpm-metadata test-rpm` -> built the
+  exact committed source and SRPM in Rocky, passed rpmlint with zero errors,
+  installed through DNF, passed `rpm -V`, booted the packaged Alpine instance,
+  booted the packaged Rocky systemd instance to `ginux login:`, reused cached
+  layers without networking, preserved all instance state across reinstall and
+  erase/reinstall, and stopped both test VMs cleanly.
 - Final source review traced configured launch and mode 3 from immutable context
   construction through contract, confinement, inventory, capability, and hook
   guards; inspected every added unsafe/host syscall site and authority lifetime;
@@ -232,13 +240,13 @@ before the native filesystem lane claims any syscall.
   independent oracles and mutations; cross-route integration; security review
   and final evidence
 - Actual commits: `f9aa3cf1`, `1759b054`, `b8f05a9a`, `47171760`, `718784ae`,
-  `35367c74`, and `2b83cdd0`; final startup/package verification commit pending
+  `35367c74`, `2b83cdd0`, `cfd233ec`, and `c56d30c4`; final evidence checkpoint
+  commit pending
 
 ## Review policy and outcome
 
 Security checkpoint. The approved gate may run autonomously through
 implementation, security review, complete final testing, commit, push, and pull
 request delivery. Stop after delivering the pull request for explicit human
-review. Gate 31 is technically passed once the final RPM verification and pull
-request update complete; technical passage or pull-request delivery does not
-close the gate.
+review. Gate 31 is technically passed; technical passage or pull-request
+delivery does not close the gate.
