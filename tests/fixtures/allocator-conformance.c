@@ -30,9 +30,10 @@ static int expect_double_free_abort(void) {
     if (child < 0) return 1;
     if (child == 0) {
         void *memory = malloc(32);
+        void (*volatile release)(void *) = free;
         if (memory == NULL) _exit(2);
-        free(memory);
-        free(memory);
+        release(memory);
+        release(memory);
         _exit(3);
     }
     int status = 0;
@@ -52,8 +53,11 @@ int main(void) {
     memset(aligned, 0x5a, 8192);
     free(aligned);
 
+    volatile size_t overflowing_count = (size_t)-1;
+    void *(*volatile allocate_zeroed)(size_t, size_t) = calloc;
     errno = 0;
-    if (calloc((size_t)-1, 2) != NULL || errno != ENOMEM) return 14;
+    if (allocate_zeroed(overflowing_count, 2) != NULL || errno != ENOMEM)
+        return 14;
 
     pthread_t threads[THREADS];
     for (uintptr_t i = 0; i < THREADS; ++i)
