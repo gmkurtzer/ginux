@@ -3390,16 +3390,14 @@ struct NativeSupervisorTask {
     override_exit: bool,
     override_result: i64,
     pending_console_open: bool,
-    console_fd: i64,
-    console_fds: [u64; NATIVE_PROC_FD_LIMIT / 64],
-    // Close-on-exec flags of the console_fds entries; meaningless elsewhere.
-    console_cloexec: [u64; NATIVE_PROC_FD_LIMIT / 64],
     pending_console_duplicate: i8,
     pending_console_cloexec: bool,
     pending_device_arguments: Option<[u64; 3]>,
-    // Tasks with the same number share one host descriptor table
-    // (CLONE_FILES) and so one view of the console descriptors in it.
-    descriptor_table: u64,
+    // Index into the supervisor-owned descriptor table pool. CLONE_FILES
+    // tasks use the same entry rather than copied state.
+    descriptor_table: usize,
+    // Table whose mutation barrier this task currently owns, or usize::MAX.
+    descriptor_barrier: usize,
     pipe2_address: usize,
     pipe_fds: [i64; 8],
     socket_fds: [NativeSocketFd; NATIVE_SOCKET_FD_LIMIT],
@@ -3430,6 +3428,32 @@ struct NativeSupervisorTask {
     job_stopped: bool,
     tracing: bool,
     limits: [[u64; 2]; 16],
+}
+
+#[derive(Clone, Copy)]
+struct NativeDescriptorTable {
+    in_use: bool,
+    console_fd: i64,
+    console_fds: [u64; NATIVE_PROC_FD_LIMIT / 64],
+    // Close-on-exec flags are meaningful only for console_fds entries.
+    console_cloexec: [u64; NATIVE_PROC_FD_LIMIT / 64],
+    // Host PID of the tracee executing a descriptor-table mutation.
+    mutation_owner: usize,
+}
+
+const EMPTY_NATIVE_DESCRIPTOR_TABLE: NativeDescriptorTable = NativeDescriptorTable {
+    in_use: false,
+    console_fd: -1,
+    console_fds: [0; NATIVE_PROC_FD_LIMIT / 64],
+    console_cloexec: [0; NATIVE_PROC_FD_LIMIT / 64],
+    mutation_owner: 0,
+};
+
+fn native_descriptor_barrier_syscall(syscall: u64) -> bool {
+    matches!(
+        syscall,
+        2 | 3 | 16 | 32 | 33 | 56 | 57 | 58 | 59 | 72 | 257 | 292 | 435 | 436
+    )
 }
 
 #[derive(Clone, Copy)]
@@ -5744,7 +5768,15 @@ fn supervise_native(
             native_fail(instance, pid, b"native console descriptor table full");
         }
     }
-    let mut next_descriptor_table = 0u64;
+    let mut descriptor_tables = [EMPTY_NATIVE_DESCRIPTOR_TABLE; 128];
+    descriptor_tables[0] = NativeDescriptorTable {
+        in_use: true,
+        console_fd: INSTANCE_CONSOLE_FD as i64,
+        console_fds: root_console_fds,
+        console_cloexec: [0; NATIVE_PROC_FD_LIMIT / 64],
+        mutation_owner: 0,
+    };
+    let mut deferred_stops = [0i32; 128];
     tasks[0] = Some(NativeSupervisorTask {
         host_pid: pid,
         clone_call: native_clone::Pending::empty(),
@@ -5755,13 +5787,11 @@ fn supervise_native(
         override_exit: false,
         override_result: 0,
         pending_console_open: false,
-        console_fd: INSTANCE_CONSOLE_FD as i64,
-        console_fds: root_console_fds,
-        console_cloexec: [0; NATIVE_PROC_FD_LIMIT / 64],
         pending_console_duplicate: 0,
         pending_console_cloexec: false,
         pending_device_arguments: None,
-        descriptor_table: next_descriptor_table,
+        descriptor_table: 0,
+        descriptor_barrier: usize::MAX,
         pipe2_address: 0,
         pipe_fds: [-1; 8],
         socket_fds: [EMPTY_SOCKET_FD; NATIVE_SOCKET_FD_LIMIT],
@@ -5794,15 +5824,33 @@ fn supervise_native(
         limits: native_default_limits(),
     });
     loop {
-        status = 0;
-        let waited = unsafe {
-            syscall4(
-                SYS_WAIT4,
-                (-1isize) as usize,
-                &mut status as *mut _ as usize,
-                0,
-                0,
-            )
+        let ready_deferred = deferred_stops
+            .iter()
+            .enumerate()
+            .position(|(slot, status)| {
+                if *status == 0 {
+                    return false;
+                }
+                tasks[slot].is_some_and(|candidate| {
+                    let owner = descriptor_tables[candidate.descriptor_table].mutation_owner;
+                    owner == 0 || owner == candidate.host_pid
+                })
+            });
+        let waited = if let Some(slot) = ready_deferred {
+            status = deferred_stops[slot];
+            deferred_stops[slot] = 0;
+            tasks[slot].map_or(0, |candidate| candidate.host_pid as isize)
+        } else {
+            status = 0;
+            unsafe {
+                syscall4(
+                    SYS_WAIT4,
+                    (-1isize) as usize,
+                    &mut status as *mut _ as usize,
+                    0,
+                    0,
+                )
+            }
         };
         if waited <= 0 {
             native_fail(instance, pid, b"native wait-any failed");
@@ -5839,6 +5887,16 @@ fn supervise_native(
             native_fail(instance, pid, b"unknown native tracee");
         };
         let mut task = tasks[task_index].unwrap();
+        if stopped(status) {
+            let owner = descriptor_tables[task.descriptor_table].mutation_owner;
+            if owner != 0 && owner != task.host_pid {
+                if deferred_stops[task_index] != 0 {
+                    native_fail(instance, pid, b"native descriptor stop already deferred");
+                }
+                deferred_stops[task_index] = status;
+                continue;
+            }
+        }
         if !stopped(status) {
             if task.clone_call.phase != native_clone::Phase::Idle {
                 // A dead caller cannot finish its private protocol. Terminate
@@ -5864,7 +5922,19 @@ fn supervise_native(
             pid_map.remove(task.host_pid);
             native_virtual_kernel_clear_owner(&mut virtual_kernel_fds, task.host_pid);
             task.tracing = false;
+            if task.descriptor_barrier != usize::MAX {
+                let barrier = task.descriptor_barrier;
+                if descriptor_tables[barrier].mutation_owner == task.host_pid {
+                    descriptor_tables[barrier].mutation_owner = 0;
+                }
+                task.descriptor_barrier = usize::MAX;
+            }
             tasks[task_index] = Some(task);
+            if !tasks.iter().flatten().any(|candidate| {
+                candidate.tracing && candidate.descriptor_table == task.descriptor_table
+            }) {
+                descriptor_tables[task.descriptor_table] = EMPTY_NATIVE_DESCRIPTOR_TABLE;
+            }
             // Linux may report the parent's SIGCHLD delivery stop before the
             // tracer receives the child's final exit status. That early
             // notification is suppressed below because the virtual child is
@@ -5985,8 +6055,13 @@ fn supervise_native(
             let descriptor_table = if shares_files {
                 task.descriptor_table
             } else {
-                next_descriptor_table += 1;
-                next_descriptor_table
+                let Some(table) = descriptor_tables.iter().position(|table| !table.in_use) else {
+                    native_fail(instance, pid, b"native descriptor table pool full");
+                };
+                descriptor_tables[table] = descriptor_tables[task.descriptor_table];
+                descriptor_tables[table].in_use = true;
+                descriptor_tables[table].mutation_owner = 0;
+                table
             };
             tasks[child_slot] = Some(NativeSupervisorTask {
                 host_pid: child_host_pid,
@@ -6002,13 +6077,11 @@ fn supervise_native(
                 override_exit: false,
                 override_result: 0,
                 pending_console_open: false,
-                console_fd: task.console_fd,
-                console_fds: task.console_fds,
-                console_cloexec: task.console_cloexec,
                 pending_console_duplicate: 0,
                 pending_console_cloexec: false,
                 pending_device_arguments: None,
                 descriptor_table,
+                descriptor_barrier: usize::MAX,
                 pipe2_address: 0,
                 pipe_fds: task.pipe_fds,
                 socket_fds: task.socket_fds,
@@ -6074,14 +6147,35 @@ fn supervise_native(
             // Exec first unshares the descriptor table, then closes every
             // close-on-exec descriptor. Without its latest console open the
             // program is back to the instance console, as at its start.
-            next_descriptor_table += 1;
-            task.descriptor_table = next_descriptor_table;
-            let latest_open = native_fd_contains(&task.console_fds, task.console_fd as usize);
-            for (console, cloexec) in task.console_fds.iter_mut().zip(task.console_cloexec) {
+            let old_table = task.descriptor_table;
+            let shared = tasks.iter().enumerate().any(|(slot, candidate)| {
+                slot != task_index
+                    && candidate.is_some_and(|candidate| {
+                        candidate.tracing && candidate.descriptor_table == old_table
+                    })
+            });
+            if shared {
+                let Some(table) = descriptor_tables.iter().position(|table| !table.in_use) else {
+                    native_fail(instance, pid, b"native descriptor table pool full");
+                };
+                descriptor_tables[table] = descriptor_tables[old_table];
+                descriptor_tables[table].in_use = true;
+                descriptor_tables[table].mutation_owner = 0;
+                task.descriptor_table = table;
+            }
+            let table = &mut descriptor_tables[task.descriptor_table];
+            let latest_open = native_fd_contains(&table.console_fds, table.console_fd as usize);
+            for (console, cloexec) in table.console_fds.iter_mut().zip(table.console_cloexec) {
                 *console &= !cloexec;
             }
-            if latest_open && !native_fd_contains(&task.console_fds, task.console_fd as usize) {
-                task.console_fd = INSTANCE_CONSOLE_FD as i64;
+            if latest_open && !native_fd_contains(&table.console_fds, table.console_fd as usize) {
+                table.console_fd = INSTANCE_CONSOLE_FD as i64;
+            }
+            if task.descriptor_barrier != usize::MAX {
+                if descriptor_tables[old_table].mutation_owner == task.host_pid {
+                    descriptor_tables[old_table].mutation_owner = 0;
+                }
+                task.descriptor_barrier = usize::MAX;
             }
             tasks[task_index] = Some(task);
             if ptrace(PTRACE_CONT, host_pid, 0, 0) < 0 {
@@ -6225,6 +6319,21 @@ fn supervise_native(
         } else {
             None
         };
+
+        if entry_syscall.is_some_and(native_descriptor_barrier_syscall)
+            && task.descriptor_barrier == usize::MAX
+        {
+            let table = task.descriptor_table;
+            if descriptor_tables[table].mutation_owner != 0 {
+                native_fail(
+                    instance,
+                    pid,
+                    b"native descriptor mutation barrier collision",
+                );
+            }
+            descriptor_tables[table].mutation_owner = task.host_pid;
+            task.descriptor_barrier = table;
+        }
 
         if task.initial_exec_pending && entry_syscall == Some(59) {
             let mut listener = -1isize;
@@ -6606,16 +6715,16 @@ fn supervise_native(
                 registers.rax as i64
             });
             write_all(b"\n");
-            let console_tracking = (task.console_fd, task.console_fds, task.console_cloexec);
+            let table = &mut descriptor_tables[task.descriptor_table];
             if task.pending_console_open {
-                task.console_fd = registers.rax as i64;
+                table.console_fd = registers.rax as i64;
                 if registers.rax as i64 >= 0
-                    && !native_fd_set(&mut task.console_fds, registers.rax as usize)
+                    && !native_fd_set(&mut table.console_fds, registers.rax as usize)
                 {
                     native_fail(instance, pid, b"native console descriptor table full");
                 }
                 native_fd_assign(
-                    &mut task.console_cloexec,
+                    &mut table.console_cloexec,
                     registers.rax as usize,
                     task.pending_console_cloexec,
                 );
@@ -6624,14 +6733,14 @@ fn supervise_native(
             if task.pending_console_duplicate != 0 {
                 if registers.rax as i64 >= 0 {
                     let duplicated = registers.rax as usize;
-                    native_fd_clear(&mut task.console_fds, duplicated);
+                    native_fd_clear(&mut table.console_fds, duplicated);
                     if task.pending_console_duplicate > 0
-                        && !native_fd_set(&mut task.console_fds, duplicated)
+                        && !native_fd_set(&mut table.console_fds, duplicated)
                     {
                         native_fail(instance, pid, b"native console descriptor table full");
                     }
                     native_fd_assign(
-                        &mut task.console_cloexec,
+                        &mut table.console_cloexec,
                         duplicated,
                         task.pending_console_cloexec,
                     );
@@ -6655,7 +6764,7 @@ fn supervise_native(
                 cloexec.filter(|_| registers.rax == 0 && registers.orig_rax != u64::MAX)
             {
                 native_fd_assign(
-                    &mut task.console_cloexec,
+                    &mut table.console_cloexec,
                     registers.rdi as u32 as usize,
                     cloexec,
                 );
@@ -6740,7 +6849,7 @@ fn supervise_native(
                 // A close emulated for a protected descriptor never ran, and
                 // the kernel's descriptor is still open.
                 if registers.orig_rax != u64::MAX {
-                    native_fd_clear(&mut task.console_fds, registers.rdi as u32 as usize);
+                    native_fd_clear(&mut table.console_fds, registers.rdi as u32 as usize);
                 }
                 if let Some(slot) = task
                     .socket_fds
@@ -6840,26 +6949,40 @@ fn supervise_native(
                 let first = registers.rdi as u32 as usize;
                 let last = registers.rsi as u32 as usize;
                 if registers.rdx & CLOSE_RANGE_UNSHARE != 0 {
-                    next_descriptor_table += 1;
-                    task.descriptor_table = next_descriptor_table;
+                    let old_table = task.descriptor_table;
+                    let shared = tasks.iter().enumerate().any(|(slot, candidate)| {
+                        slot != task_index
+                            && candidate.is_some_and(|candidate| {
+                                candidate.tracing && candidate.descriptor_table == old_table
+                            })
+                    });
+                    if shared {
+                        let Some(new_table) =
+                            descriptor_tables.iter().position(|table| !table.in_use)
+                        else {
+                            native_fail(instance, pid, b"native descriptor table pool full");
+                        };
+                        descriptor_tables[new_table] = descriptor_tables[old_table];
+                        descriptor_tables[new_table].in_use = true;
+                        descriptor_tables[new_table].mutation_owner = 0;
+                        task.descriptor_table = new_table;
+                    }
                 }
+                let table = &mut descriptor_tables[task.descriptor_table];
                 if registers.rdx & CLOSE_RANGE_CLOEXEC != 0 {
                     for fd in first..=core::cmp::min(last, NATIVE_PROC_FD_LIMIT - 1) {
-                        native_fd_set(&mut task.console_cloexec, fd);
+                        native_fd_set(&mut table.console_cloexec, fd);
                     }
                 } else {
-                    native_fd_clear_range(&mut task.console_fds, first, last);
+                    native_fd_clear_range(&mut table.console_fds, first, last);
                 }
             }
-            // Tasks that share this descriptor table see the same change.
-            if (task.console_fd, task.console_fds, task.console_cloexec) != console_tracking {
-                for sharer in tasks.iter_mut().flatten() {
-                    if sharer.descriptor_table == task.descriptor_table {
-                        sharer.console_fd = task.console_fd;
-                        sharer.console_fds = task.console_fds;
-                        sharer.console_cloexec = task.console_cloexec;
-                    }
+            if task.descriptor_barrier != usize::MAX {
+                let barrier = task.descriptor_barrier;
+                if descriptor_tables[barrier].mutation_owner == task.host_pid {
+                    descriptor_tables[barrier].mutation_owner = 0;
                 }
+                task.descriptor_barrier = usize::MAX;
             }
             task.awaiting_exit = false;
             task.override_exit = false;
@@ -7268,9 +7391,13 @@ fn supervise_native(
             } else {
                 Some("filesystem.path.read")
             }
-        } else if syscall == 0 && registers.rdi as i64 == task.console_fd {
+        } else if syscall == 0
+            && registers.rdi as i64 == descriptor_tables[task.descriptor_table].console_fd
+        {
             Some("device.console.read")
-        } else if syscall == 1 && registers.rdi as i64 == task.console_fd {
+        } else if syscall == 1
+            && registers.rdi as i64 == descriptor_tables[task.descriptor_table].console_fd
+        {
             Some("device.console.write")
         } else if mode == 3 && matches!(syscall, 42 | 49) {
             match (native_socket_protocol(&task, registers.rdi), syscall) {
@@ -9178,7 +9305,12 @@ fn supervise_native(
                     && tracee_decimal_fd_path(host_pid, registers.rsi as usize) =>
             {
                 let target: &[u8] = tracee_proc_self_fd_number(host_pid, registers.rsi as usize)
-                    .filter(|fd| native_fd_contains(&task.console_fds, *fd))
+                    .filter(|fd| {
+                        native_fd_contains(
+                            &descriptor_tables[task.descriptor_table].console_fds,
+                            *fd,
+                        )
+                    })
                     .map_or(b"/memfd:ginux-instance", |_| b"/dev/console");
                 let count = core::cmp::min(target.len(), registers.r10 as usize);
                 let allowed =
@@ -9199,7 +9331,8 @@ fn supervise_native(
             Action::Mediate
                 if mode == 3
                     && syscall == 16
-                    && registers.rdi as i64 == task.console_fd
+                    && registers.rdi as i64
+                        == descriptor_tables[task.descriptor_table].console_fd
                     && registers.rsi == 21_505 =>
             {
                 line(b"mediate surface=virtual-console-termios result=pending");
@@ -9211,7 +9344,10 @@ fn supervise_native(
             Action::Mediate
                 if mode == 3
                     && syscall == 16
-                    && native_fd_contains(&task.console_fds, registers.rdi as usize)
+                    && native_fd_contains(
+                        &descriptor_tables[task.descriptor_table].console_fds,
+                        registers.rdi as usize,
+                    )
                     && registers.rsi == TIOCSCTTY =>
             {
                 let task_view = processes.view(task.virtual_id).unwrap_or_else(|_| {
@@ -9232,7 +9368,10 @@ fn supervise_native(
             Action::Mediate
                 if mode == 3
                     && syscall == 16
-                    && native_fd_contains(&task.console_fds, registers.rdi as usize)
+                    && native_fd_contains(
+                        &descriptor_tables[task.descriptor_table].console_fds,
+                        registers.rdi as usize,
+                    )
                     && matches!(registers.rsi, TIOCGPGRP | TIOCSPGRP) =>
             {
                 let task_view = processes.view(task.virtual_id).unwrap_or_else(|_| {
@@ -9273,12 +9412,14 @@ fn supervise_native(
             }
             Action::Mediate if mode == 3 && syscall == 32 => {
                 line(b"mediate surface=managed-descriptor-dup result=pending");
-                task.pending_console_duplicate =
-                    if native_fd_contains(&task.console_fds, registers.rdi as u32 as usize) {
-                        1
-                    } else {
-                        -1
-                    };
+                task.pending_console_duplicate = if native_fd_contains(
+                    &descriptor_tables[task.descriptor_table].console_fds,
+                    registers.rdi as u32 as usize,
+                ) {
+                    1
+                } else {
+                    -1
+                };
                 task.pending_console_cloexec = false;
                 task.awaiting_exit = true;
                 if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
@@ -9287,12 +9428,14 @@ fn supervise_native(
             }
             Action::Mediate if mode == 3 && syscall == 292 && registers.rdx & !0x8_0000 == 0 => {
                 line(b"mediate surface=managed-descriptor-dup result=pending");
-                task.pending_console_duplicate =
-                    if native_fd_contains(&task.console_fds, registers.rdi as u32 as usize) {
-                        1
-                    } else {
-                        -1
-                    };
+                task.pending_console_duplicate = if native_fd_contains(
+                    &descriptor_tables[task.descriptor_table].console_fds,
+                    registers.rdi as u32 as usize,
+                ) {
+                    1
+                } else {
+                    -1
+                };
                 task.pending_console_cloexec = registers.rdx & O_CLOEXEC != 0;
                 task.awaiting_exit = true;
                 if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
@@ -9317,7 +9460,10 @@ fn supervise_native(
                 // its close-on-exec flag.
                 task.pending_console_duplicate = if registers.rdi as u32 == registers.rsi as u32 {
                     0
-                } else if native_fd_contains(&task.console_fds, registers.rdi as u32 as usize) {
+                } else if native_fd_contains(
+                    &descriptor_tables[task.descriptor_table].console_fds,
+                    registers.rdi as u32 as usize,
+                ) {
                     1
                 } else {
                     -1
@@ -9334,12 +9480,14 @@ fn supervise_native(
                     && matches!(registers.rsi as u32 as u64, F_DUPFD | F_DUPFD_CLOEXEC) =>
             {
                 line(b"mediate surface=managed-descriptor-fcntl-dup result=pending");
-                task.pending_console_duplicate =
-                    if native_fd_contains(&task.console_fds, registers.rdi as u32 as usize) {
-                        1
-                    } else {
-                        -1
-                    };
+                task.pending_console_duplicate = if native_fd_contains(
+                    &descriptor_tables[task.descriptor_table].console_fds,
+                    registers.rdi as u32 as usize,
+                ) {
+                    1
+                } else {
+                    -1
+                };
                 task.pending_console_cloexec = registers.rsi as u32 as u64 == F_DUPFD_CLOEXEC;
                 task.awaiting_exit = true;
                 if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
@@ -9368,7 +9516,8 @@ fn supervise_native(
             Action::Mediate
                 if mode == 3
                     && matches!(syscall, 1 | 20)
-                    && registers.rdi as i64 == task.console_fd
+                    && registers.rdi as i64
+                        == descriptor_tables[task.descriptor_table].console_fd
                     && ((syscall == 1 && registers.rdx <= 4096)
                         || (syscall == 20 && registers.rdx <= 16)) =>
             {
