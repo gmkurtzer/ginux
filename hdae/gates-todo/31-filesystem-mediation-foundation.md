@@ -127,6 +127,9 @@ before the native filesystem lane claims any syscall.
 - `make test-security` -> host/peer tripwires, deterministic races, fault
   injection, and security mutations pass.
 - `make test-systemd` -> supported systemd filesystem behavior does not regress.
+- `make test-rpm` -> the exact committed RPM installs cleanly, verifies with
+  `rpm -V`, boots both packaged Alpine and Rocky systemd instances, preserves
+  their state across reinstall and erase/reinstall, and stops cleanly.
 - `make test` -> the complete aggregate suite passes at the final branch head.
 - Final source review -> trace every filesystem-capable route from syscall
   entry through authorization to host effect, inspect unsafe code and lifetime
