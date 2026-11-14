@@ -19,22 +19,28 @@
   alternate filesystem ABI inventory entries. No unresolved in-scope high- or
   critical-impact finding remains.
 - `make check`, `make test-unit`, focused clippy/check, aggregate `make test`,
-  and `make test-security` pass. `make test-recovery test-systemd` reaches the
-  systemd leg and then fails because IPv4 loopback setup returns `EINVAL` and
-  PID 1 exits.
-- The identical `test-systemd` failure reproduces at clean `origin/main`
-  (`285d025b`) with a separate fresh Rocky host overlay, so it is a pre-existing
-  baseline blocker rather than a Gate 31 regression. The gate remains partial
-  because its mandatory final matrix is not fully green.
+  `make test-security`, and the complete `make test-systemd` matrix pass.
+- The systemd blocker was traced beyond the Gate 31 filesystem work. Shared
+  networking incorrectly treated every `sendmsg` as an Internet datagram,
+  returning `EINVAL` for systemd's netlink loopback request. Internet policy
+  now applies only to tracked `AF_INET` and `AF_INET6` sockets. Namespace clone
+  requests are denied with `EPERM`, allowing systemd's documented optional
+  sandbox fallback without granting a host namespace.
+- An installed-RPM reproduction also exposed persisted contract metadata from
+  an older catalog revision. The instance was repaired explicitly by
+  recompiling its unchanged recipe; silent contract migration remains
+  prohibited because a catalog change can alter wildcard meaning. Package
+  upgrade/migration coverage is a recorded follow-up, not a weakened startup
+  check.
 - Draft pull request https://github.com/gmkurtzer/ginux/pull/291 contains the
   bounded implementation and discloses the baseline blocker; it references but
   does not close issue #290.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Exact next action: stop for human review and direction on a separate
-  corrective gate for the pre-existing systemd failure; do not accept or close
-  Gate 31 while its mandatory matrix remains red.
+- Exact next action: rebuild and exercise the RPM installation path at the
+  final branch head, update pull request 291, and stop for human review. Do not
+  accept or close Gate 31 without explicit human acceptance.
 
 ### Prior checkpoint: Gate 26 Rocky Linux RPM packaging
 

@@ -3407,6 +3407,7 @@ struct NativeSupervisorTask {
     pipe2_address: usize,
     pipe_fds: [i64; 8],
     socket_fds: [NativeSocketFd; NATIVE_SOCKET_FD_LIMIT],
+    pending_socket_family: u16,
     pending_socket_type: u8,
     pending_sockaddr: usize,
     pending_sockaddr_word: u64,
@@ -3484,6 +3485,7 @@ const EMPTY_RETIRED_CREDENTIAL: NativeRetiredCredential = NativeRetiredCredentia
 #[derive(Clone, Copy)]
 struct NativeSocketFd {
     fd: i64,
+    address_family: u16,
     protocol: u8,
     source_bound: bool,
     internal_port: u16,
@@ -3588,6 +3590,7 @@ const EMPTY_VIRTUAL_KERNEL_FD: NativeVirtualKernelFd = NativeVirtualKernelFd {
 
 const EMPTY_SOCKET_FD: NativeSocketFd = NativeSocketFd {
     fd: -1,
+    address_family: 0,
     protocol: 0,
     source_bound: false,
     internal_port: 0,
@@ -5827,6 +5830,7 @@ fn supervise_native(
         pipe2_address: 0,
         pipe_fds: [-1; 8],
         socket_fds: [EMPTY_SOCKET_FD; NATIVE_SOCKET_FD_LIMIT],
+        pending_socket_family: 0,
         pending_socket_type: 0,
         pending_sockaddr: 0,
         pending_sockaddr_word: 0,
@@ -6124,6 +6128,7 @@ fn supervise_native(
                 pipe2_address: 0,
                 pipe_fds: task.pipe_fds,
                 socket_fds: task.socket_fds,
+                pending_socket_family: 0,
                 pending_socket_type: 0,
                 pending_sockaddr: 0,
                 pending_sockaddr_word: 0,
@@ -6951,6 +6956,7 @@ fn supervise_native(
                 };
                 *slot = NativeSocketFd {
                     fd: registers.rax as i64,
+                    address_family: task.pending_socket_family,
                     protocol: task.pending_socket_type,
                     source_bound: false,
                     internal_port: 0,
@@ -7112,6 +7118,7 @@ fn supervise_native(
             task.wait_status = 0;
             task.waitid_info = 0;
             task.pipe2_address = 0;
+            task.pending_socket_family = 0;
             task.pending_socket_type = 0;
             task.pending_getsockname = 0;
             task.close_range_first = -1;
@@ -7167,6 +7174,7 @@ fn supervise_native(
         let socket_table_full =
             shared_network && syscall == 41 && !task.socket_fds.iter().any(|entry| entry.fd < 0);
         if shared_network && syscall == 41 && !socket_table_full {
+            task.pending_socket_family = registers.rdi as u16;
             task.pending_socket_type = (registers.rsi & 0xf) as u8;
         }
         if shared_network
@@ -7280,7 +7288,10 @@ fn supervise_native(
                 }
             }
         }
-        if shared_network && matches!(syscall, 44 | 46 | 307) {
+        if shared_network
+            && matches!(syscall, 44 | 46 | 307)
+            && native_socket_is_ip(&task, registers.rdi)
+        {
             let protocol = native_socket_protocol(&task, registers.rdi);
             let network_protocol = match protocol {
                 1 => Some(NetworkProtocol::Tcp),
@@ -7313,7 +7324,10 @@ fn supervise_native(
                         break;
                     }
                 }
-            } else if let Err(snapshot_error) = &snapshot {
+            } else if error.is_none() {
+                let Err(snapshot_error) = &snapshot else {
+                    unreachable!();
+                };
                 error = Some(*snapshot_error);
             }
             if error.is_none() {
@@ -7761,6 +7775,9 @@ fn supervise_native(
             write_u64(registers.rsi);
             write_all(b" options=");
             write_u64(registers.r10);
+        } else if mode == 3 && syscall == process_hooks::SYS_CLONE {
+            write_all(b" flags=");
+            write_u64(registers.rdi);
         } else if mode == 3 && syscall == 72 {
             write_all(b" fd=");
             write_u64(registers.rdi);
@@ -10161,11 +10178,10 @@ fn supervise_native(
             Action::Mediate if mode == 3 && syscall == 435 => {
                 let snapshot = native_clone::Pending::snapshot(host_pid, task_index, &registers)
                     .and_then(|mut snapshot| {
-                        if !process_hooks::clone3_supported(
-                            snapshot.flags(),
-                            snapshot.exit_signal(),
-                        ) {
-                            return Err(-ENOSYS);
+                        if let Some(error) =
+                            process_hooks::clone3_denial(snapshot.flags(), snapshot.exit_signal())
+                        {
+                            return Err(error);
                         }
                         if snapshot.flags() & 0x2_0000_0000 != 0 {
                             let owned = native_virtual_kernel_fd(
@@ -10721,6 +10737,13 @@ fn native_socket_protocol(task: &NativeSupervisorTask, fd: u64) -> u8 {
         .iter()
         .find(|entry| entry.fd == fd as i64)
         .map_or(0, |entry| entry.protocol)
+}
+
+fn native_socket_is_ip(task: &NativeSupervisorTask, fd: u64) -> bool {
+    task.socket_fds
+        .iter()
+        .find(|entry| entry.fd == fd as i64)
+        .is_some_and(|entry| matches!(entry.address_family, 2 | 10))
 }
 
 fn native_bind_socket_source(pid: usize, fd: i64, source: [u8; 4]) -> bool {

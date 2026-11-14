@@ -73,15 +73,17 @@ before the native filesystem lane claims any syscall.
   the filesystem lane claim any syscall or adding a host effect.
 - [x] Completed the explicit security review and resolved its in-scope findings.
 - [x] Ran the focused, security, recovery, aggregate, and systemd suites; all
-  Gate 31 and aggregate coverage passed, while `test-systemd` exposed the same
-  pre-existing loopback failure on both this branch and clean `origin/main`.
+  Gate 31 and aggregate coverage passed.
+- [x] Corrected the pre-existing systemd startup blocker without broadening the
+  filesystem lane: Internet snapshot policy now applies only to tracked IPv4
+  and IPv6 sockets, while netlink and Unix sockets remain outside that path;
+  namespace creation is denied with `EPERM` so systemd can use its documented
+  optional-sandbox fallback without receiving host namespace authority.
 
 ## Remaining work
 
-- [ ] Resolve or explicitly disposition the pre-existing `test-systemd`
-  loopback failure that reproduces unchanged on clean `origin/main`; the gate
-  cannot be called passed while this mandatory command is red.
-- [ ] Deliver the dedicated pull request and stop for human review.
+- [ ] Rebuild and exercise the installable RPM at the final branch head.
+- [ ] Update the dedicated pull request and stop for human review.
 
 ## Acceptance criteria
 
@@ -166,11 +168,21 @@ before the native filesystem lane claims any syscall.
   compatibility claim. Their existing regressions ran, but later gates must add
   the operation-specific mutation, proc-magic-link, fault, and effect oracles
   before enabling each filesystem family.
-- The final systemd regression is blocked by a pre-existing failure: systemd's
-  IPv4 loopback request returns `EINVAL` and PID 1 exits. The failure reproduced
-  byte-for-byte on this branch and in a detached clean `origin/main` worktree,
-  each with a fresh Rocky host overlay. It is not attributed to Gate 31 and is
-  not masked or relaxed here.
+- The systemd failure was not caused by Gate 31, but it was resolved before
+  final delivery because the gate requires a green mandatory matrix. The shared
+  networking path had applied an Internet-socket snapshot to netlink
+  `sendmsg`; tracking each socket's address family prevents that
+  misclassification. This does not add filesystem ownership or host effect.
+- Ginux denies host namespace creation with `EPERM`. This preserves the
+  security boundary while allowing systemd to disable an optional generator
+  sandbox and continue inside the already confined instance. Truly
+  unimplemented clone shapes still return `ENOSYS`.
+- Installed-RPM reproduction identified a separate upgrade limitation:
+  persisted normalized recipes can fail closed when catalog contents change
+  without a corresponding migration. The affected instance was repaired only
+  through an explicit recompile of its unchanged recipe. Silent refresh is not
+  acceptable because wildcard rules may acquire new meaning; deterministic
+  old-package-to-new-package migration coverage remains follow-up work.
 
 ## Evidence
 
@@ -189,12 +201,19 @@ before the native filesystem lane claims any syscall.
 - `make test-security` in an isolated Rocky QEMU host -> passed deterministic
   fuzzing, authority reduction, contract denial, native VFS, devices, kernel
   views, teardown, and host-effect checks.
-- `make test-recovery test-systemd` -> reached the systemd leg after all prior
-  security/recovery checks passed, then failed because loopback setup returned
-  `EINVAL` and PID 1 exited.
+- `make test-systemd` -> passed cold and warm cached Rocky boots, repeated
+  lifecycle, offline-cache reuse, failed-DNF recovery, startup failure, and
+  controlled shutdown after the netlink and namespace-denial corrections.
+- `make test-security test` -> passed deterministic security coverage and the
+  complete aggregate suite after the startup correction.
 - Clean detached `origin/main` at `285d025b`, fresh host overlay,
   `make test-systemd` -> failed with the identical loopback `EINVAL` diagnostic,
-  establishing a pre-existing baseline defect rather than a Gate 31 regression.
+  establishing the original failure as a pre-existing baseline defect rather
+  than a Gate 31 regression.
+- Installed RPM, existing `rocky` instance -> reproduced
+  `contract-digest-mismatch`; explicit recompilation of the unchanged recipe
+  restored its derived digest, and the corrected packaged runtime then reached
+  `multi-user.target` and the Rocky login prompt.
 - Final source review traced configured launch and mode 3 from immutable context
   construction through contract, confinement, inventory, capability, and hook
   guards; inspected every added unsafe/host syscall site and authority lifetime;
@@ -210,13 +229,13 @@ before the native filesystem lane claims any syscall.
   independent oracles and mutations; cross-route integration; security review
   and final evidence
 - Actual commits: `f9aa3cf1`, `1759b054`, `b8f05a9a`, `47171760`, `718784ae`,
-  and `35367c74`; pull-request URL checkpoint commit pending
+  `35367c74`, and `2b83cdd0`; final startup/package verification commit pending
 
 ## Review policy and outcome
 
 Security checkpoint. The approved gate may run autonomously through
 implementation, security review, complete final testing, commit, push, and pull
 request delivery. Stop after delivering the pull request for explicit human
-review. Gate 31 is technically partial because its mandatory systemd command is
-blocked by the documented pre-existing `main` failure; technical passage or
-pull-request delivery does not close the gate.
+review. Gate 31 is technically passed once the final RPM verification and pull
+request update complete; technical passage or pull-request delivery does not
+close the gate.
