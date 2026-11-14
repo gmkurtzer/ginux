@@ -22,18 +22,30 @@ cc -O2 -Wall -Wextra -Werror -pthread tests/fixtures/allocator-benchmark.c \
 LD_PRELOAD="$PWD/$allocator" .artifacts/allocator/conformance
 
 report=.artifacts/allocator/benchmark.tsv
-printf '%s\n' 'allocator	threads	operations	elapsed_ns	ops_per_second' >"$report"
+provenance=.artifacts/allocator/provenance.txt
+printf '%s\n' 'allocator	threads	repetition	operations	elapsed_ns	ops_per_second' >"$report"
+{
+    uname -a
+    rustc --version
+    cargo --version
+    cc --version | sed -n '1p'
+} >"$provenance"
 for threads in 1 2 4; do
-    native=$(.artifacts/allocator/benchmark "$threads")
-    guarded=$(LD_PRELOAD="$PWD/$allocator" .artifacts/allocator/benchmark "$threads")
-    for row in "native:$native" "ginux-guarded:$guarded"; do
-        kind=${row%%:*}
-        values=${row#*:}
-        operations=$(printf '%s\n' "$values" | sed -n 's/.*operations=\([0-9]*\).*/\1/p')
-        elapsed=$(printf '%s\n' "$values" | sed -n 's/.*elapsed_ns=\([0-9]*\).*/\1/p')
-        rate=$(printf '%s\n' "$values" | sed -n 's/.*ops_per_second=\([0-9.]*\).*/\1/p')
-        test -n "$operations" && test -n "$elapsed" && test -n "$rate"
-        printf '%s\t%s\t%s\t%s\t%s\n' "$kind" "$threads" "$operations" "$elapsed" "$rate" >>"$report"
+    repetition=1
+    while test "$repetition" -le 5; do
+        native=$(.artifacts/allocator/benchmark "$threads")
+        guarded=$(LD_PRELOAD="$PWD/$allocator" .artifacts/allocator/benchmark "$threads")
+        for row in "native:$native" "ginux-guarded:$guarded"; do
+            kind=${row%%:*}
+            values=${row#*:}
+            operations=$(printf '%s\n' "$values" | sed -n 's/.*operations=\([0-9]*\).*/\1/p')
+            elapsed=$(printf '%s\n' "$values" | sed -n 's/.*elapsed_ns=\([0-9]*\).*/\1/p')
+            rate=$(printf '%s\n' "$values" | sed -n 's/.*ops_per_second=\([0-9.]*\).*/\1/p')
+            test -n "$operations" && test -n "$elapsed" && test -n "$rate"
+            printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+                "$kind" "$threads" "$repetition" "$operations" "$elapsed" "$rate" >>"$report"
+        done
+        repetition=$((repetition + 1))
     done
 done
 

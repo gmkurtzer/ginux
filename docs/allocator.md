@@ -40,22 +40,26 @@ jemalloc extended allocation entry points. Unsupported `mallctl` names return
 
 ## Design
 
-- Allocator metadata lives in a fixed library-owned registry rather than in or
-  next to caller allocations.
-- Every allocation receives inaccessible guard pages on both sides of its
-  writable mapping.
-- Placement inside the guarded region is randomized when `getrandom` is
-  available and uses a deterministic non-secret fallback otherwise.
+- Allocator metadata lives in fixed library-owned registries and atomic slot
+  bitmaps rather than in or next to caller allocations.
+- Ordinary allocations use power-of-two size classes in per-thread-sharded
+  1 MiB arenas. Each arena has inaccessible guard pages; large or unusually
+  aligned allocations receive an individually guarded mapping.
+- Arena placement and slot starting points are seeded from `getrandom` when it
+  is available and use a deterministic non-secret fallback otherwise.
 - Size and alignment arithmetic is checked before mapping.
 - Unknown, invalid, and duplicate frees terminate the workload deterministically
   without mutating another allocation.
-- A process-aware spin lock resets inherited ownership after `fork`; allocation
-  and release remain serialized across threads.
-- Freed mappings are immediately returned to the kernel. The implementation has
-  no retained slab or thread cache in this first version.
+- A process-aware spin lock resets inherited ownership after `fork`. Ordinary
+  slot allocation and cross-thread release use sharded atomic bitmaps; guarded
+  mappings and arena initialization use the lock.
+- Large freed mappings are immediately returned to the kernel. Arena pages are
+  retained on normal fast paths and page-sized free slots are advised away when
+  the instance reaches its configured pressure threshold.
 - `/sys/fs/cgroup/memory.max` is read through the instance's virtual kernel view.
-  The allocator refuses a request that would exceed the visible limit according
-  to its live requested-byte accounting.
+  Size classes acquire coarse credits against that hard limit, so fast-path
+  accounting is local while aggregate reserved capacity cannot exceed the
+  instance-visible ceiling.
 
 ## Assurance boundary
 
@@ -74,6 +78,7 @@ make test-allocator-linux
 ```
 
 Raw benchmark rows are written to
-`.artifacts/allocator/benchmark.tsv`. The guarded design favors simple authority
-and immediate reclamation over allocator throughput; the report must retain
-failed or slow rows rather than imply parity with optimized slab allocators.
+`.artifacts/allocator/benchmark.tsv`, with five paired repetitions for each
+thread count and separate provenance. The guarded design favors explicit
+authority and metadata separation; reports retain failed or slow rows rather
+than imply parity with mature optimized allocators.

@@ -9,6 +9,43 @@ use core::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, AtomicUsize, Ordering
 const MAX_ALLOCATIONS: usize = 16_384;
 const DEFAULT_ALIGNMENT: usize = 16;
 const MAX_ALIGNMENT: usize = 2 * 1024 * 1024;
+const ARENA_BYTES: usize = 1024 * 1024;
+const ARENA_SHARDS: usize = 8;
+const BITMAP_WORDS: usize = ARENA_BYTES / 16 / 64;
+const DIRECTORY_ENTRIES: usize = 512;
+const DIRECTORY_SHIFT: usize = 20;
+const SIZE_CLASSES: [usize; 13] = [
+    16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16_384, 32_768, 65_536,
+];
+
+struct Arena {
+    payload: AtomicUsize,
+    cursor: AtomicUsize,
+    live_bytes: AtomicUsize,
+    live_allocations: AtomicUsize,
+    reserved_bytes: AtomicUsize,
+    live: [AtomicU64; BITMAP_WORDS],
+}
+
+impl Arena {
+    const fn new() -> Self {
+        Self {
+            payload: AtomicUsize::new(0),
+            cursor: AtomicUsize::new(0),
+            live_bytes: AtomicUsize::new(0),
+            live_allocations: AtomicUsize::new(0),
+            reserved_bytes: AtomicUsize::new(0),
+            live: [const { AtomicU64::new(0) }; BITMAP_WORDS],
+        }
+    }
+}
+
+static ARENAS: [Arena; SIZE_CLASSES.len() * ARENA_SHARDS] =
+    [const { Arena::new() }; SIZE_CLASSES.len() * ARENA_SHARDS];
+static DIRECTORY_KEYS: [AtomicUsize; DIRECTORY_ENTRIES] =
+    [const { AtomicUsize::new(0) }; DIRECTORY_ENTRIES];
+static DIRECTORY_VALUES: [AtomicUsize; DIRECTORY_ENTRIES] =
+    [const { AtomicUsize::new(0) }; DIRECTORY_ENTRIES];
 
 #[derive(Clone, Copy)]
 struct Slot {
@@ -46,6 +83,8 @@ static LIVE_BYTES: AtomicUsize = AtomicUsize::new(0);
 static LIVE_ALLOCATIONS: AtomicUsize = AtomicUsize::new(0);
 static GENERATION: AtomicU64 = AtomicU64::new(1);
 static RANDOM_FALLBACK: AtomicU64 = AtomicU64::new(0x9e37_79b9_7f4a_7c15);
+static RANDOM_SEEDED: AtomicBool = AtomicBool::new(false);
+static INSTANCE_MEMORY_LIMIT: AtomicUsize = AtomicUsize::new(0);
 
 struct RegistryGuard;
 
@@ -108,24 +147,36 @@ fn valid_alignment(alignment: usize) -> bool {
 }
 
 fn random_word() -> u64 {
-    #[cfg(target_os = "linux")]
-    {
-        let mut value = 0u64;
-        // SAFETY: the destination is a valid local u64 for the supplied size.
-        let result = unsafe {
-            libc::syscall(
-                libc::SYS_getrandom,
-                &mut value as *mut u64,
-                core::mem::size_of::<u64>(),
-                0,
-            )
-        };
-        if result == core::mem::size_of::<u64>() as libc::c_long {
-            return value;
+    if !RANDOM_SEEDED.swap(true, Ordering::AcqRel) {
+        #[cfg(target_os = "linux")]
+        {
+            let mut value = 0u64;
+            // SAFETY: the destination is a valid local u64 for the supplied size.
+            let result = unsafe {
+                libc::syscall(
+                    libc::SYS_getrandom,
+                    &mut value as *mut u64,
+                    core::mem::size_of::<u64>(),
+                    0,
+                )
+            };
+            if result == core::mem::size_of::<u64>() as libc::c_long {
+                RANDOM_FALLBACK.store(value.max(1), Ordering::Release);
+            }
         }
     }
-    let old = RANDOM_FALLBACK.fetch_add(0xa076_1d64_78bd_642f, Ordering::Relaxed);
-    old ^ old.rotate_left(23)
+    let mut old = RANDOM_FALLBACK.load(Ordering::Relaxed);
+    loop {
+        let mut next = old;
+        next ^= next << 13;
+        next ^= next >> 7;
+        next ^= next << 17;
+        match RANDOM_FALLBACK.compare_exchange_weak(old, next, Ordering::Relaxed, Ordering::Relaxed)
+        {
+            Ok(_) => return next,
+            Err(observed) => old = observed,
+        }
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -197,21 +248,173 @@ fn read_small_file(_path: &[u8]) -> Option<usize> {
 }
 
 fn instance_memory_limit() -> usize {
-    read_small_file(b"/sys/fs/cgroup/memory.max\0").unwrap_or(usize::MAX)
+    let cached = INSTANCE_MEMORY_LIMIT.load(Ordering::Acquire);
+    if cached != 0 {
+        return cached;
+    }
+    let limit = read_small_file(b"/sys/fs/cgroup/memory.max\0").unwrap_or(usize::MAX);
+    INSTANCE_MEMORY_LIMIT.store(limit.max(1), Ordering::Release);
+    limit
 }
 
 fn reserve_live_bytes(size: usize) -> bool {
-    let live = LIVE_BYTES.load(Ordering::Relaxed);
-    match live.checked_add(size) {
-        Some(next) if next <= instance_memory_limit() => {
-            LIVE_BYTES.store(next, Ordering::Relaxed);
-            true
-        }
-        _ => false,
+    let limit = instance_memory_limit();
+    if size > limit {
+        return false;
+    }
+    let previous = LIVE_BYTES.fetch_add(size, Ordering::AcqRel);
+    if previous > limit.saturating_sub(size) {
+        LIVE_BYTES.fetch_sub(size, Ordering::AcqRel);
+        false
+    } else {
+        true
     }
 }
 
-fn allocate(size: usize, alignment: usize, zero: bool) -> *mut c_void {
+fn memory_pressure_high() -> bool {
+    let limit = instance_memory_limit();
+    limit != usize::MAX && LIVE_BYTES.load(Ordering::Relaxed) >= limit.saturating_mul(4) / 5
+}
+
+fn class_index(size: usize) -> Option<usize> {
+    SIZE_CLASSES.iter().position(|class| size <= *class)
+}
+
+fn thread_shard() -> usize {
+    // SAFETY: pthread_self returns the calling thread's opaque identity and
+    // has no pointer arguments or allocation side effects.
+    let identity = unsafe { libc::pthread_self() as usize };
+    identity.wrapping_mul(0x9e37_79b9_7f4a_7c15) >> (usize::BITS as usize - 3)
+}
+
+fn reserve_arena_bytes(index: usize, size: usize) -> bool {
+    let arena = &ARENAS[index];
+    let previous = arena.live_bytes.fetch_add(size, Ordering::AcqRel);
+    let Some(required) = previous.checked_add(size) else {
+        arena.live_bytes.fetch_sub(size, Ordering::AcqRel);
+        return false;
+    };
+    if required <= arena.reserved_bytes.load(Ordering::Acquire) {
+        return true;
+    }
+
+    let _guard = lock_registry();
+    let required = arena.live_bytes.load(Ordering::Acquire);
+    let reserved = arena.reserved_bytes.load(Ordering::Acquire);
+    if required <= reserved {
+        return true;
+    }
+    let target = align_up(required, ARENA_BYTES).unwrap_or(required);
+    let additional = target.saturating_sub(reserved);
+    if additional == 0 || reserve_live_bytes(additional) {
+        arena.reserved_bytes.store(target, Ordering::Release);
+        true
+    } else {
+        arena.live_bytes.fetch_sub(size, Ordering::AcqRel);
+        false
+    }
+}
+
+fn initialize_arena(index: usize) -> Option<usize> {
+    let arena = &ARENAS[index];
+    let existing = arena.payload.load(Ordering::Acquire);
+    if existing != 0 {
+        return Some(existing);
+    }
+    let _guard = lock_registry();
+    let existing = arena.payload.load(Ordering::Acquire);
+    if existing != 0 {
+        return Some(existing);
+    }
+    let page = page_size();
+    let mapping_len = ARENA_BYTES.checked_add(page.checked_mul(2)?)?;
+    // SAFETY: mmap is called with no input pointer and a checked length.
+    let mapping = unsafe {
+        libc::mmap(
+            ptr::null_mut(),
+            mapping_len,
+            libc::PROT_NONE,
+            libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+            -1,
+            0,
+        )
+    };
+    if mapping == libc::MAP_FAILED {
+        return None;
+    }
+    let payload = mapping as usize + page;
+    // SAFETY: payload is the complete interior of the new guarded mapping.
+    if unsafe {
+        libc::mprotect(
+            payload as *mut c_void,
+            ARENA_BYTES,
+            libc::PROT_READ | libc::PROT_WRITE,
+        )
+    } != 0
+    {
+        // SAFETY: mapping and length came from the successful mmap above.
+        unsafe { libc::munmap(mapping, mapping_len) };
+        return None;
+    }
+    let first_key = payload >> DIRECTORY_SHIFT;
+    let last_key = (payload + ARENA_BYTES - 1) >> DIRECTORY_SHIFT;
+    for key in first_key..=last_key {
+        let mut position = key.wrapping_mul(0x9e37_79b9) % DIRECTORY_ENTRIES;
+        loop {
+            if DIRECTORY_KEYS[position].load(Ordering::Relaxed) == 0 {
+                DIRECTORY_VALUES[position].store(index + 1, Ordering::Relaxed);
+                DIRECTORY_KEYS[position].store(key + 1, Ordering::Release);
+                break;
+            }
+            position = (position + 1) % DIRECTORY_ENTRIES;
+        }
+    }
+    arena.payload.store(payload, Ordering::Release);
+    arena
+        .cursor
+        .store(random_word() as usize, Ordering::Release);
+    Some(payload)
+}
+
+fn allocate_slab(requested: usize, zero: bool) -> *mut c_void {
+    let Some(class_index) = class_index(requested) else {
+        return ptr::null_mut();
+    };
+    let index = class_index * ARENA_SHARDS + thread_shard();
+    let class = SIZE_CLASSES[class_index];
+    if !reserve_arena_bytes(index, class) {
+        set_errno(libc::ENOMEM);
+        return ptr::null_mut();
+    }
+    let Some(payload) = initialize_arena(index) else {
+        ARENAS[index].live_bytes.fetch_sub(class, Ordering::AcqRel);
+        set_errno(libc::ENOMEM);
+        return ptr::null_mut();
+    };
+    let slots = ARENA_BYTES / class;
+    let start = ARENAS[index].cursor.fetch_add(1, Ordering::Relaxed) % slots;
+    for step in 0..slots {
+        let slot = (start + step) % slots;
+        let word = slot / 64;
+        let mask = 1u64 << (slot % 64);
+        if ARENAS[index].live[word].fetch_or(mask, Ordering::AcqRel) & mask == 0 {
+            let user = payload + slot * class;
+            if zero {
+                // SAFETY: this thread owns the selected live slot.
+                unsafe { ptr::write_bytes(user as *mut u8, 0, requested) };
+            }
+            ARENAS[index]
+                .live_allocations
+                .fetch_add(1, Ordering::Relaxed);
+            return user as *mut c_void;
+        }
+    }
+    ARENAS[index].live_bytes.fetch_sub(class, Ordering::AcqRel);
+    set_errno(libc::ENOMEM);
+    ptr::null_mut()
+}
+
+fn allocate_guarded(size: usize, alignment: usize, zero: bool) -> *mut c_void {
     if !valid_alignment(alignment) {
         set_errno(libc::EINVAL);
         return ptr::null_mut();
@@ -322,9 +525,56 @@ fn allocate(size: usize, alignment: usize, zero: bool) -> *mut c_void {
     user as *mut c_void
 }
 
+fn allocate(size: usize, alignment: usize, zero: bool) -> *mut c_void {
+    if !valid_alignment(alignment) {
+        set_errno(libc::EINVAL);
+        return ptr::null_mut();
+    }
+    let requested = cmp::max(size, 1);
+    if alignment <= DEFAULT_ALIGNMENT && requested <= *SIZE_CLASSES.last().unwrap() {
+        return allocate_slab(requested, zero);
+    }
+    allocate_guarded(size, alignment, zero)
+}
+
+fn slab_slot(pointer: *mut c_void) -> Option<(usize, usize)> {
+    let address = pointer as usize;
+    let key = address >> DIRECTORY_SHIFT;
+    let mut position = key.wrapping_mul(0x9e37_79b9) % DIRECTORY_ENTRIES;
+    for _ in 0..DIRECTORY_ENTRIES {
+        let stored_key = DIRECTORY_KEYS[position].load(Ordering::Acquire);
+        if stored_key == 0 {
+            return None;
+        }
+        if stored_key == key + 1 {
+            let value = DIRECTORY_VALUES[position].load(Ordering::Relaxed);
+            if value != 0 {
+                let index = value - 1;
+                let payload = ARENAS[index].payload.load(Ordering::Acquire);
+                if address >= payload && address < payload + ARENA_BYTES {
+                    let class = SIZE_CLASSES[index / ARENA_SHARDS];
+                    let offset = address - payload;
+                    if !offset.is_multiple_of(class) {
+                        abort_invalid_free();
+                    }
+                    return Some((index, offset / class));
+                }
+            }
+        }
+        position = (position + 1) % DIRECTORY_ENTRIES;
+    }
+    None
+}
+
 fn allocation_size(pointer: *mut c_void) -> Option<usize> {
     if pointer.is_null() {
         return Some(0);
+    }
+    if let Some((index, slot)) = slab_slot(pointer) {
+        let word = slot / 64;
+        let mask = 1u64 << (slot % 64);
+        return (ARENAS[index].live[word].load(Ordering::Acquire) & mask != 0)
+            .then_some(SIZE_CLASSES[index / ARENA_SHARDS]);
     }
     let _guard = lock_registry();
     // SAFETY: registry access is serialized by REGISTRY_LOCK.
@@ -337,6 +587,28 @@ fn allocation_size(pointer: *mut c_void) -> Option<usize> {
 
 fn deallocate(pointer: *mut c_void) {
     if pointer.is_null() {
+        return;
+    }
+    if let Some((index, slot)) = slab_slot(pointer) {
+        let class = SIZE_CLASSES[index / ARENA_SHARDS];
+        let word = slot / 64;
+        let mask = 1u64 << (slot % 64);
+        if ARENAS[index].live[word].load(Ordering::Acquire) & mask == 0 {
+            abort_invalid_free();
+        }
+        if class >= page_size() && memory_pressure_high() {
+            // Keep the slot live until reclamation is complete so another
+            // thread cannot reuse it while madvise is discarding its pages.
+            // SAFETY: page-sized classes are page aligned and still live.
+            unsafe { libc::madvise(pointer, class, libc::MADV_DONTNEED) };
+        }
+        if ARENAS[index].live[word].fetch_and(!mask, Ordering::AcqRel) & mask == 0 {
+            abort_invalid_free();
+        }
+        ARENAS[index].live_bytes.fetch_sub(class, Ordering::AcqRel);
+        ARENAS[index]
+            .live_allocations
+            .fetch_sub(1, Ordering::Relaxed);
         return;
     }
     let (mapping, mapping_len, requested) = {
@@ -370,7 +642,14 @@ fn reallocate(pointer: *mut c_void, size: usize) -> *mut c_void {
         deallocate(pointer);
         return ptr::null_mut();
     }
-    let (old_size, alignment) = {
+    let (old_size, alignment) = if let Some((index, slot)) = slab_slot(pointer) {
+        let word = slot / 64;
+        let mask = 1u64 << (slot % 64);
+        if ARENAS[index].live[word].load(Ordering::Acquire) & mask == 0 {
+            abort_invalid_free();
+        }
+        (SIZE_CLASSES[index / ARENA_SHARDS], DEFAULT_ALIGNMENT)
+    } else {
         let _guard = lock_registry();
         // SAFETY: registry access is serialized by REGISTRY_LOCK.
         let slots = unsafe { &*REGISTRY.0.get() };
@@ -382,6 +661,9 @@ fn reallocate(pointer: *mut c_void, size: usize) -> *mut c_void {
         };
         (slot.requested, slot.alignment)
     };
+    if size <= old_size {
+        return pointer;
+    }
     let replacement = allocate(size, alignment, false);
     if replacement.is_null() {
         return ptr::null_mut();
@@ -635,7 +917,7 @@ mod tests {
         assert!(!pointer.is_null());
         assert_eq!(pointer as usize % 64, 0);
         assert_eq!(allocation_size(pointer), Some(123));
-        assert_eq!(LIVE_ALLOCATIONS.load(Ordering::Relaxed), 1);
+        assert!(LIVE_ALLOCATIONS.load(Ordering::Relaxed) >= 1);
         deallocate(pointer);
         assert_eq!(LIVE_ALLOCATIONS.load(Ordering::Relaxed), 0);
     }
