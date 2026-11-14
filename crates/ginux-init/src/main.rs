@@ -6902,7 +6902,16 @@ fn supervise_native(
             }
         }
         let implementation_decision = if mode == 3 {
-            decide_systemd(syscall, shared_network)
+            if let Some(result) =
+                process_hooks::claim(syscall, registers.rdi, registers.rsi, registers.rdx)
+            {
+                ginux_core::Decision {
+                    syscall,
+                    action: Action::Deny((-result) as i32),
+                }
+            } else {
+                decide_systemd(syscall, shared_network)
+            }
         } else {
             match decide_native(syscall, registers.rdi, registers.rsi, registers.rdx) {
                 NativeDecision::Contract(decision) => decision,
@@ -9568,6 +9577,16 @@ fn supervise_native(
             Action::Mediate if mode == 3 && syscall == 435 => {
                 let snapshot = native_clone::Pending::snapshot(host_pid, task_index, &registers)
                     .and_then(|mut snapshot| {
+                        if process_hooks::claim(
+                            process_hooks::SYS_CLONE,
+                            (snapshot.flags() & !0x2_0000_0000) | snapshot.exit_signal(),
+                            0,
+                            0,
+                        )
+                        .is_some()
+                        {
+                            return Err(-ENOSYS);
+                        }
                         if snapshot.flags() & 0x2_0000_0000 != 0 {
                             let owned = native_virtual_kernel_fd(
                                 &virtual_kernel_fds,

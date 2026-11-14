@@ -211,6 +211,11 @@ sys_read = ["/"]
             "GINUX_FIXTURE: clone3-invalid=-9", "GINUX_FIXTURE: clone3-ordinary=-9",
             "GINUX_FIXTURE: cgroup-open-ok=1", "GINUX_FIXTURE: clone3-ok=1",
             "GINUX_FIXTURE: wait-ok=1", "GINUX_FIXTURE: child-status=7"], code, out)
+        code, out = run("Clone-policy", configured)
+        fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
+        check("unsafe clone flags are denied before host effect", code == 0 and fixture == [
+            "GINUX_FIXTURE: clone-untraced=-38",
+            "GINUX_FIXTURE: clone3-untraced=-38"], code, out)
         code, out = run("arguments", configured)
         fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
         check("immutable clone3 arguments and cleanup", code == 0

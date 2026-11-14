@@ -384,6 +384,25 @@ long native_fixture_main(void)
         print_result("GINUX_FIXTURE: child-status=", (status >> 8) & 0xff);
         return 0;
     }
+    case 'C': {
+        /* Configured-native process creation must apply the same managed
+         * shape policy before either clone ABI can reach the host kernel. */
+        word stack = call6(9, 0, 16384, 3, 0x22, -1, 0);
+        const word unsafe = 0x00800000 | 0x00000100 | 17; /* UNTRACED|VM|SIGCHLD */
+        print_result("GINUX_FIXTURE: clone-untraced=",
+                     call6(56, unsafe, stack + 16384, 0, 0, 0, 0));
+        struct {
+            word flags, pidfd, child_tid, parent_tid, exit_signal, stack, stack_size, tls,
+                set_tid, set_tid_size, cgroup;
+        } args = {0};
+        args.flags = 0x00800000 | 0x00000100; /* UNTRACED|VM */
+        args.exit_signal = 17;
+        args.stack = stack;
+        args.stack_size = 16384;
+        print_result("GINUX_FIXTURE: clone3-untraced=",
+                     call3(435, (word)&args, sizeof args, 0));
+        return 0;
+    }
     case 'a': {
         struct clone_args { word flags, pidfd, child_tid, parent_tid, exit_signal,
             stack, stack_size, tls, set_tid, set_tid_size, cgroup; };

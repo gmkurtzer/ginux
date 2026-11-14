@@ -91,6 +91,9 @@ impl Pending {
     pub fn flags(&self) -> u64 {
         u64::from_ne_bytes(self.args[..8].try_into().unwrap())
     }
+    pub fn exit_signal(&self) -> u64 {
+        u64::from_ne_bytes(self.args[32..40].try_into().unwrap())
+    }
     pub fn cgroup(&self) -> u64 {
         u64::from_ne_bytes(self.args[80..88].try_into().unwrap())
     }
