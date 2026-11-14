@@ -63,14 +63,14 @@ errors cannot silently steer allocator state.
 
 ## Delivery strategy
 
-- Working branch: `hdae/allocator-hardening-concurrency`
+- Working branch: `hdae/security-allocator-initiative`
 - Intended base: `main`
-- Pull request: intended
+- Pull request: one combined Gates 32-42 pull request intended
 - Planned commits: metadata model; hardening; concurrency; unsafe review and
   final evidence
 - Actual commits: pending
 
 ## Review policy and outcome
 
-Security checkpoint requiring explicit human acceptance. Persistence of this
-gate does not authorize implementation.
+Authorized for autonomous execution in the human-approved Gates 32-42 batch.
+Keep the gate open for one final human checkpoint on the combined pull request.

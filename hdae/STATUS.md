@@ -2,6 +2,13 @@
 
 ## Approved future gate records
 
+- On 2026-11-14 the human authorized Gates 32 through 42 as one autonomous
+  execution batch on `hdae/security-allocator-initiative`, delivered through one
+  combined pull request. Gates 32 through 37 remain strictly defensive and
+  exclude exploit development. Gate 38 may select the allocator architecture
+  from its evidence and continue through Gates 39 through 42. All gates remain
+  open for one final human testing and acceptance checkpoint.
+
 - On 2026-11-14 the human approved persisting Gates 32 through 37 for a strictly
   defensive review of the project-owned Ginux codebase. The work excludes
   exploit development, payload construction, offensive validation, and external
@@ -11,8 +18,9 @@
   Gate 38 must first compare support for upstream challoc with an independent or
   Ginux-aware allocator and obtain a human architecture decision. Gates 39
   through 42 may not begin unless that decision explicitly authorizes them.
-- These future records do not change the currently active gate, approve a batch,
-  or authorize pushing, merging, or closing a pull request.
+- This batch authorization permits implementation, signed commits, pushing the
+  dedicated branch, and opening the combined pull request. It does not authorize
+  merging or closing that pull request or pushing implementation to `main`.
 
 ## Current checkpoint
 

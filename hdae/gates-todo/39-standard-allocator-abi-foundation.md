@@ -66,14 +66,15 @@ standard C allocation ABI and can run transparently inside a Ginux instance.
 
 ## Delivery strategy
 
-- Working branch: `hdae/standard-allocator-abi-foundation`
+- Working branch: `hdae/security-allocator-initiative`
 - Intended base: `main`
-- Pull request: intended
+- Pull request: one combined Gates 32-42 pull request intended
 - Planned commits: ABI specification; core allocator; conformance; Ginux loading
   and packaging; final evidence
 - Actual commits: pending
 
 ## Review policy and outcome
 
-Architecture and correctness checkpoint requiring explicit human acceptance.
-Persistence of this gate does not authorize implementation.
+Authorized for autonomous execution after Gate 38 selects the architecture in
+the human-approved batch. Keep the gate open for one final human checkpoint on
+the combined pull request.

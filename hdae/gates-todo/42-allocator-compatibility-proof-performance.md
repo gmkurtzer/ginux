@@ -76,14 +76,14 @@ performance evidence for the allocator without overstating its maturity.
 
 ## Delivery strategy
 
-- Working branch: `hdae/allocator-compatibility-proof-performance`
+- Working branch: `hdae/security-allocator-initiative`
 - Intended base: `main`
-- Pull request: intended
+- Pull request: one combined Gates 32-42 pull request intended
 - Planned commits: compatibility matrix; distribution workloads; assurance;
   benchmark reports; packaging and final evidence
 - Actual commits: pending
 
 ## Review policy and outcome
 
-Final allocator checkpoint requiring explicit human acceptance. Persistence of
-this gate does not authorize implementation.
+Final checkpoint for the authorized Gates 32-42 batch. Deliver one combined pull
+request and stop for explicit human testing and acceptance.

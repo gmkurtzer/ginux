@@ -67,14 +67,14 @@ upgrade, persistence, recovery, and removal behavior.
 
 ## Delivery strategy
 
-- Working branch: `hdae/host-privilege-supply-chain-review`
+- Working branch: `hdae/security-allocator-initiative`
 - Intended base: `main`
-- Pull request: intended
+- Pull request: one combined Gates 32-42 pull request intended
 - Planned commits: privilege inventory; package/acquisition tests; remediation;
   recovery documentation and final evidence
 - Actual commits: pending
 
 ## Review policy and outcome
 
-Security checkpoint requiring explicit human acceptance. Persistence of this
-gate does not authorize implementation.
+Authorized for autonomous execution in the human-approved Gates 32-42 batch.
+Keep the gate open for one final human checkpoint on the combined pull request.

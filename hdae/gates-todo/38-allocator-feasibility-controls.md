@@ -74,14 +74,15 @@ allocator.
 
 ## Delivery strategy
 
-- Working branch: `hdae/allocator-feasibility-controls`
+- Working branch: `hdae/security-allocator-initiative`
 - Intended base: `main`
-- Pull request: intended
+- Pull request: one combined Gates 32-42 pull request intended
 - Planned commits: control harness; ABI and contract inventory; matched results;
   architecture decision
 - Actual commits: pending
 
 ## Review policy and outcome
 
-Architecture checkpoint requiring explicit human acceptance. Persistence of
-this gate does not authorize implementation or subsequent allocator gates.
+Authorized to select the best-supported architecture from the recorded evidence
+and continue through Gates 39-42 in the human-approved batch. Keep the gate open
+for one final human checkpoint on the combined pull request.

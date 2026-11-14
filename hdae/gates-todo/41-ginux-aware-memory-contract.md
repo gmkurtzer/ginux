@@ -66,14 +66,15 @@ pressure state without exposing host-global memory information.
 
 ## Delivery strategy
 
-- Working branch: `hdae/ginux-aware-memory-contract`
+- Working branch: `hdae/security-allocator-initiative`
 - Intended base: `main`
-- Pull request: intended
+- Pull request: one combined Gates 32-42 pull request intended
 - Planned commits: interface decision; virtual telemetry; allocator integration;
   isolation tests and documentation
 - Actual commits: pending
 
 ## Review policy and outcome
 
-Architecture and security checkpoint requiring explicit human acceptance.
-Persistence of this gate does not authorize implementation.
+Authorized to choose the narrowest interface supported by Gate 38 evidence and
+continue autonomously in the human-approved batch. Keep the gate open for one
+final human checkpoint on the combined pull request.
