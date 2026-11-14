@@ -232,8 +232,7 @@ pub fn clone3_supported(flags: u64, exit_signal: u64) -> bool {
         return false;
     }
     let legacy = flags & !(CLONE_PIDFD | CLONE_CLEAR_SIGHAND | CLONE_INTO_CGROUP);
-    exit_signal <= u8::MAX as u64
-        && claim(SYS_CLONE, legacy | exit_signal, 0, 0).is_none()
+    exit_signal <= u8::MAX as u64 && claim(SYS_CLONE, legacy | exit_signal, 0, 0).is_none()
 }
 
 /// Whether an executable-replacement entry executes under supervision.
