@@ -49,7 +49,8 @@ Keep configured native workloads from observing their host TID through
   `supervise_process_native` already performs the equivalent translation.
 - `make check` passed on macOS.
 - `make test-unit` passed on macOS.
-- The privileged Linux integration is delegated to pull-request CI.
+- GitHub workflow 43551883397 passed `changes`, `static-and-unit`, and
+  `launch-integration`, including the privileged native-supervision regression.
 - Delivery: [PR #286](https://github.com/gmkurtzer/ginux/pull/286).
 - Source update:
   https://github.com/gmkurtzer/ginux/issues/285#issuecomment-6870903120
@@ -58,5 +59,5 @@ Keep configured native workloads from observing their host TID through
 
 ## Status
 
-- Implemented, locally verified, pushed, and delivered in PR #286; awaiting
-  Linux CI and pull-request review.
+- Implemented, locally and in Linux CI verified, pushed, and delivered in PR
+  #286; awaiting exact-head pull-request review.
