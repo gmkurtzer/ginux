@@ -226,7 +226,7 @@ sys_read = ["/"]
             "GINUX_FIXTURE: clone-vfork=1", "GINUX_FIXTURE: vfork-unchanged=1",
             "GINUX_FIXTURE: clone-short=-22", "GINUX_FIXTURE: clone-large=-7",
             "GINUX_FIXTURE: clone-unreadable=-14", "GINUX_FIXTURE: clone-short-cgroup=-22",
-            "GINUX_FIXTURE: clone-kernel-error=-22", "GINUX_FIXTURE: error-unchanged=1",
+            "GINUX_FIXTURE: clone-kernel-error=-38", "GINUX_FIXTURE: error-unchanged=1",
             "GINUX_FIXTURE: clone-tail=-7", "GINUX_FIXTURE: clone-version0=1",
             "GINUX_FIXTURE: snapshot-mmap=-1", "GINUX_FIXTURE: snapshot-mprotect=-1",
             "GINUX_FIXTURE: snapshot-munmap=-1", "GINUX_FIXTURE: snapshot-madvise=-1",

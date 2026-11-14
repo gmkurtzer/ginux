@@ -9577,14 +9577,10 @@ fn supervise_native(
             Action::Mediate if mode == 3 && syscall == 435 => {
                 let snapshot = native_clone::Pending::snapshot(host_pid, task_index, &registers)
                     .and_then(|mut snapshot| {
-                        if process_hooks::claim(
-                            process_hooks::SYS_CLONE,
-                            (snapshot.flags() & !0x2_0000_0000) | snapshot.exit_signal(),
-                            0,
-                            0,
-                        )
-                        .is_some()
-                        {
+                        if !process_hooks::clone3_supported(
+                            snapshot.flags(),
+                            snapshot.exit_signal(),
+                        ) {
                             return Err(-ENOSYS);
                         }
                         if snapshot.flags() & 0x2_0000_0000 != 0 {
