@@ -59,17 +59,28 @@ before the native filesystem lane claims any syscall.
   filesystem policy paths.
 - [x] Confirmed Gate 30's shared descriptor-table authority is the required
   descriptor foundation rather than numeric-fd authority.
+- [x] Added a complete immutable x86-64 call context carrying all six syscall
+  arguments, task and instance identity, lifetime and root generation,
+  root/cwd/descriptor-table authority, and the effective contract decision.
+- [x] Added the generated filesystem operation-ownership inventory and
+  fail-closed lookup for unknown ABIs, syscalls, owners, and denials.
+- [x] Added typed, object-identified capabilities and monotonic descriptor-table
+  generations; generation exhaustion terminates the instance rather than
+  reusing authority.
+- [x] Added independent host/peer tripwires, deterministic path-replacement
+  races, lexical-prefix rejection, and stale-generation mutations.
+- [x] Interlocked configured launch and configured-native mode 3 without making
+  the filesystem lane claim any syscall or adding a host effect.
+- [x] Completed the explicit security review and resolved its in-scope findings.
+- [x] Ran the focused, security, recovery, aggregate, and systemd suites; all
+  Gate 31 and aggregate coverage passed, while `test-systemd` exposed the same
+  pre-existing loopback failure on both this branch and clean `origin/main`.
 
 ## Remaining work
 
-- [ ] Add the complete immutable filesystem call context and route adapters.
-- [ ] Add and validate the operation-ownership inventory.
-- [ ] Add typed root, cwd, dirfd, descriptor, and lifetime authority.
-- [ ] Add the independent host-effect, race, and mutation test architecture.
-- [ ] Prove both confined native routes preserve contract and confinement
-  conjunction without enabling a filesystem syscall.
-- [ ] Perform the explicit security-focused review and resolve findings.
-- [ ] Run the complete final test matrix and record fresh evidence.
+- [ ] Resolve or explicitly disposition the pre-existing `test-systemd`
+  loopback failure that reproduces unchanged on clean `origin/main`; the gate
+  cannot be called passed while this mandatory command is red.
 - [ ] Deliver the dedicated pull request and stop for human review.
 
 ## Acceptance criteria
@@ -136,6 +147,58 @@ before the native filesystem lane claims any syscall.
   operation families in order: observation/directory state, safe open,
   descriptor I/O, single-path mutation, two-path mutation, then special
   interfaces and lifecycle recovery.
+- The security review found and corrected four in-scope weaknesses before
+  delivery: contract denial now precedes hook invocation, descriptor generation
+  overflow fails closed, retained root authority is lookup/read only, and the
+  inventory includes alternate filesystem entry points such as AIO, io_uring,
+  fanotify, pidfd descriptor import, Landlock, and mount queries. No unresolved
+  in-scope high- or critical-impact finding remains.
+- Final repeated verification also found that parallel host-effect tests could
+  collide when the platform clock returned the same timestamp. Fixture names
+  now include a process-local atomic sequence; the oracle passed ten consecutive
+  runs and the complete unit suite afterward.
+- Configured launch deliberately has unavailable root/cwd/descriptor-table
+  capabilities because it does not retain and generation-track those objects.
+  Configured-native mode 3 has retained root and descriptor-table identity, but
+  cwd remains unavailable until a later operation-family gate owns cwd object
+  lifecycle. Both conditions fail closed while `fs_hooks::claims()` is false.
+- Existing legacy filesystem executors remain outside this foundation's new
+  compatibility claim. Their existing regressions ran, but later gates must add
+  the operation-specific mutation, proc-magic-link, fault, and effect oracles
+  before enabling each filesystem family.
+- The final systemd regression is blocked by a pre-existing failure: systemd's
+  IPv4 loopback request returns `EINVAL` and PID 1 exits. The failure reproduced
+  byte-for-byte on this branch and in a detached clean `origin/main` worktree,
+  each with a fresh Rocky host overlay. It is not attributed to Gate 31 and is
+  not masked or relaxed here.
+
+## Evidence
+
+- `make check` -> passed strict formatting, lint, generated inventory, and
+  ownership checks.
+- `make test-unit` -> passed all workspace unit tests, including six policy
+  mutations and four independent host-effect oracles.
+- Ten consecutive `cargo test -p ginux-fs-policy --test host_effect_oracle`
+  runs -> passed after eliminating parallel temporary-directory collisions.
+- `cargo clippy -p ginux-fs-policy --all-targets -- -D warnings` -> passed.
+- `cargo check -p ginux-init --target x86_64-unknown-linux-gnu --release` ->
+  passed.
+- `make test` in an isolated Rocky QEMU host -> passed the complete aggregate
+  target, including host lifecycle, runtime, image, device, process, and kernel
+  view integration.
+- `make test-security` in an isolated Rocky QEMU host -> passed deterministic
+  fuzzing, authority reduction, contract denial, native VFS, devices, kernel
+  views, teardown, and host-effect checks.
+- `make test-recovery test-systemd` -> reached the systemd leg after all prior
+  security/recovery checks passed, then failed because loopback setup returned
+  `EINVAL` and PID 1 exited.
+- Clean detached `origin/main` at `285d025b`, fresh host overlay,
+  `make test-systemd` -> failed with the identical loopback `EINVAL` diagnostic,
+  establishing a pre-existing baseline defect rather than a Gate 31 regression.
+- Final source review traced configured launch and mode 3 from immutable context
+  construction through contract, confinement, inventory, capability, and hook
+  guards; inspected every added unsafe/host syscall site and authority lifetime;
+  confirmed no filesystem claim or new host effect was enabled.
 
 ## Delivery strategy
 
@@ -145,11 +208,14 @@ before the native filesystem lane claims any syscall.
 - Planned commits: gate and inventory; complete call context; capability model;
   independent oracles and mutations; cross-route integration; security review
   and final evidence
-- Actual commits: pending
+- Actual commits: `f9aa3cf1`, `1759b054`, `b8f05a9a`, `47171760`, and
+  `718784ae`; final checkpoint/evidence commit pending
 
 ## Review policy and outcome
 
 Security checkpoint. The approved gate may run autonomously through
 implementation, security review, complete final testing, commit, push, and pull
 request delivery. Stop after delivering the pull request for explicit human
-review; technical passage does not close the gate.
+review. Gate 31 is technically partial because its mandatory systemd command is
+blocked by the documented pre-existing `main` failure; technical passage or
+pull-request delivery does not close the gate.

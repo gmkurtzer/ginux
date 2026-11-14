@@ -2,7 +2,7 @@
 
 ## Current checkpoint
 
-### Active implementation: Gate 31 filesystem mediation foundation
+### Active checkpoint: Gate 31 filesystem mediation foundation
 
 - Gate 31 is approved for implementation and dedicated pull-request delivery
   from `hdae/filesystem-mediation-foundation` against `main`.
@@ -11,13 +11,27 @@
   without making `fs_hooks` claim a syscall.
 - Issue #290 remains the umbrella source. Gate 31 does not close it or enable an
   operation family.
-- The human additionally requires an explicit security-focused review and the
-  complete relevant and aggregate test matrix at the final branch head.
+- Implementation, generated ownership inventory, route interlocks, independent
+  tripwire/race/mutation tests, and explicit security review are complete. The
+  filesystem lane still claims no syscall and adds no host effect.
+- The security review resolved contract-before-hook ordering, fail-closed
+  descriptor-generation overflow, overly broad root rights, and missing
+  alternate filesystem ABI inventory entries. No unresolved in-scope high- or
+  critical-impact finding remains.
+- `make check`, `make test-unit`, focused clippy/check, aggregate `make test`,
+  and `make test-security` pass. `make test-recovery test-systemd` reaches the
+  systemd leg and then fails because IPv4 loopback setup returns `EINVAL` and
+  PID 1 exits.
+- The identical `test-systemd` failure reproduces at clean `origin/main`
+  (`285d025b`) with a separate fresh Rocky host overlay, so it is a pre-existing
+  baseline blocker rather than a Gate 31 regression. The gate remains partial
+  because its mandatory final matrix is not fully green.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Exact next action: implement the bounded immutable filesystem call context
-  and ownership inventory, then continue through the approved Gate 31 plan.
+- Exact next action: commit and deliver the dedicated Gate 31 pull request with
+  the baseline blocker disclosed, then stop for human review and direction on a
+  separate corrective gate for the pre-existing systemd failure.
 
 ### Prior checkpoint: Gate 26 Rocky Linux RPM packaging
 
