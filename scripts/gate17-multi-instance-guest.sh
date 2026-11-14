@@ -44,6 +44,7 @@ stage_instance() {
     stage_name=$1
     stage_peer=$2
     stage_external=$3
+    stage_memory=$4
     stage_directory=$state/$stage_name
     rm -rf "$stage_directory"
     mkdir -p "$stage_directory/root"
@@ -51,6 +52,7 @@ stage_instance() {
     "$runtime" config-merge "$recipe" \
         "instance.id=\"$stage_name\"" \
         "identity.hostname=\"$stage_name\"" \
+        "resources.memory_mib=$stage_memory" \
         "contract.filesystem.deny=[\"/ginux-gate17/blocked-$stage_name\"]" \
         >"$stage_directory/config.toml"
     {
@@ -102,8 +104,8 @@ install -m 755 /var/tmp/ginux-gate17-helper "$helper"
 install -m 755 /var/tmp/ginux-gate17-cli "$controller"
 mkdir -p "$state"
 
-stage_instance gate17-a gate17-b 18181
-stage_instance gate17-b gate17-a 18182
+stage_instance gate17-a gate17-b 18181 256
+stage_instance gate17-b gate17-a 18182 512
 
 "$controller" start gate17-a
 "$controller" start gate17-b
@@ -163,6 +165,8 @@ test "$shared_winners" -eq 1
 test "$shared_conflicts" -eq 1
 grep -Fq 'translated-port=bound' "$state/gate17-a/console.log"
 grep -Fq 'translated-port=bound' "$state/gate17-b/console.log"
+grep -Fq 'memory-limit=268435456' "$state/gate17-a/console.log"
+grep -Fq 'memory-limit=536870912' "$state/gate17-b/console.log"
 
 boot_a=$(sed -n 's/.*boot-id=\([^ ]*\).*/\1/p' "$state/gate17-a/console.log" | tail -n 1)
 boot_b=$(sed -n 's/.*boot-id=\([^ ]*\).*/\1/p' "$state/gate17-b/console.log" | tail -n 1)

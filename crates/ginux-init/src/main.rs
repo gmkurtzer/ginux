@@ -4697,14 +4697,35 @@ fn native_virtual_kernel_read(
                 b"cgroup.kill" => {}
                 b"cpu.max" => native_buffer_append(output, &mut length, b"max 100000\n")?,
                 b"cpu.weight" => native_buffer_append(output, &mut length, b"100\n")?,
-                b"memory.current" => native_buffer_append(output, &mut length, b"0\n")?,
+                b"memory.current" => {
+                    let mut rss_pages = 0u64;
+                    for task in tasks.iter().flatten().filter(|task| task.tracing) {
+                        let view = processes.view(task.virtual_id).ok()?;
+                        if view.tgid == view.id.pid {
+                            let sample = native_proc_sample(task.host_pid)?;
+                            rss_pages = rss_pages.saturating_add(sample.rss_pages.max(0) as u64);
+                        }
+                    }
+                    native_buffer_append_u64(
+                        output,
+                        &mut length,
+                        rss_pages.saturating_mul(4096),
+                    )?;
+                    native_buffer_append(output, &mut length, b"\n")?;
+                }
                 b"memory.events" => native_buffer_append(
                     output,
                     &mut length,
                     b"low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\n",
                 )?,
-                b"memory.high" | b"memory.max" => {
-                    native_buffer_append(output, &mut length, b"max\n")?
+                b"memory.high" => native_buffer_append(output, &mut length, b"max\n")?,
+                b"memory.max" => {
+                    native_buffer_append_u64(
+                        output,
+                        &mut length,
+                        global[3].saturating_mul(1024 * 1024),
+                    )?;
+                    native_buffer_append(output, &mut length, b"\n")?;
                 }
                 b"memory.low" | b"memory.min" | b"pids.current" => {
                     native_buffer_append(output, &mut length, b"0\n")?

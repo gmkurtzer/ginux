@@ -62,7 +62,9 @@ jemalloc extended allocation entry points. Unsupported `mallctl` names return
 - Large freed mappings are immediately returned to the kernel. Arena pages are
   retained on normal fast paths and page-sized free slots are advised away when
   the instance reaches its configured pressure threshold.
-- `/sys/fs/cgroup/memory.max` is read through the instance's virtual kernel view.
+- `/sys/fs/cgroup/memory.max` is read through the instance's virtual kernel view;
+  the value is derived from that instance's configured `resources.memory_mib`,
+  while `memory.current` is generated from only its supervised processes.
   Size classes acquire coarse credits against that hard limit, so fast-path
   accounting is local while aggregate reserved capacity cannot exceed the
   instance-visible ceiling.
