@@ -264,6 +264,8 @@ script.
 - Intended base: `main` after Gate 25 is accepted and merged
 - Pull request: https://github.com/gmkurtzer/ginux/pull/282, merged by the
   human before the `make run-host` follow-up
+- Post-merge follow-up: delivered directly to `main` with explicit human
+  authorization in commits `c5591d2f` and `9ebf369a`
 - Planned commits: gate alignment and installed-file inventory; RPM source and
   spec implementation; canonical path and installation integration; package
   lifecycle tests; documentation and evidence reconciliation

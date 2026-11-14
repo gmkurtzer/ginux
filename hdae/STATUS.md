@@ -22,14 +22,14 @@
 - Fresh regressions pass `make check test-cli test-unit`, `make test-contract`,
   `make test-systemd`, `make test-security test`, and `make demo-gate-26`.
 - Pull request https://github.com/gmkurtzer/ginux/pull/282 was merged by the
-  human. A post-merge follow-up on `codex/run-host-rpm` makes `make run-host`
-  build the RPM, boot the persistent Rocky host, install and verify the RPM,
-  and then open the interactive host shell.
+  human. The verified post-merge `make run-host` follow-up was delivered
+  directly to `main` with explicit human authorization in commits `c5591d2f`
+  and `9ebf369a`; it builds the RPM, boots the persistent Rocky host, installs
+  and verifies the RPM, and then opens the interactive host shell.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Exact next action: deliver the verified `make run-host` follow-up and wait
-  for explicit human acceptance of Gate 26.
+- Exact next action: wait for explicit human acceptance of Gate 26.
 
 - Gate 1 is accepted and closed under the corrected ordinary-host-process
   architecture. Pull request https://github.com/gmkurtzer/ginux-us/pull/1 was
@@ -656,19 +656,17 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Deliver the verified `make run-host` follow-up and wait for explicit human
-acceptance of Gate 26. Gate 11 remains partial and Gate 14 remains explicitly
-deferred.
+Wait for explicit human acceptance of Gate 26. Gate 11 remains partial and
+Gate 14 remains explicitly deferred.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 26 is technically passed and pull request 282 is merged. A
-  verified post-merge `make run-host` follow-up is local on
-  `codex/run-host-rpm`; the gate remains in `gates-todo/` pending human
-  acceptance.
+- Active gate: Gate 26 is technically passed, pull request 282 is merged, and
+  the verified post-merge `make run-host` follow-up is on `main`; the gate
+  remains in `gates-todo/` pending human acceptance.
   Gate 11 remains partial and Gate 14 remains deferred.
 - Active work: Gate 12 is technically passed and delivered in pull request 251;
   Gate 12.1 is technically passed and delivered in pull request 252; Gate
