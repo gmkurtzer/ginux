@@ -27,13 +27,17 @@ lifecycle authority stays inside the owning instance and is revoked reliably.
 
 ## Completed work
 
-- [ ] None.
+- [x] Reviewed virtual process, descriptor, device, root, console, contract,
+  audit, network, and virtual-kernel authority and revocation.
+- [x] Corrected transient control-state addressing and added bounded failure
+  evidence to the concurrent-instance workflow.
 
 ## Remaining work
 
-- [ ] Review each authority class and its generation/lifetime model.
-- [ ] Add cross-instance and post-revocation negative tests.
-- [ ] Resolve in-scope defects and document residual host-kernel trust.
+- [x] Review each authority class and its generation/lifetime model.
+- [x] Add cross-instance and post-revocation negative tests.
+- [x] Resolve in-scope defects and document residual host-kernel trust.
+- [ ] Human review and acceptance of the combined pull request.
 
 ## Acceptance criteria
 
@@ -56,7 +60,12 @@ lifecycle authority stays inside the owning instance and is revoked reliably.
 
 ## Evidence
 
-- Not run.
+- `make test-multi-instance` -> parallel Rocky systemd, isolated overlays and
+  virtual-kernel state, independent lock state, lifecycle, and shared networking passed.
+- Aggregate `make test` -> process, device, network, kernel-view, and generation
+  regressions passed.
+- `make test-security test-recovery` -> teardown, supervisor-loss, and authority
+  revocation paths passed.
 
 ## Decisions and limitations
 
@@ -73,9 +82,9 @@ lifecycle authority stays inside the owning instance and is revoked reliably.
 - Pull request: one combined Gates 32-42 pull request intended
 - Planned commits: authority matrix; multi-instance tests; remediation; final
   evidence
-- Actual commits: pending
+- Actual commits: `94c4f4f4`, `2163caa3`
 
 ## Review policy and outcome
 
-Authorized for autonomous execution in the human-approved Gates 32-42 batch.
-Keep the gate open for one final human checkpoint on the combined pull request.
+Technically passed under the authorized batch. Kept open for the final human
+checkpoint on the combined pull request.

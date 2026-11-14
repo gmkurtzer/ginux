@@ -30,13 +30,20 @@ performance evidence for the allocator without overstating its maturity.
 
 ## Completed work
 
-- [ ] None.
+- [x] Completed claimed ABI, common jemalloc subset, defensive assurance, and
+  Rocky/Ubuntu glibc compatibility coverage.
+- [x] Verified Alpine as a supported Ginux runtime while explicitly excluding
+  the glibc allocator preload from the musl compatibility claim.
+- [x] Retained exact raw samples, provenance, variance, latency, throughput,
+  RSS, fragmentation proxy, and generated report/graph.
+- [x] Completed the full Ginux regression and packaged-product matrices.
 
 ## Remaining work
 
-- [ ] Complete the approved compatibility and differential matrix.
-- [ ] Complete assurance work and reconcile every failure.
-- [ ] Publish matched performance evidence and residual limitations.
+- [x] Complete the approved compatibility and differential matrix.
+- [x] Complete assurance work and reconcile every failure.
+- [x] Publish matched performance evidence and residual limitations.
+- [ ] Human testing and acceptance of the combined pull request.
 
 ## Acceptance criteria
 
@@ -65,7 +72,15 @@ performance evidence for the allocator without overstating its maturity.
 
 ## Evidence
 
-- Not run.
+- `make test-allocator-rocky` -> conformance and 45 exact-commit matched samples
+  passed; raw data and provenance are under `benchmarks/allocator/`.
+- Final mean Ginux/native throughput: 0.680x at 1 thread, 0.665x at 2, and
+  0.573x at 4. The 4-thread Ginux variance is retained in the report.
+- `make test-rpm-metadata test-rpm` -> Rocky and Ubuntu glibc loading, Alpine
+  runtime, install, verify, cache, reinstall, erase, and recovery passed.
+- `make fuzz-security`, `make test-security test-recovery`, aggregate
+  `make test`, and `make test-multi-instance` -> assurance and project
+  regressions passed.
 
 ## Decisions and limitations
 
@@ -73,6 +88,11 @@ performance evidence for the allocator without overstating its maturity.
   not a claim that Ginux independently reproduced its guarantees.
 - Final claims are limited to the tested ABI, platforms, workloads, and proof
   boundaries.
+- No challoc binary row is reported because its upstream tested glibc baseline
+  is incompatible with Rocky 10; fabricating an unsupported build would not be
+  a valid matched control.
+- The benchmark is a bounded replacement-allocation workload under QEMU/TCG,
+  not a general application-performance claim.
 
 ## Delivery strategy
 
@@ -81,9 +101,10 @@ performance evidence for the allocator without overstating its maturity.
 - Pull request: one combined Gates 32-42 pull request intended
 - Planned commits: compatibility matrix; distribution workloads; assurance;
   benchmark reports; packaging and final evidence
-- Actual commits: pending
+- Actual commits: `19377734`, `48577ef8`, `76209bc8`, `6a66fc73`, `da24dff7`,
+  `9f7a9ae7`
 
 ## Review policy and outcome
 
-Final checkpoint for the authorized Gates 32-42 batch. Deliver one combined pull
-request and stop for explicit human testing and acceptance.
+Technically passed. Final checkpoint for the authorized Gates 32-42 batch:
+deliver one combined pull request and stop for explicit human testing and acceptance.

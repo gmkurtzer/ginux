@@ -28,13 +28,17 @@ upgrade, persistence, recovery, and removal behavior.
 
 ## Completed work
 
-- [ ] None.
+- [x] Reviewed helper privileges, workload identity reduction, inherited
+  descriptors, OCI verification, RPM ownership/modes, state lifecycle, and recovery.
+- [x] Added allocator package execution to RPM `%check` and verified packaged
+  loading across supported glibc instances.
 
 ## Remaining work
 
-- [ ] Trace host privilege and installation state transitions.
-- [ ] Add clean-install, upgrade, corruption, interruption, and recovery cases.
-- [ ] Resolve findings and document operator recovery procedures.
+- [x] Trace host privilege and installation state transitions.
+- [x] Add clean-install, upgrade, corruption, interruption, and recovery cases.
+- [x] Resolve findings and document operator recovery procedures.
+- [ ] Human review and acceptance of the combined pull request.
 
 ## Acceptance criteria
 
@@ -58,7 +62,12 @@ upgrade, persistence, recovery, and removal behavior.
 
 ## Evidence
 
-- Not run.
+- `make test-rpm-metadata test-rpm` -> offline build, zero rpmlint errors,
+  clean install, `rpm -V`, Rocky/Ubuntu allocator loading, Alpine runtime,
+  offline cache reuse, reinstall, erase, retained state, and recovery passed.
+- `make test-security test-recovery` -> reduced UID/GID, zero capabilities,
+  `NoNewPrivs`, bounded descriptors, interruption, and cleanup passed.
+- Aggregate `make test` -> OCI digest, path, cache, image, and lifecycle checks passed.
 
 ## Decisions and limitations
 
@@ -72,9 +81,9 @@ upgrade, persistence, recovery, and removal behavior.
 - Pull request: one combined Gates 32-42 pull request intended
 - Planned commits: privilege inventory; package/acquisition tests; remediation;
   recovery documentation and final evidence
-- Actual commits: pending
+- Actual commits: `3046ff27`, `19377734`, `94c4f4f4`, `2163caa3`
 
 ## Review policy and outcome
 
-Authorized for autonomous execution in the human-approved Gates 32-42 batch.
-Keep the gate open for one final human checkpoint on the combined pull request.
+Technically passed under the authorized batch. Kept open for the final human
+checkpoint on the combined pull request.

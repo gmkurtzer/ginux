@@ -31,14 +31,20 @@ silently omit a host-effect path.
 
 ## Completed work
 
-- [ ] None.
+- [x] Inventoried installed trusted executables, host-effect routes, privilege
+  transitions, persistent state, unsafe Rust, FFI, assembly, and allocator seams.
+- [x] Published owner, invariant, evidence, and residual-trust matrices in
+  `docs/security-assurance.md`.
+- [x] Added structural inventory checks for trusted paths, privilege markers,
+  package contents, and approved unsafe files.
 
 ## Remaining work
 
-- [ ] Build and validate the trust and authority inventory.
-- [ ] Publish the threat-to-control and seam-to-evidence matrices.
-- [ ] Record omissions and proposed follow-up ownership without silently fixing
+- [x] Build and validate the trust and authority inventory.
+- [x] Publish the threat-to-control and seam-to-evidence matrices.
+- [x] Record omissions and proposed follow-up ownership without silently fixing
   out-of-scope findings.
+- [ ] Human review and acceptance of the combined pull request.
 
 ## Acceptance criteria
 
@@ -61,7 +67,12 @@ silently omit a host-effect path.
 
 ## Evidence
 
-- Not run.
+- `make check` -> `SECURITY_INVENTORY: PASS`; unowned trusted-seam drift is rejected.
+- `make test-unit` through aggregate `make test` -> all component ownership and
+  invariant suites passed.
+- `make test-security` -> all bounded defensive boundary regressions passed.
+- Manual source-to-effect trace is published in `docs/security-assurance.md`;
+  every installed trusted executable and documented host-effect route has an owner.
 
 ## Decisions and limitations
 
@@ -78,9 +89,9 @@ silently omit a host-effect path.
 - Pull request: one combined Gates 32-42 pull request intended
 - Planned commits: gate alignment; inventory and documentation; completeness
   checks; final evidence
-- Actual commits: pending
+- Actual commits: `94c4f4f4`, `36c742e5`, `2163caa3`
 
 ## Review policy and outcome
 
-Authorized for autonomous execution in the human-approved Gates 32-42 batch.
-Keep the gate open for one final human checkpoint on the combined pull request.
+Technically passed under the authorized batch. Kept open for the final human
+checkpoint on the combined pull request.

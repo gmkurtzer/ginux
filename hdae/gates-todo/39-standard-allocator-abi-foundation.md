@@ -28,13 +28,19 @@ standard C allocation ABI and can run transparently inside a Ginux instance.
 
 ## Completed work
 
-- [ ] None.
+- [x] Implemented the selected standard C allocation ABI and bounded common
+  jemalloc entry-point subset in a Rust shared library.
+- [x] Added native C conformance, threaded stress, diagnostics, RPM `%check`,
+  and opt-in `LD_PRELOAD` integration.
+- [x] Corrected shard collisions so a full preferred shard probes all sibling
+  shards before returning `ENOMEM`.
 
 ## Remaining work
 
-- [ ] Implement and document the approved ABI.
-- [ ] Add native and Ginux conformance fixtures.
-- [ ] Package and load the allocator without runtime-specific application edits.
+- [x] Implement and document the approved ABI.
+- [x] Add native and Ginux conformance fixtures.
+- [x] Package and load the allocator without runtime-specific application edits.
+- [ ] Human review and acceptance of the combined pull request.
 
 ## Acceptance criteria
 
@@ -57,12 +63,18 @@ standard C allocation ABI and can run transparently inside a Ginux instance.
 
 ## Evidence
 
-- Not run.
+- `make test-allocator` -> seven allocator unit/model tests passed.
+- `make test-allocator-rocky` -> standard ABI conformance and all 45 matched
+  native/jemalloc/Ginux benchmark samples passed at exact source commit.
+- `make test-rpm` -> the installed library loaded and ran inside supported
+  Rocky and Ubuntu glibc instances; package verification and reinstall passed.
 
 ## Decisions and limitations
 
 - Gate 38's architecture decision is a hard dependency and may cancel or reshape
   this gate before implementation.
+- The packaged library is glibc x86-64. Alpine's musl runtime remains supported
+  by Ginux but is outside this allocator ABI claim.
 
 ## Delivery strategy
 
@@ -71,10 +83,9 @@ standard C allocation ABI and can run transparently inside a Ginux instance.
 - Pull request: one combined Gates 32-42 pull request intended
 - Planned commits: ABI specification; core allocator; conformance; Ginux loading
   and packaging; final evidence
-- Actual commits: pending
+- Actual commits: `2359a89d`, `3046ff27`, `2b151a26`, `19377734`, `da24dff7`
 
 ## Review policy and outcome
 
-Authorized for autonomous execution after Gate 38 selects the architecture in
-the human-approved batch. Keep the gate open for one final human checkpoint on
-the combined pull request.
+Technically passed under the authorized batch after Gate 38 selected the
+architecture. Kept open for the final human checkpoint on the combined pull request.

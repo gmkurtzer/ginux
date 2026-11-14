@@ -25,13 +25,18 @@ limitation, and security claim into one evidence-backed closure report.
 
 ## Completed work
 
-- [ ] None.
+- [x] Reconciled ten sanitized findings with fixes and permanent evidence.
+- [x] Updated the threat boundary, trust inventory, assurance limitations, and
+  package/runtime authority documentation.
+- [x] Ran the clean final security, recovery, integration, multi-instance, and
+  package matrices.
 
 ## Remaining work
 
-- [ ] Reconcile findings and evidence from Gates 32 through 36.
-- [ ] Resolve missing regressions or documentation.
-- [ ] Publish and verify the final defensive review report.
+- [x] Reconcile findings and evidence from Gates 32 through 36.
+- [x] Resolve missing regressions or documentation.
+- [x] Publish and verify the final defensive review report.
+- [ ] Human review and acceptance of the combined pull request.
 
 ## Acceptance criteria
 
@@ -54,7 +59,13 @@ limitation, and security claim into one evidence-backed closure report.
 
 ## Evidence
 
-- Not run.
+- `make check` -> finding ledger passed with 10 fixed, evidence-mapped findings.
+- `make test-security test-recovery`, aggregate `make test`, and
+  `make test-multi-instance` -> all final defensive and isolation checks passed.
+- `make test-rpm-metadata test-rpm` -> complete supported packaged-product
+  lifecycle passed.
+- `docs/security-review.md` states the bounded result and residual risks; no
+  in-scope unresolved high- or critical-impact finding remains.
 
 ## Decisions and limitations
 
@@ -69,9 +80,9 @@ limitation, and security claim into one evidence-backed closure report.
 - Intended base: `main`
 - Pull request: one combined Gates 32-42 pull request intended
 - Planned commits: finding reconciliation; documentation; final clean evidence
-- Actual commits: pending
+- Actual commits: `36c742e5`, `94c4f4f4`, `2163caa3`, `da24dff7`
 
 ## Review policy and outcome
 
-Authorized for autonomous execution in the human-approved Gates 32-42 batch.
-Keep the gate open for one final human checkpoint on the combined pull request.
+Technically passed under the authorized batch. Kept open for the final human
+checkpoint on the combined pull request.

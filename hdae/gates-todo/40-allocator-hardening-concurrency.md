@@ -27,13 +27,19 @@ errors cannot silently steer allocator state.
 
 ## Completed work
 
-- [ ] None.
+- [x] Separated allocator metadata from caller allocations and added guard
+  pages, checked size classes, randomized placement, and ownership validation.
+- [x] Added sharded atomic slot ownership, cross-thread release, guarded large
+  mappings, pressure reclamation, fork-aware locking, and deterministic invalid free.
+- [x] Fixed reclamation ordering, checked aggregate reservation, and shard
+  fallback defects found during review and stress.
 
 ## Remaining work
 
-- [ ] Implement the approved hardening and concurrency model.
-- [ ] Add defensive invalid-input and concurrency regressions.
-- [ ] Review every unsafe seam and residual assumption.
+- [x] Implement the approved hardening and concurrency model.
+- [x] Add defensive invalid-input and concurrency regressions.
+- [x] Review every unsafe seam and residual assumption.
+- [ ] Human review and acceptance of the combined pull request.
 
 ## Acceptance criteria
 
@@ -54,7 +60,13 @@ errors cannot silently steer allocator state.
 
 ## Evidence
 
-- Not run.
+- `make test-allocator` -> checked geometry, accounting, guards, and shard
+  coverage passed.
+- `make fuzz-security` -> bounded allocator fuzz target passed 158,877 cases in
+  the final five-second campaign.
+- `make test-allocator-rocky` -> single- and multithreaded conformance plus
+  1/2/4-thread benchmark stress completed without allocation failure.
+- `docs/security-assurance.md` inventories every approved allocator unsafe/FFI seam.
 
 ## Decisions and limitations
 
@@ -68,9 +80,9 @@ errors cannot silently steer allocator state.
 - Pull request: one combined Gates 32-42 pull request intended
 - Planned commits: metadata model; hardening; concurrency; unsafe review and
   final evidence
-- Actual commits: pending
+- Actual commits: `02ee1e57`, `36c742e5`, `48577ef8`, `da24dff7`
 
 ## Review policy and outcome
 
-Authorized for autonomous execution in the human-approved Gates 32-42 batch.
-Keep the gate open for one final human checkpoint on the combined pull request.
+Technically passed under the authorized batch. Kept open for the final human
+checkpoint on the combined pull request.

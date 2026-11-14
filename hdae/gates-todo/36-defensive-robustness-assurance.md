@@ -27,13 +27,18 @@ resource-exhaustion, and formal-assurance evidence without offensive testing.
 
 ## Completed work
 
-- [ ] None.
+- [x] Added the allocator to the bounded deterministic fuzz campaign.
+- [x] Added exhaustive allocator geometry, class, accounting, and shard-probe
+  models plus concurrent C stress and failure diagnostics.
+- [x] Documented why whole-runtime formal proof is unsupported and the bounded
+  model/property substitute used instead.
 
 ## Remaining work
 
-- [ ] Select bounded targets from the Gate 32 inventory.
-- [ ] Add reproducible fuzz/property/concurrency suites.
-- [ ] Complete and document the formal-assurance pilot.
+- [x] Select bounded targets from the Gate 32 inventory.
+- [x] Add reproducible fuzz/property/concurrency suites.
+- [x] Complete and document the formal-assurance pilot.
+- [ ] Human review and acceptance of the combined pull request.
 
 ## Acceptance criteria
 
@@ -56,13 +61,21 @@ resource-exhaustion, and formal-assurance evidence without offensive testing.
 
 ## Evidence
 
-- Not run.
+- `make fuzz-security` -> all nine targets passed five-second bounded campaigns,
+  including 158,877 allocator cases in the final run.
+- `make test-allocator` -> seven arithmetic, geometry, accounting, allocation,
+  reallocation, guard, and shard-coverage model tests passed.
+- `make test-security test-recovery` and aggregate `make test` -> property,
+  exhaustion, concurrency, failure, and recovery checks passed.
 
 ## Decisions and limitations
 
 - Fuzzing is confined to project-owned parsers and controlled local fixtures.
 - Formal assurance is scoped to small critical components; it does not certify
   the complete runtime or host kernel.
+- No sound external model was available for the combined raw-syscall, ptrace,
+  loader, and concurrent-caller boundary; the limitation and substitute are
+  explicit in `docs/security-review.md`.
 
 ## Delivery strategy
 
@@ -71,9 +84,9 @@ resource-exhaustion, and formal-assurance evidence without offensive testing.
 - Pull request: one combined Gates 32-42 pull request intended
 - Planned commits: target selection; fuzz/property harnesses; proof pilot;
   findings and final evidence
-- Actual commits: pending
+- Actual commits: `48577ef8`, `36c742e5`, `da24dff7`
 
 ## Review policy and outcome
 
-Authorized for autonomous execution in the human-approved Gates 32-42 batch.
-Keep the gate open for one final human checkpoint on the combined pull request.
+Technically passed under the authorized batch. Kept open for the final human
+checkpoint on the combined pull request.

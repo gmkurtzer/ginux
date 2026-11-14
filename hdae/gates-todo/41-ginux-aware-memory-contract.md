@@ -27,13 +27,20 @@ pressure state without exposing host-global memory information.
 
 ## Completed work
 
-- [ ] None.
+- [x] Selected virtual cgroup `memory.max` and `memory.current` as the narrow
+  allocator interface; no raw host memory tree is exposed.
+- [x] Derived the hard limit from instance `resources.memory_mib` and current
+  usage from only supervised instance processes.
+- [x] Added bounded allocator credits and pressure reclamation using approved
+  `madvise`/`munmap` behavior.
 
 ## Remaining work
 
-- [ ] Specify and approve the allocator-facing memory interface.
-- [ ] Implement pressure-aware reclamation and feature probing.
-- [ ] Prove instance isolation and update recipe examples.
+- [x] Specify and select the narrow allocator-facing memory interface under the
+  batch's delegated interface-selection authority.
+- [x] Implement pressure-aware reclamation and feature probing.
+- [x] Prove instance isolation and update documentation/examples.
+- [ ] Human review and acceptance of the combined pull request.
 
 ## Acceptance criteria
 
@@ -57,7 +64,12 @@ pressure state without exposing host-global memory information.
 
 ## Evidence
 
-- Not run.
+- Allocator unit/model tests -> bounded accounting never wraps or exceeds the
+  instance-visible limit.
+- `make test-kernel-views`, aggregate `make test`, and `make test-multi-instance`
+  -> virtual memory views and distinct instance limits remain private.
+- `make test-security test-recovery` -> virtual-kernel, pressure, and failure
+  behavior passed without host-tree exposure.
 
 ## Decisions and limitations
 
@@ -71,10 +83,9 @@ pressure state without exposing host-global memory information.
 - Pull request: one combined Gates 32-42 pull request intended
 - Planned commits: interface decision; virtual telemetry; allocator integration;
   isolation tests and documentation
-- Actual commits: pending
+- Actual commits: `e5f7da76`, `36c742e5`, `94c4f4f4`
 
 ## Review policy and outcome
 
-Authorized to choose the narrowest interface supported by Gate 38 evidence and
-continue autonomously in the human-approved batch. Keep the gate open for one
-final human checkpoint on the combined pull request.
+The batch selected virtual cgroup views as the narrowest supported interface.
+Technically passed; kept open for the final human checkpoint on the combined PR.

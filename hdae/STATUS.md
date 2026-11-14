@@ -24,7 +24,37 @@
 
 ## Current checkpoint
 
-### Active implementation: Gate 26 Rocky Linux RPM packaging
+### Gates 32-42 security and allocator batch
+
+- Gates 32 through 42 are technically passed on
+  `hdae/security-allocator-initiative` and remain in `gates-todo/` for the
+  authorized final human testing and acceptance checkpoint.
+- The defensive review inventoried trusted seams, closed ten sanitized findings,
+  added structural drift checks, and found no unresolved in-scope high- or
+  critical-impact issue. This is a bounded project-owned review, not an
+  independent audit or production-readiness claim.
+- The selected allocator is an opt-in, independent Rust shared library with the
+  standard C ABI and a bounded common jemalloc subset. It is packaged at
+  `/usr/lib64/ginux/libginux_allocator.so` and remains subject to the ordinary
+  instance contract.
+- The supported allocator claim is glibc x86-64 on the tested Rocky 10 and
+  Ubuntu 24 workloads. Alpine remains a supported Ginux runtime, but its musl
+  userspace is excluded from the allocator preload claim.
+- Exact-commit Rocky QEMU/TCG means for the Ginux allocator are 0.680x native at
+  one thread, 0.665x at two, and 0.573x at four. Raw samples, variance, RSS,
+  fragmentation proxy, and provenance are retained under
+  `benchmarks/allocator/`.
+- Final evidence passes `make check`, aggregate `make test`,
+  `make test-security test-recovery`, `make test-multi-instance`,
+  `make test-allocator-rocky`, and `make test-rpm-metadata test-rpm`.
+- Active skill: `hdae-development`
+- Skill path: `.agents/skills/hdae-development/SKILL.md`
+- Reload after context shift: required
+- Exact next action: commit this final checkpoint, compare with `origin/main`,
+  rebase if needed, rerun the lightweight post-rebase checks, push the branch,
+  open the combined pull request, and stop for human testing.
+
+### Historical checkpoint: Gate 26 Rocky Linux RPM packaging
 
 - Gate 26 is technically passed locally on `hdae/rpm-packaging` and remains a
   human checkpoint in `gates-todo/`.
@@ -276,6 +306,23 @@ scope, threat model, and invariants.
 
 ## Resumption
 
+### Current resumable checkpoint
+
+- Active batch: Gates 32-42, technically passed, awaiting one combined pull
+  request and final human testing.
+- Working branch: `hdae/security-allocator-initiative`; intended base:
+  `main`.
+- Latest implementation commits: `da24dff7` fixes allocator shard fallback;
+  `9f7a9ae7` retains exact-commit matched performance evidence.
+- Open limitations: upstream challoc has no valid Rocky 10 binary control;
+  Alpine/musl is outside the allocator preload claim; formal assurance is
+  bounded to named model/property/fuzz evidence; the host kernel and loader
+  remain trusted.
+- Exact next action: update delivery records with the combined PR URL and stop
+  for human testing and acceptance.
+
+### Historical checkpoints
+
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
@@ -384,6 +431,24 @@ scope, threat model, and invariants.
   option, and the direct-safe catalog remains independently bounded.
 
 ## Evidence
+
+### Gates 32-42 final evidence
+
+- `make check` -> formatting, strict lint, security inventory, and ten-finding
+  ledger passed.
+- `make test` -> complete component and isolated QEMU regression aggregate passed.
+- `make test-security test-recovery` -> nine bounded fuzz targets, native
+  boundary, contract, device, kernel-view, systemd recovery, and fail-closed
+  lifecycle checks passed.
+- `make test-multi-instance` -> concurrent Rocky systemd instances, isolated
+  roots/views/contracts/lifecycle, and documented shared networking passed.
+- `make test-allocator-rocky` -> C ABI conformance and 45 exact-commit matched
+  native/jemalloc/Ginux samples passed.
+- `make test-rpm-metadata test-rpm` -> offline build, zero rpmlint errors,
+  clean install, verify, Rocky/Ubuntu allocator loading, Alpine runtime, offline
+  cache reuse, reinstall, erase, retained state, and recovery passed.
+
+### Historical evidence
 
 - Repository inspection before establishment: clean `main` branch with no
   pre-existing root `hdae/` project ledger.
@@ -643,6 +708,22 @@ scope, threat model, and invariants.
   after the final interactive workflow and evidence review.
 
 ## Open decisions and limitations
+
+### Gates 32-42 limitations
+
+- No in-scope high- or critical-impact finding remains from the bounded review;
+  this is not independent certification and does not establish absence of defects.
+- Upstream challoc is an architecture control only. Its tested glibc baseline is
+  newer than Rocky 10, so no unsupported or misleading challoc binary row is
+  reported.
+- The packaged allocator is glibc x86-64 and opt-in. Alpine/musl allocator
+  preload is unsupported even though Alpine remains a supported Ginux runtime.
+- The allocator benchmark is one bounded replacement-allocation workload under
+  QEMU/TCG. It does not support a universal performance claim.
+- The formal-assurance substitute covers named pure invariants, controlled
+  fuzzing, and end-to-end tests; it is not a whole-runtime proof.
+
+### Historical limitations
 
 - Human direction selected the security-focused handcrafted x86-64 interpreter
   for Gate 3 and accepted its evidence. On 2026-11-03 the human selected native

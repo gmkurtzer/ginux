@@ -31,13 +31,19 @@ allocator.
 
 ## Completed work
 
-- [ ] None.
+- [x] Inventoried the standard C ABI, common jemalloc subset, memory syscalls,
+  virtual cgroup inputs, loader path, packaging, licensing, and contract needs.
+- [x] Compared support-only, vendored/forked, and independent Ginux designs.
+- [x] Selected a small opt-in independent Ginux allocator as the bounded
+  architecture authorized by the batch.
 
 ## Remaining work
 
-- [ ] Establish matched allocator controls and required interfaces.
-- [ ] Evaluate upstream integration and independent implementation options.
-- [ ] Present an architecture recommendation for explicit human approval.
+- [x] Establish matched allocator controls and required interfaces.
+- [x] Evaluate upstream integration and independent implementation options.
+- [x] Present and record the architecture recommendation under the delegated
+  architecture-selection authority for this batch.
+- [ ] Human review and acceptance of the combined pull request.
 
 ## Acceptance criteria
 
@@ -62,7 +68,12 @@ allocator.
 
 ## Evidence
 
-- Not run.
+- `docs/allocator-evaluation.md` -> records the three-option decision, trust,
+  compatibility, performance, verification, and maintenance tradeoffs.
+- C ABI conformance and matched Rocky native/jemalloc/Ginux controls passed
+  through `make test-allocator-rocky` and `make test-rpm`.
+- Contract trace documents `mmap`, `mprotect`, `munmap`, `madvise`, `getrandom`,
+  file reads, and instance-private cgroup memory inputs.
 
 ## Decisions and limitations
 
@@ -71,6 +82,9 @@ allocator.
   dispatcher.
 - An independent allocator is conditional on this gate's human-approved
   architecture decision.
+- A digest-pinned challoc binary was not a valid Rocky 10 control because the
+  upstream tested baseline requires a newer glibc. Upstream challoc remains an
+  architecture control; no inherited compatibility or proof claim is made.
 
 ## Delivery strategy
 
@@ -79,10 +93,10 @@ allocator.
 - Pull request: one combined Gates 32-42 pull request intended
 - Planned commits: control harness; ABI and contract inventory; matched results;
   architecture decision
-- Actual commits: pending
+- Actual commits: `2359a89d`, `3046ff27`, `19377734`, `6a66fc73`
 
 ## Review policy and outcome
 
-Authorized to select the best-supported architecture from the recorded evidence
-and continue through Gates 39-42 in the human-approved batch. Keep the gate open
-for one final human checkpoint on the combined pull request.
+The authorized batch selected the independent opt-in Ginux allocator and
+continued through Gates 39-42. Technically passed; kept open for the final human
+checkpoint on the combined pull request.

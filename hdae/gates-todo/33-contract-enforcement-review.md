@@ -31,13 +31,17 @@ handling of mutable inputs, unknown operations, and stale catalogs.
 
 ## Completed work
 
-- [ ] None.
+- [x] Traced contract compilation, dispatch, denial, result translation, and
+  audit routes against the immutable effective contract.
+- [x] Added permanent fail-closed checks and remediated systemd probe fallback,
+  accepted-socket classification, wait observation, and confined-filesystem identity.
 
 ## Remaining work
 
-- [ ] Trace all enforcement routes and resolve every in-scope finding.
-- [ ] Add decision-order, input-snapshot, and fail-closed regressions.
-- [ ] Document residual assumptions and unsupported operation classes.
+- [x] Trace all enforcement routes and resolve every in-scope finding.
+- [x] Add decision-order, input-snapshot, and fail-closed regressions.
+- [x] Document residual assumptions and unsupported operation classes.
+- [ ] Human review and acceptance of the combined pull request.
 
 ## Acceptance criteria
 
@@ -63,7 +67,12 @@ handling of mutable inputs, unknown operations, and stale catalogs.
 
 ## Evidence
 
-- Not run.
+- `make test-contract` and aggregate `make test` -> immutable compilation,
+  unknown-input denial, selective/paranoid routing, and catalog checks passed.
+- `make test-security test-recovery` -> defensive mutation, denial-before-effect,
+  supervisor-loss, and fail-closed regressions passed.
+- Complete Rocky systemd recovery matrix -> cold, warm, repeat, offline, DNF
+  failure, configured failure, and shutdown paths passed.
 
 ## Decisions and limitations
 
@@ -79,9 +88,9 @@ handling of mutable inputs, unknown operations, and stale catalogs.
 - Pull request: one combined Gates 32-42 pull request intended
 - Planned commits: route inventory; decision mutations; remediation; final
   documentation and evidence
-- Actual commits: pending
+- Actual commits: `36c742e5`, `2163caa3`
 
 ## Review policy and outcome
 
-Authorized for autonomous execution in the human-approved Gates 32-42 batch.
-Keep the gate open for one final human checkpoint on the combined pull request.
+Technically passed under the authorized batch. Kept open for the final human
+checkpoint on the combined pull request.
