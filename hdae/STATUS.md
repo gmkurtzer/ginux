@@ -2,30 +2,32 @@
 
 ## Current checkpoint
 
-### Active implementation: Gate 25 declarative operator CLI
+### Active implementation: Gate 26 Rocky Linux RPM packaging
 
-- Gate 25 defines a complete CLI inventory, a human-approved command-design
-  checkpoint, migration from the shell controller to a declarative Rust
-  command framework, and an explicit private boundary around runtime/backend
-  commands such as `native`.
-- The dedicated branch is synchronized with current `origin/main`, including
-  merged pull request 272.
-- `docs/cli-command-model.md` inventories the public controller, privileged
-  helper, freestanding runtime, test/benchmark tools, and their known callers.
-  It proposes a flat top-level operator taxonomy, a versioned private helper
-  protocol, generated help/version behavior, and the disposition of every
-  runtime selector.
-- The approved Rust `clap` CLI is implemented and installed separately from the
-  private runtime. Public `diff` is absent and rejected with parser exit 2.
-- Fresh evidence passes `cargo test -p ginux-cli`, `make test-cli`, `make
-  check`, `make build`, `make test-config`, and the Gate 12 CLI workflow in the
-  Rocky QEMU host.
-- Pull request: https://github.com/gmkurtzer/ginux/pull/273
+- Gate 26 is technically passed locally on `hdae/rpm-packaging` and remains a
+  human checkpoint in `gates-todo/`.
+- The branch builds one Rocky Linux 10 x86-64 `ginux` RPM and matching SRPM
+  from clean source and vendored-dependency archives with offline Cargo and
+  rpmbuild execution.
+- The package installs `/usr/bin/ginux`, private programs under
+  `/usr/libexec/ginux`, distribution-prefixed recipes under
+  `/etc/ginux/examples`, documentation and license files, and a tmpfiles policy.
+- Compiled Rust now acquires, verifies, caches, and directly expands OCI layers.
+  Persistent blobs live below `/var/lib/ginux/cache/oci/blobs/sha256`, expanded
+  roots below `/var/lib/ginux/instances/NAME/root`, and transient control state
+  below `/run/ginux/instances/NAME`.
+- Fresh package evidence passes metadata checks, rpmlint with zero errors, clean
+  DNF install and `rpm -V`, online import, network-isolated cache reuse,
+  start/status/stop, reinstall, state-preserving erase, and reinstall recovery.
+- Fresh regressions pass `make check test-cli test-unit`, `make test-contract`,
+  `make test-systemd`, `make test-security test`, and `make demo-gate-26`.
+- The branch is pushed and delivered in pull request
+  https://github.com/gmkurtzer/ginux/pull/282 for human review.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Exact next action: complete the remaining Gate 25 regression matrix, record
-  criterion-level evidence, and stop for final human acceptance.
+- Exact next action: record pull request 282 in the gate checkpoint, push that
+  signed record, and wait for human review and acceptance.
 
 - Gate 1 is accepted and closed under the corrected ordinary-host-process
   architecture. Pull request https://github.com/gmkurtzer/ginux-us/pull/1 was
@@ -253,15 +255,16 @@ scope, threat model, and invariants.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: none. Gates 18 and 19 are accepted and closed. Gate 11 remains
-  partial, Gate 14 is deferred, and Gate 16 is abandoned.
-- Last evidence: `make test-generic-oci`, `make demo-gate-19`,
-  `make test-gate19-native-examples`, `make check`, `make test-config`,
-  `make test-gate975-hooks`, `make test-security`, `make test-systemd`, and
-  aggregate `make test` passed. Rocky and Ubuntu reached systemd
-  `multi-user.target`; Alpine reached its BusyBox init console login.
-- Exact next action: obtain human direction on whether to resume or defer the
-  partial Gate 11 performance target. Gate 14 remains deferred.
+- Active gate: Gate 26 is technically passed locally and awaits its human
+  checkpoint. Gate 11 remains partial, Gate 14 is deferred, and Gate 16 is
+  abandoned.
+- Last evidence: `make rpm`, `./scripts/test-rpm-metadata.sh`,
+  `./scripts/test-rpm.sh`, `make check test-cli test-unit`, `make
+  test-contract`, `make test-systemd`, `make test-security test`, and `make
+  demo-gate-26` passed. The package lifecycle includes a clean install, online
+  OCI import, network-isolated cache reuse, reinstall, retained-state erase,
+  and recovery after reinstall.
+- Exact next action: wait for human review and acceptance of pull request 282.
 - The final CLI correction makes required configuration files positional:
   `instance create NAME FILE`, `validate FILE`, `inspect FILE`, and
   `explain FILE OPERATION`. Fresh `make check`, `make test-contract`, and
@@ -650,16 +653,16 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-For Gate 25, implement the approved public and private command model without a
-public `diff` command. Gate 11 remains partial and Gate 14 remains explicitly
-deferred.
+Wait for human review and acceptance of Gate 26 pull request 282. Gate 11
+remains partial and Gate 14 remains explicitly deferred.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 25 command design is approved and implementation is active.
+- Active gate: Gate 26 is technically passed and delivered in pull request 282;
+  it remains in `gates-todo/` pending human acceptance.
   Gate 11 remains partial and Gate 14 remains deferred.
 - Active work: Gate 12 is technically passed and delivered in pull request 251;
   Gate 12.1 is technically passed and delivered in pull request 252; Gate
@@ -683,7 +686,11 @@ deferred.
   open from `hdae/contract-network-ux` against the Gate 11 branch.
 - Gate 12.1 delivery: pull request https://github.com/gmkurtzer/ginux/pull/252
   is open from `hdae/virtual-kernel-filesystems` against the Gate 12 branch.
-- Last evidence: Gate 19 passed `make test-generic-oci`,
+- Last evidence: Gate 26 passed `make rpm`,
+  `./scripts/test-rpm-metadata.sh`, `./scripts/test-rpm.sh`, `make check
+  test-cli test-unit`, `make test-contract`, `make test-systemd`, `make
+  test-security test`, and `make demo-gate-26`. Gate 19 previously passed
+  `make test-generic-oci`,
   `make demo-gate-19`, `make test-gate19-native-examples`, `make check`,
   `make test-config`, `make test-gate975-hooks`, `make test-security`,
   `make test-systemd`, and aggregate `make test`. Gate 12.1 also passed `make

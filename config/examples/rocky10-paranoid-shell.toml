@@ -1,17 +1,19 @@
+# High-inspection Rocky Linux 10 systemd environment. Every syscall is mediated in
+# userspace, trading performance for complete syscall visibility and control.
 schema_version = 1
 
 [instance]
-id = "rocky"
+id = "paranoid-shell"
 root = "docker.io/rockylinux/rockylinux@sha256:7a18ce2c9c1e0d8735f3e72685f9666150af25036e7f7b5ee4eede3754496f8c"
 init = "/sbin/init"
 args = ["--system", "--unit=multi-user.target"]
 environment = ["container=ginux"]
 
 [identity]
-hostname = "ginux"
+hostname = "ginux-paranoid"
 
 [resources]
-vcpus = 2
+vcpus = 1
 memory_mib = 1024
 
 [execution]
@@ -26,7 +28,7 @@ allow = ["*"]
 deny = ["device.mmio.direct", "device.dma.direct", "network.packet.raw"]
 
 [contract.syscalls]
-control = "selective"
+control = "paranoid"
 default = "deny"
 allow = ["*"]
 deny = []
@@ -34,21 +36,19 @@ deny = []
 [contract.filesystem]
 default = "deny"
 read = ["/"]
-write = ["/"]
-create = ["/"]
-# A directory rule applies to the directory and all descendants, but not a
-# neighboring prefix such as /ginux-demo/read-only-other.
-deny = ["/ginux-demo/read-only"]
+write = ["/run", "/var", "/root", "/tmp"]
+create = ["/run", "/var", "/root", "/tmp"]
+deny = ["/boot", "/etc", "/usr"]
 
 [contract.network]
 default = "deny"
-inbound = ["tcp:*", "udp:*"]
-outbound = ["tcp:*", "udp:*"]
+inbound = []
+outbound = []
 
 [contract.devices]
 default = "deny"
 read = ["/dev/console", "/dev/tty", "/dev/null", "/dev/zero", "/dev/random", "/dev/urandom"]
-write = ["/dev/console", "/dev/tty", "/dev/null", "/dev/zero", "/dev/random", "/dev/urandom"]
+write = ["/dev/console", "/dev/tty", "/dev/null", "/dev/zero"]
 create = []
 
 [contract.privileges]
@@ -58,8 +58,8 @@ setgid = []
 
 [contract.process]
 default = "deny"
-max_processes = 4096
-max_threads = 4096
+max_processes = 128
+max_threads = 256
 signals = ["*"]
 ptrace = "deny"
 namespace_create = []
@@ -76,18 +76,11 @@ sys_write = []
 assignments = ["root-overlay"]
 
 [devices]
-assignments = ["console", "null", "zero", "random", "net0"]
-
-[network]
-backend = "shared"
+assignments = ["console", "null", "zero", "random"]
 
 [hooks]
-# Pre-boot commands run inside the mediated instance root before the final
-# filesystem restrictions activate.
 # CHANGEME: this example sets the development root password to "ginux".
 # Replace it before using this recipe outside a local test environment.
-# The remaining hooks create policy test paths and adapt the minimal Rocky
-# image for systemd.
 pre_boot = [
   "/usr/bin/cp --remove-destination /usr/share/zoneinfo/UTC /etc/localtime",
   """
@@ -95,11 +88,6 @@ pre_boot = [
   /usr/bin/cat /etc/.shadow.ginux > /etc/shadow
   /usr/bin/rm -f /etc/.shadow.ginux
   /usr/bin/awk -F: '$1 == "root" && $2 != "" {found=1} END {exit !found}' /etc/shadow
-  """,
-  """
-  /usr/bin/mkdir -p /ginux-demo/read-only/child /ginux-demo/writable /ginux-demo/read-only-other
-  /usr/bin/printf protected > /ginux-demo/read-only/child/value
-  /usr/bin/printf writable > /ginux-demo/writable/value
   """,
   """
   /usr/bin/sh -c 'for u in dbus-broker.service dbus.service dbus.socket modprobe@.service systemd-userdbd.service systemd-userdbd.socket; do
@@ -130,7 +118,7 @@ timeout_seconds = 30
 failure = "stop"
 
 [audit]
-enabled = false
+enabled = true
 
 [failure]
 policy = "stop"

@@ -10,7 +10,7 @@ BASELINE := target/$(X86_TARGET)/release/baseline-runner
 RUNTIME_FIXTURE := target/$(X86_TARGET)/release/runtime-fixture
 PROCESS_NATIVE_FIXTURE := target/$(X86_TARGET)/release/process-native-fixture
 
-.PHONY: doctor host-image-fetch host-image-verify host-boot-test host-run host-reset test-host-lifecycle image-helper-fetch image-prepare instance-image-fetch instance-image-verify instance-image-prepare systemd-image-fetch systemd-image-verify systemd-image-prepare test-image test-oci-image test-generic-oci test-oci-layers test-vfs test-native-vfs image-cache-clean build check-name check-instance-terminology check test-cli test-ci-changes contract-doc test-contract test-contract-runtime test test-unit test-intercept test-runtime test-config test-instance test-instance-terminology test-process build-process-fixtures test-process-native test-devices test-kernel-views test-systemd test-systemd-live test-systemd-interactive test-multi-instance test-gate19-native-examples test-gate975-network test-gate975-hooks test-gate125-lock test-cgroup test-block test-network test-security test-recovery check-architecture-doc check-security-doc fuzz-security test-bench-compare test-gate15-report bench-prepare bench bench-baseline bench-compare bench-systemd bench-report bench-block bench-network bench-modes-prepare bench-modes bench-modes-report demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 demo-gate-5 demo-gate-6 demo-gate-7 demo-gate-8 demo-gate-9 demo-gate-9.5 demo-gate-9.75 demo-gate-10 demo-gate-10.25 demo-gate-10.5 demo-gate-11 demo-gate-12 demo-gate-12.1 demo-gate-12.25 demo-gate-12.5 demo-gate-13 demo-gate-15 demo-gate-17 demo-gate-19 demo-gate-25 clean
+.PHONY: doctor host-image-fetch host-image-verify host-boot-test host-run host-reset test-host-lifecycle image-helper-fetch image-prepare instance-image-fetch instance-image-verify instance-image-prepare systemd-image-fetch systemd-image-verify systemd-image-prepare test-image test-oci-image test-generic-oci test-oci-layers test-vfs test-native-vfs image-cache-clean build check-name check-instance-terminology check test-cli test-ci-changes contract-doc test-contract test-contract-runtime test test-unit test-intercept test-runtime test-config test-instance test-instance-terminology test-process build-process-fixtures test-process-native test-devices test-kernel-views test-systemd test-systemd-live test-systemd-interactive test-multi-instance test-gate19-native-examples test-gate975-network test-gate975-hooks test-gate125-lock test-cgroup test-block test-network test-security test-recovery check-architecture-doc check-security-doc fuzz-security test-bench-compare test-gate15-report bench-prepare bench bench-baseline bench-compare bench-systemd bench-report bench-block bench-network bench-modes-prepare bench-modes bench-modes-report rpm-source rpm test-rpm-metadata test-rpm demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 demo-gate-5 demo-gate-6 demo-gate-7 demo-gate-8 demo-gate-9 demo-gate-9.5 demo-gate-9.75 demo-gate-10 demo-gate-10.25 demo-gate-10.5 demo-gate-11 demo-gate-12 demo-gate-12.1 demo-gate-12.25 demo-gate-12.5 demo-gate-13 demo-gate-15 demo-gate-17 demo-gate-19 demo-gate-25 demo-gate-26 clean
 
 doctor:
 	@./scripts/doctor.sh
@@ -90,6 +90,7 @@ test-ci-changes:
 check: check-name check-instance-terminology
 	cargo fmt --check
 	cargo clippy -p ginux-cli --all-targets -- -D warnings
+	cargo clippy -p ginux-oci --all-targets -- -D warnings
 	cargo clippy -p ginux-contract --all-targets -- -D warnings
 	cargo clippy -p ginux-core --all-targets -- -D warnings
 	cargo clippy -p ginux-instance --all-targets -- -D warnings
@@ -118,6 +119,7 @@ test-contract-runtime: build instance-image-prepare
 
 test-unit:
 	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-cli
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-oci
 	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-core
 	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-contract
 	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-instance
@@ -177,7 +179,7 @@ test-kernel-views: build
 test-systemd: build systemd-image-prepare
 	@ROCKY_NETWORK_RESTRICT=on ./scripts/with-rocky-host.sh ./scripts/test-systemd.sh
 
-test-gate19-native-examples: build
+test-gate19-native-examples: rpm
 	@ROCKY_NETWORK_RESTRICT=off ROCKY_SSH_PORT=22419 ROCKY_PID_FILE=build/rocky-gate19-host.pid ROCKY_SERIAL_LOG=build/rocky-gate19-host-serial.log ROCKY_OVERLAY_DISK=build/rocky-gate19-host-overlay.qcow2 ./scripts/with-rocky-host.sh ./scripts/test-gate19-native-examples.sh
 
 test-generic-oci:
@@ -210,7 +212,7 @@ test-block:
 test-network:
 	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-devices network_
 
-host-run: build
+host-run: rpm
 	@./scripts/run-host.sh
 
 host-reset:
@@ -226,6 +228,24 @@ test-native-vfs: build instance-image-prepare
 	@./scripts/with-rocky-host.sh ./scripts/test-native-vfs.sh
 
 test: check test-cli test-gate15-report test-host-lifecycle test-unit test-intercept test-runtime test-config test-instance test-image test-devices test-process test-kernel-views
+
+rpm-source:
+	@./scripts/prepare-rpm-sources.sh
+
+rpm: rpm-source
+	@./scripts/build-rpm.sh
+
+test-rpm-metadata: rpm
+	@./scripts/test-rpm-metadata.sh
+
+test-rpm: rpm
+	@./scripts/test-rpm.sh
+
+demo-gate-26: test-rpm-metadata test-rpm
+	@rpm_file=$$(find build/rpm/RPMS -type f -name 'ginux-*.x86_64.rpm' -print | sed -n '1p'); \
+		rpm -qip "$$rpm_file"; \
+		rpm -qpl "$$rpm_file"; \
+		printf '%s\n' 'GATE26_DEMO: PASS (offline build, metadata, install, verify, cache reuse, erase, retained state, reinstall)'
 
 fuzz-security:
 	./scripts/fuzz-security.sh
@@ -251,7 +271,7 @@ test-recovery:
 	@$(MAKE) test-systemd
 	@printf '%s\n' 'test-recovery: PASS (startup failure, supervisor loss, forced stop, audit bound, controlled shutdown)'
 
-bench-prepare: build
+bench-prepare: rpm
 	@ROCKY_NETWORK_RESTRICT=off ./scripts/with-gate11-host.sh ./scripts/prepare-gate11-benchmark.sh
 
 bench-baseline: build
@@ -380,11 +400,11 @@ demo-gate-17: doctor build systemd-image-prepare
 demo-gate-19:
 	@printf '%s\n' 'Gate 19: validate readable hooks and five operator-facing instance recipes.'
 	@cargo test -q -p ginux-instance
-	@printf '%s\n' '  minimal Rocky systemd: config/instance-rocky-systemd.toml'
-	@printf '%s\n' '  constrained agent:    config/examples/agent-workspace.toml'
-	@printf '%s\n' '  Ubuntu blank CMS:     config/examples/network-service.toml'
-	@printf '%s\n' '  paranoid shell:       config/examples/paranoid-shell.toml'
-	@printf '%s\n' '  Alpine native init:   config/examples/alpine-native.toml'
+	@printf '%s\n' '  minimal Rocky systemd: config/examples/rocky10-systemd.toml'
+	@printf '%s\n' '  constrained agent:    config/examples/rocky10-agent-workspace.toml'
+	@printf '%s\n' '  Ubuntu blank CMS:     config/examples/ubuntu24-network-service.toml'
+	@printf '%s\n' '  paranoid shell:       config/examples/rocky10-paranoid-shell.toml'
+	@printf '%s\n' '  Alpine native init:   config/examples/alpine3.22-native.toml'
 	@printf '%s\n' 'Gate 19 example validation: PASS'
 
 demo-gate-25: doctor build

@@ -2,9 +2,9 @@
 set -eu
 
 printf '%s\n' 'Gate 10.5 self-contained instance recipe'
-grep -F '[contract]' config/instance-rocky-systemd.toml
-grep -F '[contract.syscalls]' config/instance-rocky-systemd.toml
-grep -F 'default = "deny"' config/instance-rocky-systemd.toml
+grep -F '[contract]' config/examples/rocky10-systemd.toml
+grep -F '[contract.syscalls]' config/examples/rocky10-systemd.toml
+grep -F 'default = "deny"' config/examples/rocky10-systemd.toml
 grep -E '^Contract valid: .* digest=[0-9a-f]{64} ' build/gate105-instance-validate.log
 
 printf '%s\n' 'Gate 10.5 explanation and comparison'

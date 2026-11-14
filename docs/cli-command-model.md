@@ -6,16 +6,20 @@ implementation begins.
 
 ## Executable boundary
 
-The installed system currently has three command layers:
+The installed system has four command layers:
 
-1. `/usr/local/bin/ginux` is the public operator command. It is currently
-   `scripts/ginux-host-controller.sh` and hand-parses its arguments.
-2. `/usr/local/libexec/ginux-instance-helper` is the privileged instance-state
-   helper. It is not an operator command, although several of its internal
-   verbs currently share names with public commands.
-3. `/usr/local/libexec/ginux-runtime` is the freestanding `no_std` workload
+1. `/usr/bin/ginux` is the compiled public operator command built from
+   `crates/ginux-cli`; its declarative parser and generated help are the only
+   supported operator interface.
+2. `/usr/libexec/ginux/ginux-helper` is the privileged instance-state
+   helper. It is not an operator command even where internal protocol verbs
+   share names with public commands.
+3. `/usr/libexec/ginux/ginux-runtime` is the freestanding `no_std` workload
    runtime built from `crates/ginux-init`. Its selectors are backend, fixture,
    and component-test entry points, not operator commands.
+4. `/usr/libexec/ginux/ginux-image` is the compiled OCI acquisition and
+   direct layer-expansion tool built from `crates/ginux-oci`; it is invoked by
+   the helper and has no public command alias.
 
 Gate 25 replaces only the public parser with a normal Rust host binary using
 `clap`. It does not link `clap` into the freestanding runtime and does not make
@@ -129,7 +133,7 @@ These are outside the operator CLI and remain explicitly classified:
 | `security-fuzzer` | `TARGET SECONDS ARTIFACT_DIRECTORY` | bounded test-only fuzzer used by `fuzz-security.sh` |
 | `baseline-runner` | no arguments | benchmark fixture used by baseline targets |
 | `managed-payload`, `runtime-fixture`, `process-native-fixture` | fixture-specific arguments | test payloads, never control-plane commands |
-| `/usr/local/libexec/ginux-image/*` | script-specific image references and cache/work paths | private image acquisition and preparation tools called by the instance helper or maintainer scripts |
+| `/usr/libexec/ginux/ginux-image` | digest-qualified image reference, OCI cache, and destination root | compiled private image acquisition and direct layer-expansion tool called by the instance helper |
 
 ## Proposed public command specification
 
@@ -228,9 +232,8 @@ group is added.
 5. Preserve the current attach privilege transition and terminal behavior;
    move its public orchestration into Rust while leaving only narrow endpoint
    authorization and resize operations in the helper.
-6. Install the Rust CLI at `/usr/local/bin/ginux`, the freestanding runtime at
-   `/usr/local/libexec/ginux-runtime`, and the private helper under
-   `/usr/local/libexec`.
+6. Install the Rust CLI at `/usr/bin/ginux`; install the freestanding runtime,
+   compiled image tool, and privileged helper under `/usr/libexec/ginux/`.
 7. Add generated-help snapshots, parser/negative-state tests, command-inventory
    consistency checks, installation assertions, and the existing lifecycle
    and systemd regressions before removing the shell public controller.

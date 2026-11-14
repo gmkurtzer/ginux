@@ -4,7 +4,7 @@ These recipes are complete, self-contained starting points. Copy one, change
 its instance identity and policy, then validate it before importing it:
 
 ```sh
-cp config/examples/agent-workspace.toml my-agent.toml
+cp config/examples/rocky10-agent-workspace.toml my-agent.toml
 ginux validate my-agent.toml
 ginux inspect my-agent.toml
 ginux import my-agent my-agent.toml
@@ -12,11 +12,11 @@ ginux import my-agent my-agent.toml
 
 | Recipe | Purpose | Important tradeoff |
 | --- | --- | --- |
-| [`../instance-rocky-systemd.toml`](../instance-rocky-systemd.toml) | Minimal Rocky systemd environment with an interactive login | Broad compatibility policy for the reference systemd workflow |
-| [`agent-workspace.toml`](agent-workspace.toml) | Rocky systemd environment for an automation or coding workspace | Writes are limited to systemd runtime paths, `/workspace`, and `/tmp`; inbound networking is denied |
-| [`network-service.toml`](network-service.toml) | Ubuntu 24.04 systemd environment serving a blank CMS on instance TCP port 8080 | Uses the digest-pinned third-party `jrei/systemd-ubuntu` OCI root and a small Python HTTP service |
-| [`paranoid-shell.toml`](paranoid-shell.toml) | Rocky systemd environment with every syscall mediated in userspace | Strongest syscall visibility, with substantial syscall-heavy performance cost |
-| [`alpine-native.toml`](alpine-native.toml) | Minimal Alpine environment using its native BusyBox init | Smallest example; intentionally does not add or emulate systemd |
+| [`rocky10-systemd.toml`](rocky10-systemd.toml) | Minimal Rocky systemd environment with an interactive login | Broad compatibility policy for the reference systemd workflow |
+| [`rocky10-agent-workspace.toml`](rocky10-agent-workspace.toml) | Rocky systemd environment for an automation or coding workspace | Writes are limited to systemd runtime paths, `/workspace`, and `/tmp`; inbound networking is denied |
+| [`ubuntu24-network-service.toml`](ubuntu24-network-service.toml) | Ubuntu 24.04 systemd environment serving a blank CMS on instance TCP port 8080 | Uses the digest-pinned third-party `jrei/systemd-ubuntu` OCI root and a small Python HTTP service |
+| [`rocky10-paranoid-shell.toml`](rocky10-paranoid-shell.toml) | Rocky systemd environment with every syscall mediated in userspace | Strongest syscall visibility, with substantial syscall-heavy performance cost |
+| [`alpine3.22-native.toml`](alpine3.22-native.toml) | Minimal Alpine 3.22 environment using its native BusyBox init | Smallest example; intentionally does not add or emulate systemd |
 
 Every shipped example sets the development root password to `ginux` in a
 pre-boot hook. Each occurrence is marked `CHANGEME`; replace it before using a
@@ -38,7 +38,7 @@ The Ubuntu CMS recipe contains only portable network policy. Select the host
 attachment and external forwarding when importing or changing an instance:
 
 ```sh
-ginux import web config/examples/network-service.toml \
+ginux import web config/examples/ubuntu24-network-service.toml \
   --network default \
   --forward protocol=tcp,external_port=8080,instance_port=8080
 ```

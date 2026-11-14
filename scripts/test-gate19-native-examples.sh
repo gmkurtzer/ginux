@@ -5,10 +5,10 @@ set -eu
 
 ./scripts/install-ginux-host.sh >/dev/null
 for config in \
-    config/examples/agent-workspace.toml \
-    config/examples/network-service.toml \
-    config/examples/paranoid-shell.toml \
-    config/examples/alpine-native.toml
+    config/examples/rocky10-agent-workspace.toml \
+    config/examples/ubuntu24-network-service.toml \
+    config/examples/rocky10-paranoid-shell.toml \
+    config/examples/alpine3.22-native.toml
 do
     rocky_scp "$config" "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/$(basename "$config")"
 done
@@ -31,19 +31,19 @@ run_example() {
     printf 'Gate 19 %s native boot: PASS\n' "$name"
 }
 
-run_example agent-workspace agent-workspace.toml \
+run_example agent-workspace rocky10-agent-workspace.toml \
     'Reached target multi-user.target - Multi-User System.' \
     "printf 'GINUX_GATE19_BOOT_OK:agent-workspace\\n'" \
     'kill -RTMIN+4 1; exit'
-run_example ubuntu-cms network-service.toml \
+run_example ubuntu-cms ubuntu24-network-service.toml \
     'Reached target multi-user.target - Multi-User System.' \
     "/usr/bin/python3 -c 'import urllib.request; assert b\"Blank CMS\" in urllib.request.urlopen(\"http://127.0.0.1:8080\").read()' && printf 'GINUX_GATE19_BOOT_OK:ubuntu-cms\\n'" \
     'kill -RTMIN+4 1; exit'
-run_example paranoid-shell paranoid-shell.toml \
+run_example paranoid-shell rocky10-paranoid-shell.toml \
     'Reached target multi-user.target - Multi-User System.' \
     "printf 'GINUX_GATE19_BOOT_OK:paranoid-shell\\n'" \
     'kill -RTMIN+4 1; exit'
-run_example alpine-native alpine-native.toml \
+run_example alpine-native alpine3.22-native.toml \
     'ginux-alpine login:' \
     "printf 'GINUX_GATE19_BOOT_OK:alpine-native\\n'" \
     'poweroff; exit'
