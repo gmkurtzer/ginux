@@ -146,6 +146,23 @@ fn valid_alignment(alignment: usize) -> bool {
         && alignment.is_power_of_two()
 }
 
+/// Pure checked model used by the allocator and bounded defensive fuzzing.
+#[doc(hidden)]
+pub fn guarded_mapping_geometry(
+    size: usize,
+    alignment: usize,
+    page: usize,
+) -> Option<(usize, usize, usize)> {
+    if !valid_alignment(alignment) || page < 4096 || !page.is_power_of_two() {
+        return None;
+    }
+    let requested = cmp::max(size, 1);
+    let slack = alignment.checked_sub(1)?.checked_add(page)?;
+    let data_len = align_up(requested.checked_add(slack)?, page)?;
+    let mapping_len = data_len.checked_add(page.checked_mul(2)?)?;
+    Some((requested, data_len, mapping_len))
+}
+
 fn random_word() -> u64 {
     if !RANDOM_SEEDED.swap(true, Ordering::AcqRel) {
         #[cfg(target_os = "linux")]
@@ -424,27 +441,9 @@ fn allocate_guarded(size: usize, alignment: usize, zero: bool) -> *mut c_void {
         set_errno(libc::EINVAL);
         return ptr::null_mut();
     }
-    let requested = cmp::max(size, 1);
     let page = page_size();
-    let slack = match alignment.checked_sub(1).and_then(|v| v.checked_add(page)) {
-        Some(value) => value,
-        None => {
-            set_errno(libc::ENOMEM);
-            return ptr::null_mut();
-        }
-    };
-    let data_len = match requested
-        .checked_add(slack)
-        .and_then(|value| align_up(value, page))
-    {
-        Some(value) => value,
-        None => {
-            set_errno(libc::ENOMEM);
-            return ptr::null_mut();
-        }
-    };
-    let mapping_len = match data_len.checked_add(page.saturating_mul(2)) {
-        Some(value) => value,
+    let (requested, data_len, mapping_len) = match guarded_mapping_geometry(size, alignment, page) {
+        Some(geometry) => geometry,
         None => {
             set_errno(libc::ENOMEM);
             return ptr::null_mut();
@@ -950,6 +949,26 @@ mod tests {
         assert_eq!(align_up(17, 16), Some(32));
         assert_eq!(nallocx_for_test(17, 4), 32);
         assert_eq!(mallocx_alignment(4), 16);
+    }
+
+    #[test]
+    fn guarded_geometry_is_checked_and_contains_requested_bytes() {
+        for alignment in [16, 64, 4096, MAX_ALIGNMENT] {
+            for size in [0, 1, alignment, 65_537, usize::MAX] {
+                if let Some((requested, data, mapping)) =
+                    guarded_mapping_geometry(size, alignment, 4096)
+                {
+                    assert!(requested >= 1);
+                    assert!(data >= requested);
+                    assert!(mapping >= data + 8192);
+                    assert_eq!(data % 4096, 0);
+                } else {
+                    assert_eq!(size, usize::MAX);
+                }
+            }
+        }
+        assert!(guarded_mapping_geometry(1, 3, 4096).is_none());
+        assert!(guarded_mapping_geometry(1, 16, 0).is_none());
     }
 
     #[test]
