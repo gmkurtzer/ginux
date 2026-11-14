@@ -26,12 +26,15 @@
   (`285d025b`) with a separate fresh Rocky host overlay, so it is a pre-existing
   baseline blocker rather than a Gate 31 regression. The gate remains partial
   because its mandatory final matrix is not fully green.
+- Draft pull request https://github.com/gmkurtzer/ginux/pull/291 contains the
+  bounded implementation and discloses the baseline blocker; it references but
+  does not close issue #290.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Exact next action: commit and deliver the dedicated Gate 31 pull request with
-  the baseline blocker disclosed, then stop for human review and direction on a
-  separate corrective gate for the pre-existing systemd failure.
+- Exact next action: stop for human review and direction on a separate
+  corrective gate for the pre-existing systemd failure; do not accept or close
+  Gate 31 while its mandatory matrix remains red.
 
 ### Prior checkpoint: Gate 26 Rocky Linux RPM packaging
 

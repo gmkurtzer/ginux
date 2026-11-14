@@ -204,12 +204,13 @@ before the native filesystem lane claims any syscall.
 
 - Working branch: `hdae/filesystem-mediation-foundation`
 - Intended base: `main`
-- Pull request: intended; reference issue #290 without a closing keyword
+- Pull request: https://github.com/gmkurtzer/ginux/pull/291; draft and references
+  issue #290 without a closing keyword
 - Planned commits: gate and inventory; complete call context; capability model;
   independent oracles and mutations; cross-route integration; security review
   and final evidence
-- Actual commits: `f9aa3cf1`, `1759b054`, `b8f05a9a`, `47171760`, and
-  `718784ae`; final checkpoint/evidence commit pending
+- Actual commits: `f9aa3cf1`, `1759b054`, `b8f05a9a`, `47171760`, `718784ae`,
+  and `35367c74`; pull-request URL checkpoint commit pending
 
 ## Review policy and outcome
 
