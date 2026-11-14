@@ -40,4 +40,32 @@ rg -Fq 'No unresolved high- or critical-impact finding remains' \
 rg -Fq 'not an independent audit' docs/security-review.md
 rg -Fq 'does not claim its proof' docs/allocator-evaluation.md
 
+for installed in \
+    '/usr/bin/ginux' \
+    '/usr/libexec/ginux/ginux-helper' \
+    '/usr/libexec/ginux/ginux-image' \
+    '/usr/libexec/ginux/ginux-runtime' \
+    '/usr/lib64/ginux/libginux_allocator.so'
+do
+    rg -Fq "$installed" docs/security-assurance.md
+done
+for route in \
+    'Instance create/import/set/edit' \
+    'OCI fetch and expansion' \
+    'Workload syscall' \
+    'Descriptor and virtual-object operation' \
+    'Lifecycle stop/failure/recovery' \
+    'Allocator memory operation'
+do
+    rg -Fq "$route" docs/security-assurance.md
+done
+for state in \
+    '/etc/ginux/examples' \
+    '/var/lib/ginux/cache/oci' \
+    '/var/lib/ginux/instances/NAME' \
+    '/run/ginux/instances/NAME'
+do
+    rg -Fq "$state" docs/security-assurance.md
+done
+
 printf '%s\n' 'SECURITY_INVENTORY: PASS'

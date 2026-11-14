@@ -20,6 +20,52 @@ exploits, build weaponized payloads, or test third-party systems.
 | Package lifecycle | RPM spec, tmpfiles, and helper | Code is immutable package content; persistent and transient state have explicit ownership and lifecycle | RPM install, verify, erase, reinstall, and persistence tests |
 | Allocator | `ginux-allocator` after Gates 38-42 | Caller memory never contains allocator metadata; invalid ownership fails closed | allocator conformance, property, and Linux integration suites |
 
+### Installed trusted executables
+
+| Installed component | Privilege and host effects | Owner and invariant |
+|---|---|---|
+| `/usr/bin/ginux` | Operator process; requests lifecycle changes through `sudo` and the private helper protocol | `ginux-cli`; it validates public syntax but is not itself a privileged policy boundary |
+| `/usr/libexec/ginux/ginux-helper` | Root lifecycle, instance-root, console, deployment-state, and cache operations | Lifecycle helper; names are validated, paths remain below owned roots, and stopped/running transitions are checked before mutation |
+| `/usr/libexec/ginux/ginux-image` | Registry I/O, digest verification, blob caching, and root expansion | `ginux-oci`; verified content is committed atomically and extraction cannot escape its selected root |
+| `/usr/libexec/ginux/ginux-runtime` | `chroot`, identity reduction, ptrace supervision, virtual-kernel generation, syscall mediation, and workload execution | `ginux-init`; the immutable effective contract and virtual object identity govern every managed effect |
+| `/usr/lib64/ginux/libginux_allocator.so` | Optional workload-side virtual-memory calls and instance-private cgroup reads | `ginux-allocator`; it has no helper protocol or privileged path and remains subject to the workload contract |
+
+Test-only fixtures and benchmark binaries are not installed and are outside the
+runtime trusted computing base. The RPM file list is the authoritative package
+boundary; the inventory checker rejects drift in these installed paths.
+
+### Host-effect route matrix
+
+| Route | Authority snapshot | Decision point | Effect owner |
+|---|---|---|---|
+| Instance create/import/set/edit | Complete candidate recipe plus deployment state | CLI validation, runtime normalization, then helper transition validation | Privileged lifecycle helper using atomic file replacement |
+| OCI fetch and expansion | Digest-pinned manifest, layer descriptors, and selected destination root | Descriptor validation and content digest verification before commit | `ginux-image` cache and extraction code |
+| Workload syscall | Entry registers plus one supervisor-owned copy of pointer-derived authority inputs | Immutable contract, operation catalog, dispatch lane, and object-generation checks | Native supervisor or an explicitly direct-safe host syscall |
+| Descriptor and virtual-object operation | Instance-local descriptor/object identity and generation | Contract decision plus type-specific owner lookup | Process, device, network, filesystem, or virtual-kernel owner |
+| Lifecycle stop/failure/recovery | Persisted instance identity plus verified live PID ownership | Helper state transition and stale-PID rejection | Helper cleanup of only that instance's transient resources |
+| Allocator memory operation | Checked size/alignment and instance-visible memory limit | Allocator ownership bitmap and checked reservation | Ordinary workload `mmap`, `mprotect`, `madvise`, and `munmap`, still mediated by Ginux |
+
+No managed route treats a text path, numeric PID, or descriptor number alone as
+authority. Direct-safe syscalls are limited to cataloged fixed semantics whose
+arguments do not require synchronous inspection, translation, virtual results,
+or a denial-side host effect.
+
+### Instance authority and revocation matrix
+
+| Authority class | Instance-private identity | Revocation evidence |
+|---|---|---|
+| Processes and signals | Virtual PID plus generation mapped to one supervised host task | Process, native-process, multi-instance, and forced-teardown tests |
+| Descriptors and devices | Per-process descriptor entry plus backing-object generation | Process/device suites, descriptor reuse tests, and restart tests |
+| Root and writable storage | Validated instance directory and private expanded root | Multi-instance overlay checks and helper cleanup/reinstall tests |
+| Contract and audit | Normalized recipe digest, catalog version, deployment lock state, and instance-owned log | Contract mutation, lock/unlock, multi-instance, and package persistence tests |
+| Console | Instance-owned FIFO/log and verified supervisor identity | Attach/detach, signal, stale-state, and concurrent-console tests |
+| Network | Instance deployment attachment, forward ownership, and tracked socket identity | Network policy, bind-conflict, destination-snapshot, and multi-instance tests |
+| Virtual `/proc`, `/sys`, and cgroup | On-demand view derived from only the instance process/configuration state | Kernel-view, systemd, and distinct-memory-limit multi-instance tests |
+
+Numeric identity reuse is never sufficient to recover an old capability. Stop,
+failure, and restart discard transient generation-bearing state; persistent
+recipe and root state survive only where the documented lifecycle says they do.
+
 ## Unsafe-code boundary
 
 Production Rust `unsafe` is confined to the freestanding native runtime and
@@ -34,6 +80,19 @@ Rust.
 outside the approved runtime files. It also checks the retained privilege and
 package boundary markers. This is a structural tripwire, not a proof that each
 unsafe expression is correct.
+
+The approved unsafe/FFI/assembly owners are:
+
+| Source | Reason it is trusted |
+|---|---|
+| `ginux-init/src/main.rs`, `launch.rs`, `native_clone.rs`, `native_network.rs`, and `supervisor.rs` | Freestanding entry, raw Linux syscalls, ptrace register and tracee-memory transfer, and fixed-buffer supervision |
+| `ginux-allocator/src/lib.rs` | C ABI exports, raw allocation pointers, atomics, and Linux virtual-memory calls |
+| `baseline-runner` and `process-native-fixture` | Test/benchmark-only raw syscall fixtures; not installed runtime components |
+
+The x86-64 startup assembly is owned by `ginux-init/src/main.rs`; no separate
+production assembly object is installed. All other production policy and state
+libraries are required to remain free of Rust `unsafe` syntax by the inventory
+tripwire.
 
 ## Dispatch and host effects
 
@@ -55,6 +114,18 @@ and retain only Ginux virtual credentials. The helper remains privileged and is
 part of the trusted computing base. Persistent instance and OCI state lives
 under `/var/lib/ginux`; transient control state lives under `/run/ginux`.
 Package verification and state-preserving reinstall tests are mandatory.
+
+| State | Owner/mode boundary | Lifecycle |
+|---|---|---|
+| `/etc/ginux/examples` | RPM-owned, read-only example recipes | Replaced only by package lifecycle rules |
+| `/var/lib/ginux/cache/oci` | Root-owned verified content-addressed cache | Preserved across package erase; corrupt content is rejected and may be reacquired |
+| `/var/lib/ginux/instances/NAME` | Root-owned recipe, deployment state, private root, console, and audit data | Created/replaced atomically; retained across package reinstall; explicit instance removal owns deletion |
+| `/run/ginux/instances/NAME` | Root-owned transient control state | Recreated at boot/start and revoked on stop or recovery |
+
+The helper accepts only its versioned private protocol. Operator environment
+values are not promoted into privileged paths without command-specific parsing;
+workloads do not inherit helper descriptors, ambient capabilities, or root host
+identity.
 
 OCI manifests and layers are verified before use. Cache corruption fails
 closed. Catalog changes do not silently recompile persisted wildcard contracts,
