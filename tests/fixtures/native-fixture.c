@@ -980,6 +980,24 @@ long native_fixture_main(const word *stack)
                      tracked_as_console(descriptor_sibling_result));
         return 0;
     }
+    case 'K': {
+        /* console writes through a duplicate and through the vectored and
+         * positional calls are console writes like write on the open itself. */
+        long console = call3(2, (word)"/dev/console", 1 /* O_WRONLY */, 0);
+        long copy = call3(32, console, 0, 0);
+        struct { const char *base; word length; } vector = {"K\n", 2};
+        print_result("GINUX_FIXTURE: console-open-ok=", console >= 0);
+        print_result("GINUX_FIXTURE: write-duplicate=", call3(1, copy, (word)"K\n", 2));
+        print_result("GINUX_FIXTURE: writev-console=", call3(20, console, (word)&vector, 1));
+        print_result("GINUX_FIXTURE: pwrite-duplicate=", call4(18, copy, (word)"K\n", 2, 0));
+        /* A number freed by close and reused is no longer the console. */
+        call3(3, console, 0, 0);
+        call3(3, copy, 0, 0);
+        long reused = call3(2, (word)"/scenario", 0, 0);
+        print_result("GINUX_FIXTURE: reused-same-number=", reused == console);
+        print_result("GINUX_FIXTURE: write-reused=", call3(1, reused, (word)"K\n", 2));
+        return 0;
+    }
     default:
         return 81;
     }

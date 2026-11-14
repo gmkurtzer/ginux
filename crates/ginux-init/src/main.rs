@@ -7376,6 +7376,13 @@ fn supervise_native(
             write_all(b" result=-1\n");
         }
 
+        // A console descriptor is one the shared descriptor table tracks:
+        // every duplicate, and any number above 2. Numbers 0-2 are in the set
+        // from the start, so only the latest open of the console on one of
+        // them counts; console_fd alone would outlive a close of that number.
+        let descriptor_table = &descriptor_tables[task.descriptor_table];
+        let on_console = native_fd_contains(&descriptor_table.console_fds, registers.rdi as usize)
+            && (registers.rdi > 2 || registers.rdi as i64 == descriptor_table.console_fd);
         let semantic_operation = if mode == 3 && syscall == 257 {
             if tracee_string_starts_with(host_pid, registers.rsi as usize, b"/proc") {
                 Some("proc.process.read")
@@ -7391,13 +7398,9 @@ fn supervise_native(
             } else {
                 Some("filesystem.path.read")
             }
-        } else if syscall == 0
-            && registers.rdi as i64 == descriptor_tables[task.descriptor_table].console_fd
-        {
+        } else if matches!(syscall, 0 | 17 | 19 | 295 | 327) && on_console {
             Some("device.console.read")
-        } else if syscall == 1
-            && registers.rdi as i64 == descriptor_tables[task.descriptor_table].console_fd
-        {
+        } else if matches!(syscall, 1 | 18 | 20 | 296 | 328) && on_console {
             Some("device.console.write")
         } else if mode == 3 && matches!(syscall, 42 | 49) {
             match (native_socket_protocol(&task, registers.rdi), syscall) {

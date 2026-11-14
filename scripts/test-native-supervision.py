@@ -351,6 +351,30 @@ sys_read = ["/"]
             "GINUX_FIXTURE: sibling-deferred=1",
             "GINUX_FIXTURE: mutation-result=0",
             "GINUX_FIXTURE: sibling-console=1"], proc.returncode, out)
+        # Every descriptor the supervisor tracks as the console, and the
+        # vectored and positional writes on it, belong to device.console.write.
+        denied_console = work / "denied-console-write.toml"
+        denied_console.write_text(configured.read_text().replace(
+            'deny = ["device.mmio.direct"', 'deny = ["device.console.write", "device.mmio.direct"'))
+        with open(work / "console-output", "w+b") as console:
+            code, out = run("K-console-descriptors", denied_console, stdin=console, configured_launch=True)
+            fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
+            check("denied console write covers duplicates and vectored writes", code == 0
+                  and fixture == ["GINUX_FIXTURE: console-open-ok=1",
+                                  "GINUX_FIXTURE: write-duplicate=-1",
+                                  "GINUX_FIXTURE: writev-console=-1",
+                                  "GINUX_FIXTURE: pwrite-duplicate=-1",
+                                  "GINUX_FIXTURE: reused-same-number=1",
+                                  "GINUX_FIXTURE: write-reused=-9"]
+                  and (work / "console-output").read_bytes() == b"", code, out)
+        with open(work / "console-output", "w+b") as console:
+            code, out = run("K-console-descriptors", configured, stdin=console)
+            fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
+            check("allowed console write still reaches the console", code == 0
+                  and fixture[:3] == ["GINUX_FIXTURE: console-open-ok=1",
+                                      "GINUX_FIXTURE: write-duplicate=2",
+                                      "GINUX_FIXTURE: writev-console=2"]
+                  and (work / "console-output").read_bytes().startswith(b"K\nK\n"), code, out)
 
         # Upstream owns cgroups in memory. Retain the public API and
         # containment regressions without requiring obsolete host files.
