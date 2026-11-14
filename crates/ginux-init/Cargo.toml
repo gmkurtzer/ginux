@@ -13,6 +13,7 @@ ginux-contract = { path = "../ginux-contract" }
 ginux-core = { path = "../ginux-core" }
 ginux-instance = { path = "../ginux-instance" }
 ginux-devices = { path = "../ginux-devices" }
+ginux-fs-policy = { path = "../ginux-fs-policy" }
 ginux-kernel-views = { path = "../ginux-kernel-views" }
 ginux-runtime = { path = "../ginux-runtime" }
 ginux-process = { path = "../ginux-process" }

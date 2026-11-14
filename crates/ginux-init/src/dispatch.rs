@@ -7,6 +7,7 @@
 use ginux_core::{
     balanced_arguments_allowed, decide_balanced, Action, BalancedSurface, Decision, SYS_FORK,
 };
+use ginux_fs_policy::CallContext;
 
 use crate::supervisor::UserRegs;
 
@@ -45,7 +46,14 @@ pub enum NativeDecision {
 /// hook claims falls through to `decide_balanced` byte-identically. The one
 /// exception is fork, which both callers (`launch` and `native`) deny
 /// although the balanced contract lists it in the task surface.
-pub fn decide_native(syscall: u64, rdi: u64, rsi: u64, rdx: u64) -> NativeDecision {
+pub fn decide_native(context: &CallContext) -> NativeDecision {
+    let syscall = context.syscall;
+    if let ginux_fs_policy::ContractAuthorization::Deny(errno) = context.contract {
+        return NativeDecision::Contract(Decision {
+            syscall,
+            action: Action::Deny(errno),
+        });
+    }
     // Neither caller traces children, so a host fork would leave the child
     // running unsupervised.
     if syscall == SYS_FORK {
@@ -55,21 +63,31 @@ pub fn decide_native(syscall: u64, rdi: u64, rsi: u64, rdx: u64) -> NativeDecisi
         });
     }
     match classify(syscall) {
-        Lane::Process => match crate::process_hooks::claim(syscall, rdi, rsi, rdx) {
+        Lane::Process => match crate::process_hooks::claim(
+            syscall,
+            context.arguments[0],
+            context.arguments[1],
+            context.arguments[2],
+        ) {
             Some(result) => NativeDecision::Hooked {
                 lane: Lane::Process,
                 result,
             },
             None => NativeDecision::Contract(decide_balanced(syscall)),
         },
-        Lane::Filesystem => match crate::fs_hooks::claim(syscall, rdi, rsi, rdx) {
+        Lane::Filesystem => match crate::fs_hooks::claim(context) {
             Some(result) => NativeDecision::Hooked {
                 lane: Lane::Filesystem,
                 result,
             },
             None => NativeDecision::Contract(decide_balanced(syscall)),
         },
-        Lane::Channel => match crate::channel_hooks::claim(syscall, rdi, rsi, rdx) {
+        Lane::Channel => match crate::channel_hooks::claim(
+            syscall,
+            context.arguments[0],
+            context.arguments[1],
+            context.arguments[2],
+        ) {
             Some(result) => NativeDecision::Hooked {
                 lane: Lane::Channel,
                 result,
