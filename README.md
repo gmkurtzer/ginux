@@ -419,8 +419,11 @@ behavior, retained state, and the clean-host lifecycle test are documented in
 The package also contains an opt-in standard C ABI
 [guarded allocator](docs/allocator.md). Its metadata isolation, guard mappings,
 instance-memory integration, verification boundary, and performance tradeoffs
-are documented separately. The broader constructive review is recorded in
-[Defensive security assurance](docs/security-assurance.md).
+are documented separately, along with the
+[architecture evaluation](docs/allocator-evaluation.md). The broader
+constructive review is recorded in
+[Defensive security assurance](docs/security-assurance.md) and its bounded
+[finding ledger](docs/security-review.md).
 
 ## Historical standalone kernel
 

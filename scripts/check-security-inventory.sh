@@ -35,5 +35,9 @@ rg -Fq '%config(noreplace)' packaging/rpm/ginux.spec.in
 rg -Fq 'Package removal deletes package-owned programs' docs/packaging.md
 rg -Fq 'build weaponized payloads' docs/security-assurance.md
 rg -Fq 'not VM-equivalent' docs/security-assurance.md
+rg -Fq 'No unresolved high- or critical-impact finding remains' \
+    docs/security-review.md
+rg -Fq 'not an independent audit' docs/security-review.md
+rg -Fq 'does not claim its proof' docs/allocator-evaluation.md
 
 printf '%s\n' 'SECURITY_INVENTORY: PASS'

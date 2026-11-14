@@ -30,6 +30,12 @@ environment = [
 The allocator is opt-in. Recipes without `LD_PRELOAD` retain the distribution's
 normal allocator.
 
+The packaged shared library is currently a glibc x86-64 build. The package
+matrix verifies loading with Rocky Linux 10 and Ubuntu 24 workloads, natively
+through the host kernel and through Ginux. Alpine remains a supported Ginux
+instance, but its musl userspace is not in the allocator compatibility claim;
+attempting to preload this glibc library there is unsupported.
+
 ## Implemented ABI
 
 The initial ABI includes `malloc`, `free`, `calloc`, `realloc`,

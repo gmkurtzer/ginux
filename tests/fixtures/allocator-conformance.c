@@ -10,6 +10,10 @@
 
 enum { THREADS = 8, ITERATIONS = 2000 };
 
+struct release_batch {
+    void *pointers[256];
+};
+
 static void *worker(void *argument) {
     uintptr_t id = (uintptr_t)argument;
     for (size_t i = 0; i < ITERATIONS; ++i) {
@@ -25,6 +29,12 @@ static void *worker(void *argument) {
     return NULL;
 }
 
+static void *release_worker(void *argument) {
+    struct release_batch *batch = argument;
+    for (size_t i = 0; i < 256; ++i) free(batch->pointers[i]);
+    return NULL;
+}
+
 static int expect_double_free_abort(void) {
     pid_t child = fork();
     if (child < 0) return 1;
@@ -34,6 +44,22 @@ static int expect_double_free_abort(void) {
         if (memory == NULL) _exit(2);
         release(memory);
         release(memory);
+        _exit(3);
+    }
+    int status = 0;
+    if (waitpid(child, &status, 0) != child) return 4;
+    return WIFEXITED(status) && WEXITSTATUS(status) == 134 ? 0 : 5;
+}
+
+static int expect_interior_free_abort(void) {
+    pid_t child = fork();
+    if (child < 0) return 1;
+    if (child == 0) {
+        unsigned char *memory = malloc(64);
+        void (*volatile release)(void *) = free;
+        volatile uintptr_t offset = 1;
+        if (memory == NULL) _exit(2);
+        release(memory + offset);
         _exit(3);
     }
     int status = 0;
@@ -67,7 +93,17 @@ int main(void) {
         if (pthread_join(threads[i], &result) != 0 || result != NULL) return 21;
     }
 
+    struct release_batch batch;
+    for (size_t i = 0; i < 256; ++i) {
+        batch.pointers[i] = malloc(16 + i);
+        if (batch.pointers[i] == NULL) return 22;
+    }
+    pthread_t releaser;
+    if (pthread_create(&releaser, NULL, release_worker, &batch) != 0) return 23;
+    if (pthread_join(releaser, NULL) != 0) return 24;
+
     if (expect_double_free_abort() != 0) return 30;
+    if (expect_interior_free_abort() != 0) return 31;
     puts("GINUX_ALLOCATOR_CONFORMANCE: PASS");
     return 0;
 }

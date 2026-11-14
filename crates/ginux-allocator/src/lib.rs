@@ -259,16 +259,21 @@ fn instance_memory_limit() -> usize {
 
 fn reserve_live_bytes(size: usize) -> bool {
     let limit = instance_memory_limit();
-    if size > limit {
-        return false;
+    let mut current = LIVE_BYTES.load(Ordering::Acquire);
+    loop {
+        let Some(next) = bounded_add(current, size, limit) else {
+            return false;
+        };
+        match LIVE_BYTES.compare_exchange_weak(current, next, Ordering::AcqRel, Ordering::Acquire) {
+            Ok(_) => return true,
+            Err(observed) => current = observed,
+        }
     }
-    let previous = LIVE_BYTES.fetch_add(size, Ordering::AcqRel);
-    if previous > limit.saturating_sub(size) {
-        LIVE_BYTES.fetch_sub(size, Ordering::AcqRel);
-        false
-    } else {
-        true
-    }
+}
+
+fn bounded_add(current: usize, additional: usize, limit: usize) -> Option<usize> {
+    let next = current.checked_add(additional)?;
+    (next <= limit).then_some(next)
 }
 
 fn memory_pressure_high() -> bool {
@@ -945,6 +950,39 @@ mod tests {
         assert_eq!(align_up(17, 16), Some(32));
         assert_eq!(nallocx_for_test(17, 4), 32);
         assert_eq!(mallocx_alignment(4), 16);
+    }
+
+    #[test]
+    fn bounded_accounting_model_never_wraps_or_exceeds_limit() {
+        for limit in 0usize..=64 {
+            for current in 0usize..=80 {
+                for additional in 0usize..=80 {
+                    let result = bounded_add(current, additional, limit);
+                    assert_eq!(
+                        result,
+                        current
+                            .checked_add(additional)
+                            .filter(|next| *next <= limit)
+                    );
+                }
+            }
+        }
+        assert_eq!(bounded_add(usize::MAX, 1, usize::MAX), None);
+    }
+
+    #[test]
+    fn size_class_model_is_monotonic_and_complete() {
+        for pair in SIZE_CLASSES.windows(2) {
+            assert!(pair[0] < pair[1]);
+            assert_eq!(pair[1], pair[0] * 2);
+        }
+        for size in 1usize..=*SIZE_CLASSES.last().unwrap() {
+            let index = class_index(size).expect("covered allocation size");
+            assert!(SIZE_CLASSES[index] >= size);
+            if index > 0 {
+                assert!(SIZE_CLASSES[index - 1] < size);
+            }
+        }
     }
 
     fn nallocx_for_test(size: usize, lg_alignment: usize) -> usize {

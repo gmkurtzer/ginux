@@ -24,6 +24,40 @@ ginux stop rpm-alpine
 ginux status rpm-alpine | grep -Fq 'state: stopped'
 sudo touch /var/lib/ginux/instances/rpm-alpine/rpm-state-marker
 
+# Run an unmodified dynamically linked Rocky workload through the packaged
+# allocator inside Ginux. Successful loader startup and directory output prove
+# that the documented LD_PRELOAD path is usable by an instance workload.
+ginux import rpm-allocator /etc/ginux/examples/rocky10-systemd.toml \
+    --set 'instance.init="/usr/bin/ls"' \
+    --set 'instance.args=["/"]' \
+    --set 'instance.environment=["container=ginux","LD_PRELOAD=/usr/lib64/ginux/libginux_allocator.so"]'
+ginux start rpm-allocator
+for _ in $(seq 1 30); do
+    ginux status rpm-allocator | grep -Fq 'state: stopped' && break
+    sleep 1
+done
+ginux status rpm-allocator | grep -Fq 'state: stopped'
+sudo grep -Fq bin /var/lib/ginux/instances/rpm-allocator/console.log
+
+# Repeat the supported glibc loading check with Ubuntu, both directly on the
+# host kernel through chroot and through the Ginux supervisor. Alpine remains a
+# supported Ginux instance but uses musl, so the glibc-built allocator is not a
+# claimed drop-in component there.
+ginux import rpm-allocator-ubuntu /etc/ginux/examples/ubuntu24-network-service.toml \
+    --set 'instance.init="/usr/bin/ls"' \
+    --set 'instance.args=["/"]' \
+    --set 'instance.environment=["container=ginux","LD_PRELOAD=/usr/lib64/ginux/libginux_allocator.so"]'
+sudo chroot /var/lib/ginux/instances/rpm-allocator-ubuntu/root \
+    /usr/bin/env LD_PRELOAD=/usr/lib64/ginux/libginux_allocator.so \
+    /usr/bin/ls / | grep -Fq bin
+ginux start rpm-allocator-ubuntu
+for _ in $(seq 1 30); do
+    ginux status rpm-allocator-ubuntu | grep -Fq 'state: stopped' && break
+    sleep 1
+done
+ginux status rpm-allocator-ubuntu | grep -Fq 'state: stopped'
+sudo grep -Fq bin /var/lib/ginux/instances/rpm-allocator-ubuntu/console.log
+
 # Cached import must work with all guest networking disabled.
 sudo unshare -n ginux import rpm-cache /etc/ginux/examples/alpine3.22-native.toml
 sudo test -x /var/lib/ginux/instances/rpm-cache/root/bin/busybox
