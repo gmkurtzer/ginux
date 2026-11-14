@@ -4,9 +4,12 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+static FIXTURE_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 struct Fixture {
     base: PathBuf,
@@ -21,8 +24,11 @@ impl Fixture {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let base =
-            std::env::temp_dir().join(format!("ginux-fs-oracle-{}-{nonce}", std::process::id()));
+        let sequence = FIXTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let base = std::env::temp_dir().join(format!(
+            "ginux-fs-oracle-{}-{nonce}-{sequence}",
+            std::process::id()
+        ));
         let instance = base.join("instance");
         let peer = base.join("peer");
         let host = base.join("host-only");
