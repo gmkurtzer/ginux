@@ -10197,6 +10197,10 @@ fn native_fail(instance: &mut Instance, pid: usize, reason: &[u8]) -> ! {
 /// gone. A nonblocking wait first tells them apart: it fails once the child is
 /// reaped and reaps it if it has exited, so `kill(2)` only targets a child that
 /// is still ours and whose pid cannot have been reused.
+///
+/// The reap waits for any child, not for `pid` alone: a killed traced thread
+/// stays a zombie until its tracer reaps it, and until then the kernel does not
+/// report the group leader, so a wait for the leader alone never returns.
 fn kill_tracee(pid: usize) {
     let mut status = 0i32;
     let reaped = unsafe {
@@ -10214,7 +10218,25 @@ fn kill_tracee(pid: usize) {
     if unsafe { syscall2(SYS_KILL, pid, SIGKILL) } < 0 {
         let _ = ptrace(PTRACE_KILL, pid, 0, 0);
     }
-    let _ = wait(pid, &mut status);
+    loop {
+        let waited = unsafe {
+            syscall4(
+                SYS_WAIT4,
+                (-1isize) as usize,
+                &mut status as *mut _ as usize,
+                0,
+                0,
+            )
+        };
+        if waited < 0 || (waited as usize == pid && !stopped(status)) {
+            return;
+        }
+        // Before Linux 5.19, PTRACE_KILL only resumes a stopped tracee: after
+        // the fallback, the leader can stop again instead of exiting.
+        if waited as usize == pid {
+            let _ = ptrace(PTRACE_KILL, pid, 0, 0);
+        }
+    }
 }
 
 fn config_main(config_path: *const u8) -> ! {

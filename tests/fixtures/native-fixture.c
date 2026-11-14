@@ -103,6 +103,20 @@ __asm__(".global sigchld_restorer\n"
         "mov $15, %rax\n"
         "syscall\n");
 
+long native_thread_trap(word flags, word stack);
+__asm__(".global native_thread_trap\n"
+        "native_thread_trap:\n"
+        "xor %edx, %edx\n"
+        "xor %r10d, %r10d\n"
+        "xor %r8d, %r8d\n"
+        "mov $56, %eax\n"
+        "syscall\n"
+        "test %rax, %rax\n"
+        "jnz 1f\n"
+        "int3\n"
+        "ud2\n"
+        "1: ret\n");
+
 long native_clone_spawn(void *args, word size);
 __asm__(".global native_clone_spawn\n"
         "native_clone_spawn:\n"
@@ -160,6 +174,19 @@ long native_fixture_main(void)
         print_result("GINUX_FIXTURE: uname-before=", call3(63, (word)buffer, 0, 0));
         __asm__ volatile("int3");
         print_result("GINUX_FIXTURE: uname-after=", call3(63, (word)buffer, 0, 0));
+        return 0;
+    }
+    case 'T': {
+        /* A thread takes a plain SIGTRAP stop while the leader spins without
+         * syscalls, so supervision fails the instance with a traced thread
+         * still alive. Native supervision denies nanosleep, and a write or
+         * exit by the leader would race the thread's stop. */
+        word stack = call6(9, 0, 16384, 3, 0x22, -1, 0);
+        const word thread = 0x50f00; /* VM|FS|FILES|SIGHAND|THREAD|SYSVSEM */
+        long created = native_thread_trap(thread, stack + 16384);
+        if (created > 0)
+            for (volatile long spin = 0; spin < 4000000000L; ++spin) {}
+        print_result("GINUX_FIXTURE: thread=", created);
         return 0;
     }
     case 'i': {
