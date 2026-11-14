@@ -219,6 +219,11 @@ sys_read = ["/"]
             "GINUX_FIXTURE: clone3-invalid=-9", "GINUX_FIXTURE: clone3-ordinary=-9",
             "GINUX_FIXTURE: cgroup-open-ok=1", "GINUX_FIXTURE: clone3-ok=1",
             "GINUX_FIXTURE: wait-ok=1", "GINUX_FIXTURE: child-status=7"], code, out)
+        code, out = run("Clone-policy", configured)
+        fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
+        check("unsafe clone flags are denied before host effect", code == 0 and fixture == [
+            "GINUX_FIXTURE: clone-untraced=-38",
+            "GINUX_FIXTURE: clone3-untraced=-38"], code, out)
         code, out = run("arguments", configured)
         fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
         check("immutable clone3 arguments and cleanup", code == 0
@@ -229,7 +234,7 @@ sys_read = ["/"]
             "GINUX_FIXTURE: clone-vfork=1", "GINUX_FIXTURE: vfork-unchanged=1",
             "GINUX_FIXTURE: clone-short=-22", "GINUX_FIXTURE: clone-large=-7",
             "GINUX_FIXTURE: clone-unreadable=-14", "GINUX_FIXTURE: clone-short-cgroup=-22",
-            "GINUX_FIXTURE: clone-kernel-error=-22", "GINUX_FIXTURE: error-unchanged=1",
+            "GINUX_FIXTURE: clone-kernel-error=-38", "GINUX_FIXTURE: error-unchanged=1",
             "GINUX_FIXTURE: clone-tail=-7", "GINUX_FIXTURE: clone-version0=1",
             "GINUX_FIXTURE: snapshot-mmap=-1", "GINUX_FIXTURE: snapshot-mprotect=-1",
             "GINUX_FIXTURE: snapshot-munmap=-1", "GINUX_FIXTURE: snapshot-madvise=-1",

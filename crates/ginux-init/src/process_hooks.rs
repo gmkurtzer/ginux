@@ -222,6 +222,19 @@ pub fn claim(syscall: u64, rdi: u64, _rsi: u64, _rdx: u64) -> Option<i64> {
     None
 }
 
+/// Apply the legacy clone ownership policy to clone3's split flags and exit
+/// signal while preserving clone3-only features already mediated elsewhere.
+pub fn clone3_supported(flags: u64, exit_signal: u64) -> bool {
+    const CLONE_PIDFD: u64 = 0x0000_1000;
+    const CLONE_CLEAR_SIGHAND: u64 = 0x1_0000_0000;
+    const CLONE_INTO_CGROUP: u64 = 0x2_0000_0000;
+    if flags & CLONE_CLEAR_SIGHAND != 0 && flags & CLONE_SIGHAND != 0 {
+        return false;
+    }
+    let legacy = flags & !(CLONE_PIDFD | CLONE_CLEAR_SIGHAND | CLONE_INTO_CGROUP);
+    exit_signal <= u8::MAX as u64 && claim(SYS_CLONE, legacy | exit_signal, 0, 0).is_none()
+}
+
 /// Whether an executable-replacement entry executes under supervision.
 /// Plain `execve` and `execveat(AT_FDCWD, path, argv, envp, 0)` are mediated:
 /// the host kernel performs shebang and loader transitions with the tracee
