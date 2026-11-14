@@ -55,7 +55,7 @@ CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS='-C linker=clang -C link-arg=-no
 
 %check
 cc -O2 -Wall -Wextra -Werror -pthread \
-    tests/fixtures/allocator-conformance.c -o allocator-conformance
+    tests/fixtures/allocator-conformance.c -ldl -o allocator-conformance
 LD_PRELOAD=%{cargo_target}/release/libginux_allocator.so \
     ./allocator-conformance
 

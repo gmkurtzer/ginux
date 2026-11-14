@@ -15,7 +15,7 @@ test -r "$allocator"
 
 mkdir -p .artifacts/allocator
 cc -O2 -Wall -Wextra -Werror -pthread tests/fixtures/allocator-conformance.c \
-    -o .artifacts/allocator/conformance
+    -ldl -o .artifacts/allocator/conformance
 cc -O2 -Wall -Wextra -Werror -pthread tests/fixtures/allocator-benchmark.c \
     -o .artifacts/allocator/benchmark
 

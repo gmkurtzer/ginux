@@ -1,5 +1,7 @@
 #define _GNU_SOURCE
 #include <errno.h>
+#include <dlfcn.h>
+#include <malloc.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -13,6 +15,54 @@ enum { THREADS = 8, ITERATIONS = 2000 };
 struct release_batch {
     void *pointers[256];
 };
+
+static int stats_callback_seen;
+
+static void stats_callback(void *opaque, const char *message) {
+    (void)opaque;
+    if (message != NULL && strstr(message, "ginux-allocator") != NULL)
+        stats_callback_seen = 1;
+}
+
+static int exercise_extended_abi(void) {
+    void *(*mallocx_fn)(size_t, int) = dlsym(RTLD_DEFAULT, "mallocx");
+    void *(*rallocx_fn)(void *, size_t, int) = dlsym(RTLD_DEFAULT, "rallocx");
+    size_t (*xallocx_fn)(void *, size_t, size_t, int) = dlsym(RTLD_DEFAULT, "xallocx");
+    size_t (*sallocx_fn)(void *, int) = dlsym(RTLD_DEFAULT, "sallocx");
+    void (*dallocx_fn)(void *, int) = dlsym(RTLD_DEFAULT, "dallocx");
+    void (*sdallocx_fn)(void *, size_t, int) = dlsym(RTLD_DEFAULT, "sdallocx");
+    size_t (*nallocx_fn)(size_t, int) = dlsym(RTLD_DEFAULT, "nallocx");
+    int (*mallctl_fn)(const char *, void *, size_t *, void *, size_t) =
+        dlsym(RTLD_DEFAULT, "mallctl");
+    int (*mallctlnametomib_fn)(const char *, size_t *, size_t *) =
+        dlsym(RTLD_DEFAULT, "mallctlnametomib");
+    int (*mallctlbymib_fn)(const size_t *, size_t, void *, size_t *, void *, size_t) =
+        dlsym(RTLD_DEFAULT, "mallctlbymib");
+    void (*stats_fn)(void (*)(void *, const char *), void *, const char *) =
+        dlsym(RTLD_DEFAULT, "malloc_stats_print");
+    if (mallocx_fn == NULL || rallocx_fn == NULL || xallocx_fn == NULL ||
+        sallocx_fn == NULL || dallocx_fn == NULL || sdallocx_fn == NULL ||
+        nallocx_fn == NULL || mallctl_fn == NULL || mallctlnametomib_fn == NULL ||
+        mallctlbymib_fn == NULL || stats_fn == NULL)
+        return 1;
+    void *first = mallocx_fn(33, 0);
+    if (first == NULL || sallocx_fn(first, 0) < 33 || nallocx_fn(33, 0) < 33)
+        return 2;
+    if (xallocx_fn(first, 32, 0, 0) < 32) return 3;
+    first = rallocx_fn(first, 4097, 0);
+    if (first == NULL) return 4;
+    dallocx_fn(first, 0);
+    void *second = mallocx_fn(64, 0);
+    if (second == NULL) return 5;
+    sdallocx_fn(second, 64, 0);
+    size_t mib = 0, mib_length = 1;
+    if (mallctl_fn("unsupported", NULL, NULL, NULL, 0) != ENOENT ||
+        mallctlnametomib_fn("unsupported", &mib, &mib_length) != ENOENT ||
+        mallctlbymib_fn(&mib, mib_length, NULL, NULL, NULL, 0) != ENOENT)
+        return 6;
+    stats_fn(stats_callback, NULL, NULL);
+    return stats_callback_seen ? 0 : 7;
+}
 
 static void *worker(void *argument) {
     uintptr_t id = (uintptr_t)argument;
@@ -68,6 +118,14 @@ static int expect_interior_free_abort(void) {
 }
 
 int main(void) {
+    void (*cfree_fn)(void *) = dlsym(RTLD_DEFAULT, "cfree");
+    if (cfree_fn == NULL) return 7;
+    void *ordinary = malloc(17);
+    if (ordinary == NULL || malloc_usable_size(ordinary) < 17) return 8;
+    ordinary = reallocarray(ordinary, 4, 32);
+    if (ordinary == NULL) return 9;
+    cfree_fn(ordinary);
+
     unsigned char *zero = calloc(64, 4);
     if (zero == NULL) return 10;
     for (size_t i = 0; i < 256; ++i) if (zero[i] != 0) return 11;
@@ -77,6 +135,21 @@ int main(void) {
     if (posix_memalign(&aligned, 4096, 8192) != 0 || aligned == NULL) return 12;
     if ((uintptr_t)aligned % 4096 != 0) return 13;
     memset(aligned, 0x5a, 8192);
+    free(aligned);
+
+    aligned = aligned_alloc(64, 128);
+    if (aligned == NULL || (uintptr_t)aligned % 64 != 0) return 15;
+    free(aligned);
+    aligned = memalign(128, 129);
+    if (aligned == NULL || (uintptr_t)aligned % 128 != 0) return 16;
+    free(aligned);
+    aligned = valloc(33);
+    if (aligned == NULL || (uintptr_t)aligned % (uintptr_t)sysconf(_SC_PAGESIZE) != 0)
+        return 17;
+    free(aligned);
+    aligned = pvalloc(33);
+    if (aligned == NULL || (uintptr_t)aligned % (uintptr_t)sysconf(_SC_PAGESIZE) != 0)
+        return 18;
     free(aligned);
 
     volatile size_t overflowing_count = (size_t)-1;
@@ -104,6 +177,7 @@ int main(void) {
 
     if (expect_double_free_abort() != 0) return 30;
     if (expect_interior_free_abort() != 0) return 31;
+    if (exercise_extended_abi() != 0) return 32;
     puts("GINUX_ALLOCATOR_CONFORMANCE: PASS");
     return 0;
 }

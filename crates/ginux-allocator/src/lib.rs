@@ -905,7 +905,7 @@ pub unsafe extern "C" fn malloc_stats_print(
     opaque: *mut c_void,
     _options: *const c_char,
 ) {
-    static MESSAGE: &[u8] = b"ginux-allocator: guarded mmap allocator\n\0";
+    static MESSAGE: &[u8] = b"ginux-allocator: guarded arena allocator\n\0";
     if let Some(write) = callback {
         // SAFETY: MESSAGE is static and NUL terminated as required by the API.
         unsafe { write(opaque, MESSAGE.as_ptr().cast::<c_char>()) };

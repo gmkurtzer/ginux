@@ -7,18 +7,35 @@ rocky_scp tests/fixtures/allocator-conformance.c \
     "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/allocator-conformance.c"
 rocky_scp tests/fixtures/allocator-benchmark.c \
     "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/allocator-benchmark.c"
-rocky_scp crates/ginux-allocator/src/lib.rs \
-    "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/ginux-rpmbuild/BUILD/ginux-0.1.0/crates/ginux-allocator/src/lib.rs"
 rocky_ssh '
     set -eu
-    cd /var/tmp/ginux-rpmbuild/BUILD/ginux-0.1.0
+    rm -rf /var/tmp/ginux-allocator-source
+    mkdir -p /var/tmp/ginux-allocator-source
+    tar -xf /var/tmp/ginux-rpmbuild/SOURCES/ginux-0.1.0.tar.gz \
+        -C /var/tmp/ginux-allocator-source --strip-components=1
+    tar -xf /var/tmp/ginux-rpmbuild/SOURCES/ginux-0.1.0-vendor.tar.gz \
+        -C /var/tmp/ginux-allocator-source
+    cat >>/var/tmp/ginux-allocator-source/.cargo/config.toml <<"EOF"
+
+[source.crates-io]
+replace-with = "vendored-sources"
+
+[source.vendored-sources]
+directory = "vendor"
+EOF
+'
+rocky_scp crates/ginux-allocator/src/lib.rs \
+    "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/ginux-allocator-source/crates/ginux-allocator/src/lib.rs"
+rocky_ssh '
+    set -eu
+    cd /var/tmp/ginux-allocator-source
     export CARGO_TARGET_DIR=/var/tmp/ginux-rpmbuild/CARGO_TARGET
     RUSTFLAGS="-C link-arg=-Wl,-z,relro -C link-arg=-Wl,-z,now" \
         cargo build --offline --locked --release -p ginux-allocator
     allocator=/var/tmp/ginux-rpmbuild/CARGO_TARGET/release/libginux_allocator.so
     test -r "$allocator"
     cc -O2 -Wall -Wextra -Werror -pthread /var/tmp/allocator-conformance.c \
-        -o /var/tmp/allocator-conformance
+        -ldl -o /var/tmp/allocator-conformance
     cc -O2 -Wall -Wextra -Werror -pthread /var/tmp/allocator-benchmark.c \
         -o /var/tmp/allocator-benchmark
     LD_PRELOAD="$allocator" /var/tmp/allocator-conformance
