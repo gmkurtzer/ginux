@@ -53,6 +53,12 @@ RUSTFLAGS='-C link-arg=-Wl,-z,relro -C link-arg=-Wl,-z,now' \
 CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS='-C linker=clang -C link-arg=-nostdlib -C link-arg=-static -C link-arg=-no-pie -C relocation-model=static' \
     cargo build --offline --locked --release -p ginux-init --target x86_64-unknown-linux-gnu
 
+%check
+cc -O2 -Wall -Wextra -Werror -pthread \
+    tests/fixtures/allocator-conformance.c -o allocator-conformance
+LD_PRELOAD=%{cargo_target}/release/libginux_allocator.so \
+    ./allocator-conformance
+
 %install
 install -D -m 0755 %{cargo_target}/release/ginux-cli %{buildroot}%{_bindir}/ginux
 install -D -m 0755 %{cargo_target}/release/ginux-oci %{buildroot}%{_libexecdir}/ginux/ginux-image
