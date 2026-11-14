@@ -275,6 +275,26 @@ sys_read = ["/"]
         credential_config = work / "credential.toml"
         credential_config.write_text(configured.read_text().replace(
             '[network]\nbackend = "none"', '[network]\nbackend = "shared"'))
+        network_config = work / "network.toml"
+        network_config.write_text(configured.read_text().replace(
+            '[network]\nbackend = "none"', '''[contract.network]
+default = "deny"
+inbound = ["udp:18081"]
+outbound = ["udp:18081"]
+
+[network]
+backend = "shared"'''))
+        code, out = run("Network-sends", network_config, configured_launch=True)
+        fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
+        check("shared-network sends use bounded immutable destinations", code == 0 and fixture == [
+            "GINUX_FIXTURE: sendto-allowed=1", "GINUX_FIXTURE: sendto-denied=-1",
+            "GINUX_FIXTURE: sendmsg-allowed=1", "GINUX_FIXTURE: sendmsg-denied=-1",
+            "GINUX_FIXTURE: sendmmsg-allowed=2", "GINUX_FIXTURE: sendmmsg-lengths=1",
+            "GINUX_FIXTURE: sendmmsg-denied=-1", "GINUX_FIXTURE: sendto-family=-22",
+            "GINUX_FIXTURE: sendmsg-oversized=-7", "GINUX_FIXTURE: sendmsg-many-iov=-7",
+            "GINUX_FIXTURE: sendmmsg-many=-22", "GINUX_FIXTURE: connect=0",
+            "GINUX_FIXTURE: connected-sendto=1", "GINUX_FIXTURE: connected-sendmsg=1"],
+            code, out)
         code, out = run("expired-credentials", credential_config, configured_launch=True)
         fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
         check("queued credentials survive sender reap", code == 0 and fixture == [
