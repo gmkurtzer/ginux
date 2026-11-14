@@ -79,6 +79,23 @@ supervisor-owned immutable arguments for the host effect.
 - Native fixture compilation on the macOS arm64 development host is not a
   valid Linux/x86-64 check; the repository's Ubuntu CI job is the required
   execution environment for `sudo make test-native-supervision`.
+- GitHub Actions run `43557689897` passed `changes`, `static-and-unit`, and
+  `launch-integration` at corrective head `195a38bd`. The Ubuntu launch job
+  passed `sudo make test-native-supervision`, including allowed and denied
+  `sendto`/`sendmsg`/`sendmmsg`, bounds, connected sends, and deterministic
+  post-capture mutation.
+- `make test-contract` -> passed.
+- `ROCKY_SSH_PORT=22485 ... make test-security` -> passed the complete unit,
+  eight-target fuzz, native VFS, contract runtime, device, and virtual-kernel
+  matrix in isolated Rocky QEMU.
+- `ROCKY_SSH_PORT=22484 ... make test` -> passed the full aggregate suite in
+  isolated Rocky QEMU after using the existing verified cache through a
+  container-visible worktree-local layout.
+- Delivery: [PR #289](https://github.com/gmkurtzer/ginux/pull/289).
+- Source update:
+  https://github.com/gmkurtzer/ginux/issues/283#issuecomment-6871851836
+- Reciprocal PR update:
+  https://github.com/gmkurtzer/ginux/pull/289#issuecomment-6871851761
 
 ## Completed work
 
@@ -93,17 +110,19 @@ supervisor-owned immutable arguments for the host effect.
 
 ## Remaining work
 
-- [ ] Run the exact branch head through Linux native-supervision CI.
-- [ ] Run the remaining contract, security, and aggregate regression commands.
-- [ ] Deliver the pull request and reciprocal links, then stop for exact-head
+- [x] Run the exact branch head through Linux native-supervision CI.
+- [x] Run the remaining contract, security, and aggregate regression commands.
+- [x] Deliver the pull request and reciprocal links, then stop for exact-head
   security review.
 
 ## Status
 
-- Implementation and regressions are committed. Local static and unit evidence
-  passes; Linux integration and aggregate verification remain active.
+- Gate 29 is technically passed at corrective PR head `195a38bd`. Every
+  acceptance criterion has fresh Linux or aggregate evidence. It remains in
+  `gates-todo/` for exact-head security review and human acceptance.
 
 ## Actual commits
 
 - `8476539c` — immutable bounded native network-send snapshots.
 - `b2812bdc` — positive, negative, bounds, connected-send, and mutation tests.
+- `195a38bd` — implementation checkpoint and local evidence.
