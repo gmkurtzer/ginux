@@ -41,7 +41,7 @@ rocky_ssh '
     LD_PRELOAD="$allocator" /var/tmp/allocator-conformance
     report=/var/tmp/allocator-benchmark.tsv
     provenance=/var/tmp/allocator-provenance.txt
-    printf "%s\n" "allocator	threads	repetition	operations	elapsed_ns	ops_per_second" >"$report"
+    printf "%s\n" "allocator	threads	repetition	operations	elapsed_ns	ops_per_second	latency_ns	peak_rss_kib	live_requested_bytes	live_rss_delta_bytes	fragmentation_ratio" >"$report"
     {
         uname -a
         rustc --version
@@ -60,9 +60,17 @@ rocky_ssh '
                 operations=$(printf "%s\n" "$values" | sed -n "s/.*operations=\([0-9]*\).*/\1/p")
                 elapsed=$(printf "%s\n" "$values" | sed -n "s/.*elapsed_ns=\([0-9]*\).*/\1/p")
                 rate=$(printf "%s\n" "$values" | sed -n "s/.*ops_per_second=\([0-9.]*\).*/\1/p")
-                test -n "$operations" && test -n "$elapsed" && test -n "$rate"
-                printf "%s\t%s\t%s\t%s\t%s\t%s\n" \
-                    "$kind" "$threads" "$repetition" "$operations" "$elapsed" "$rate" >>"$report"
+                latency=$(printf "%s\n" "$values" | sed -n "s/.*latency_ns=\([0-9.]*\).*/\1/p")
+                peak=$(printf "%s\n" "$values" | sed -n "s/.*peak_rss_kib=\([0-9]*\).*/\1/p")
+                requested=$(printf "%s\n" "$values" | sed -n "s/.*live_requested_bytes=\([0-9]*\).*/\1/p")
+                resident=$(printf "%s\n" "$values" | sed -n "s/.*live_rss_delta_bytes=\([0-9]*\).*/\1/p")
+                fragmentation=$(printf "%s\n" "$values" | sed -n "s/.*fragmentation_ratio=\([0-9.]*\).*/\1/p")
+                test -n "$operations" && test -n "$elapsed" && test -n "$rate" && \
+                    test -n "$latency" && test -n "$peak" && test -n "$requested" && \
+                    test -n "$resident" && test -n "$fragmentation"
+                printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
+                    "$kind" "$threads" "$repetition" "$operations" "$elapsed" "$rate" \
+                    "$latency" "$peak" "$requested" "$resident" "$fragmentation" >>"$report"
             done
             repetition=$((repetition + 1))
         done

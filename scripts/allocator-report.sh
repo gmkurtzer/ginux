@@ -16,6 +16,9 @@ NR == 1 { next }
     count[key]++
     sum[key] += $6
     square[key] += $6 * $6
+    latency[key] += $7
+    peak[key] += $8
+    fragmentation[key] += $11
 }
 END {
     for (t = 1; t <= 4; t *= 2) {
@@ -27,7 +30,7 @@ END {
             mean = sum[key] / n
             variance = n > 1 ? (square[key] - sum[key] * sum[key] / n) / (n - 1) : 0
             if (variance < 0) variance = 0
-            printf "%s\t%d\t%d\t%.2f\t%.2f\n", name, t, n, mean, sqrt(variance)
+            printf "%s\t%d\t%d\t%.2f\t%.2f\t%.2f\t%.2f\t%.4f\n", name, t, n, mean, sqrt(variance), latency[key] / n, peak[key] / n, fragmentation[key] / n
         }
     }
 }
@@ -36,18 +39,18 @@ END {
 {
     printf '%s\n\n' '# Ginux allocator performance'
     printf '%s\n\n' 'This matched Rocky Linux 10 x86-64 QEMU/TCG run compares the native distribution allocator with the opt-in Ginux allocator. Each row contains five retained samples from the same guest. Results characterize this fixture only; they are not a universal allocator claim.'
-    printf '%s\n' '| Threads | Allocator | Samples | Mean ops/s | Standard deviation | Versus native |'
-    printf '%s\n' '|---:|---|---:|---:|---:|---:|'
+    printf '%s\n' '| Threads | Allocator | Samples | Mean ops/s | Stddev | Mean ns/op | Mean peak RSS KiB | Mean live RSS/requested | Versus native |'
+    printf '%s\n' '|---:|---|---:|---:|---:|---:|---:|---:|---:|'
     for threads in 1 2 4; do
         native=$(awk -F '\t' -v t="$threads" '$1 == "native" && $2 == t { print $4 }' "$summary")
-        while IFS="$(printf '\t')" read -r allocator current count mean deviation; do
+        while IFS="$(printf '\t')" read -r allocator current count mean deviation latency peak fragmentation; do
             test "$current" = "$threads" || continue
             ratio=$(awk -v value="$mean" -v control="$native" 'BEGIN { printf "%.3fx", value / control }')
-            printf '| %s | %s | %s | %.0f | %.0f | %s |\n' \
-                "$threads" "$allocator" "$count" "$mean" "$deviation" "$ratio"
+            printf '| %s | %s | %s | %.0f | %.0f | %.1f | %.0f | %.3fx | %s |\n' \
+                "$threads" "$allocator" "$count" "$mean" "$deviation" "$latency" "$peak" "$fragmentation" "$ratio"
         done <"$summary"
     done
-    printf '\n%s\n' 'Raw samples and exact environment provenance are retained under `benchmarks/allocator/`. The benchmark performs repeated 16-4096 byte allocate-touch-free operations and reports throughput. It does not measure fragmentation or every application allocation pattern.'
+    printf '\n%s\n' 'Raw samples and exact environment provenance are retained under `benchmarks/allocator/`. The benchmark keeps a touched 16-4096 byte working set while replacing allocations, and reports throughput, latency, peak RSS, and live-set RSS/requested as a bounded fragmentation proxy. It does not represent every application allocation pattern.'
 } >"$markdown"
 
 {

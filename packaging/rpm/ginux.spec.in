@@ -74,6 +74,9 @@ install -D -m 0644 %{SOURCE2} %{buildroot}%{_tmpfilesdir}/ginux.conf
 install -d -m 0755 %{buildroot}%{_docdir}/ginux
 install -m 0644 README.md NOTICE docs/cli-command-model.md \
     docs/configurable-contract.md docs/security-boundary.md \
+    docs/security-assurance.md docs/security-review.md \
+    docs/allocator.md docs/allocator-evaluation.md \
+    docs/allocator-performance.md \
     %{buildroot}%{_docdir}/ginux/
 install -D -m 0644 LICENSE %{buildroot}%{_licensedir}/ginux/LICENSE
 
