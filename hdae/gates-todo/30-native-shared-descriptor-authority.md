@@ -87,6 +87,11 @@ descriptor-table semantics without a window in which tasks sharing
   `dup` cannot complete until the mutation barrier releases.
 - `make check` passed on macOS after rebasing onto `f5ee0402`.
 - `make test-unit` passed on macOS after rebasing onto `f5ee0402`.
+- Delivery: [PR #288](https://github.com/gmkurtzer/ginux/pull/288).
+- Source update:
+  https://github.com/gmkurtzer/ginux/pull/279#issuecomment-6871665340
+- Reciprocal PR update:
+  https://github.com/gmkurtzer/ginux/pull/288#issuecomment-6871665741
 
 ## Decisions and limitations
 
@@ -105,8 +110,9 @@ descriptor-table semantics without a window in which tasks sharing
 - Planned commits: gate and imported contributor baseline; shared-table barrier;
   deterministic concurrency regression; evidence and delivery links.
 - Actual commits: `1a5f5a36` gate definition, `9dd04b94` attributed PR #279
-  baseline, `7d4bf52f` shared authority and mutation barrier, and `a1292986`
-  forced concurrency regression; evidence commit pending.
+  baseline, `7d4bf52f` shared authority and mutation barrier, `a1292986`
+  forced concurrency regression, and `3e131b15` local evidence; delivery
+  evidence commit pending.
 
 ## Review policy and outcome
 
