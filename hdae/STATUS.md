@@ -21,13 +21,15 @@
   start/status/stop, reinstall, state-preserving erase, and reinstall recovery.
 - Fresh regressions pass `make check test-cli test-unit`, `make test-contract`,
   `make test-systemd`, `make test-security test`, and `make demo-gate-26`.
-- The branch is pushed and delivered in pull request
-  https://github.com/gmkurtzer/ginux/pull/282 for human review.
+- Pull request https://github.com/gmkurtzer/ginux/pull/282 was merged by the
+  human. A post-merge follow-up on `codex/run-host-rpm` makes `make run-host`
+  build the RPM, boot the persistent Rocky host, install and verify the RPM,
+  and then open the interactive host shell.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Exact next action: record pull request 282 in the gate checkpoint, push that
-  signed record, and wait for human review and acceptance.
+- Exact next action: deliver the verified `make run-host` follow-up and wait
+  for explicit human acceptance of Gate 26.
 
 - Gate 1 is accepted and closed under the corrected ordinary-host-process
   architecture. Pull request https://github.com/gmkurtzer/ginux-us/pull/1 was
@@ -264,7 +266,8 @@ scope, threat model, and invariants.
   demo-gate-26` passed. The package lifecycle includes a clean install, online
   OCI import, network-isolated cache reuse, reinstall, retained-state erase,
   and recovery after reinstall.
-- Exact next action: wait for human review and acceptance of pull request 282.
+- Exact next action: deliver the verified `make run-host` follow-up and wait
+  for explicit human acceptance of Gate 26.
 - The final CLI correction makes required configuration files positional:
   `instance create NAME FILE`, `validate FILE`, `inspect FILE`, and
   `explain FILE OPERATION`. Fresh `make check`, `make test-contract`, and
@@ -653,16 +656,19 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Wait for human review and acceptance of Gate 26 pull request 282. Gate 11
-remains partial and Gate 14 remains explicitly deferred.
+Deliver the verified `make run-host` follow-up and wait for explicit human
+acceptance of Gate 26. Gate 11 remains partial and Gate 14 remains explicitly
+deferred.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: Gate 26 is technically passed and delivered in pull request 282;
-  it remains in `gates-todo/` pending human acceptance.
+- Active gate: Gate 26 is technically passed and pull request 282 is merged. A
+  verified post-merge `make run-host` follow-up is local on
+  `codex/run-host-rpm`; the gate remains in `gates-todo/` pending human
+  acceptance.
   Gate 11 remains partial and Gate 14 remains deferred.
 - Active work: Gate 12 is technically passed and delivered in pull request 251;
   Gate 12.1 is technically passed and delivered in pull request 252; Gate

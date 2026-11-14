@@ -218,6 +218,11 @@ script.
   lifecycle verification, displayed package metadata and contents, and
   reported `GATE26_DEMO: PASS` for offline build, install, verification, cache
   reuse, erase-state retention, and reinstall.
+- Isolated `make run-host` with a dedicated port, PID, serial log, and overlay
+  -> rebuilt the current RPM, booted Rocky Linux 10, installed and verified
+  `ginux-0.1.0-1.el10.x86_64`, opened the interactive host shell, resolved
+  `/usr/bin/ginux`, reported `ginux 0.1.0`, and stopped only the isolated test
+  host when the shell exited. The pre-existing interactive host was untouched.
 
 ## Decisions and limitations
 
@@ -257,7 +262,8 @@ script.
 
 - Working branch: `hdae/rpm-packaging`
 - Intended base: `main` after Gate 25 is accepted and merged
-- Pull request: https://github.com/gmkurtzer/ginux/pull/282
+- Pull request: https://github.com/gmkurtzer/ginux/pull/282, merged by the
+  human before the `make run-host` follow-up
 - Planned commits: gate alignment and installed-file inventory; RPM source and
   spec implementation; canonical path and installation integration; package
   lifecycle tests; documentation and evidence reconciliation
@@ -270,6 +276,6 @@ script.
 Human checkpoint gate. Gate 26 must not begin implementation until Gate 25 is
 accepted and merged and the human approves this package scope. After complete
 verification, publish one dedicated pull request and stop for human acceptance.
-Technical passage alone does not close the gate. All mandatory local criteria
-now pass; Gate 26 remains in `gates-todo/` pending explicit branch/PR
-authorization and human acceptance.
+Technical passage alone does not close the gate. All mandatory criteria and the
+post-merge `make run-host` refinement now pass; Gate 26 remains in
+`gates-todo/` pending explicit human acceptance.
