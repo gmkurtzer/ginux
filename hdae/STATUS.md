@@ -2,7 +2,24 @@
 
 ## Current checkpoint
 
-### Active implementation: Gate 26 Rocky Linux RPM packaging
+### Active implementation: Gate 31 filesystem mediation foundation
+
+- Gate 31 is approved for implementation and dedicated pull-request delivery
+  from `hdae/filesystem-mediation-foundation` against `main`.
+- The gate establishes complete filesystem call context, operation ownership,
+  typed root/cwd/descriptor authority, and independent host-effect oracles
+  without making `fs_hooks` claim a syscall.
+- Issue #290 remains the umbrella source. Gate 31 does not close it or enable an
+  operation family.
+- The human additionally requires an explicit security-focused review and the
+  complete relevant and aggregate test matrix at the final branch head.
+- Active skill: `hdae-development`
+- Skill path: `.agents/skills/hdae-development/SKILL.md`
+- Reload after context shift: required
+- Exact next action: implement the bounded immutable filesystem call context
+  and ownership inventory, then continue through the approved Gate 31 plan.
+
+### Prior checkpoint: Gate 26 Rocky Linux RPM packaging
 
 - Gate 26 is technically passed locally on `hdae/rpm-packaging` and remains a
   human checkpoint in `gates-todo/`.
