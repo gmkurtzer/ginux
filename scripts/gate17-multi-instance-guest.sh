@@ -5,6 +5,7 @@ runtime=/usr/local/libexec/ginux-runtime
 helper=/usr/local/libexec/ginux-instance-helper
 controller=/usr/local/bin/ginux
 state=/var/lib/ginux/instances
+run_state=/run/ginux/instances
 rootfs=/var/tmp/ginux-gate17-rootfs.tar
 recipe=/var/tmp/ginux-gate17-rocky.toml
 
@@ -27,7 +28,7 @@ console_check() {
     console_name=$1
     console_peer=$2
     console_peer_pid=$3
-    console_input=$state/$console_name/console.in
+    console_input=$run_state/$console_name/console.in
     printf 'root\n' >"$console_input"
     sleep 1
     printf 'ginux\n' >"$console_input"
@@ -94,8 +95,18 @@ EOF
 }
 
 cleanup() {
+    cleanup_status=$?
+    if test "$cleanup_status" -ne 0; then
+        for cleanup_name in gate17-a gate17-b; do
+            printf '%s\n' "--- $cleanup_name console (last 80 lines) ---" >&2
+            tail -n 80 "$state/$cleanup_name/console.log" >&2 || true
+            printf '%s\n' "--- $cleanup_name audit (last 80 lines) ---" >&2
+            tail -n 80 "$state/$cleanup_name/audit.log" >&2 || true
+        done
+    fi
     "$helper" --protocol 1 stop gate17-a >/dev/null 2>&1 || true
     "$helper" --protocol 1 stop gate17-b >/dev/null 2>&1 || true
+    return "$cleanup_status"
 }
 trap cleanup 0 HUP INT TERM
 
@@ -104,8 +115,8 @@ install -m 755 /var/tmp/ginux-gate17-helper "$helper"
 install -m 755 /var/tmp/ginux-gate17-cli "$controller"
 mkdir -p "$state"
 
-stage_instance gate17-a gate17-b 18181 256
-stage_instance gate17-b gate17-a 18182 512
+stage_instance gate17-a gate17-b 18181 512
+stage_instance gate17-b gate17-a 18182 1024
 
 "$controller" start gate17-a
 "$controller" start gate17-b
@@ -117,8 +128,8 @@ wait_for_log gate17-b 'gate17-b login:'
 wait_for_log gate17-a 'GINUX_GATE17_CHECK: PASS name=gate17-a'
 wait_for_log gate17-b 'GINUX_GATE17_CHECK: PASS name=gate17-b'
 
-pid_a=$(awk 'NR == 1 { print $1 }' "$state/gate17-a/supervisor.pid")
-pid_b=$(awk 'NR == 1 { print $1 }' "$state/gate17-b/supervisor.pid")
+pid_a=$(awk 'NR == 1 { print $1 }' "$run_state/gate17-a/supervisor.pid")
+pid_b=$(awk 'NR == 1 { print $1 }' "$run_state/gate17-b/supervisor.pid")
 test -n "$pid_a" && test -n "$pid_b" && test "$pid_a" != "$pid_b"
 kill -0 "$pid_a"
 kill -0 "$pid_b"
@@ -165,8 +176,8 @@ test "$shared_winners" -eq 1
 test "$shared_conflicts" -eq 1
 grep -Fq 'translated-port=bound' "$state/gate17-a/console.log"
 grep -Fq 'translated-port=bound' "$state/gate17-b/console.log"
-grep -Fq 'memory-limit=268435456' "$state/gate17-a/console.log"
-grep -Fq 'memory-limit=536870912' "$state/gate17-b/console.log"
+grep -Fq 'memory-limit=536870912' "$state/gate17-a/console.log"
+grep -Fq 'memory-limit=1073741824' "$state/gate17-b/console.log"
 
 boot_a=$(sed -n 's/.*boot-id=\([^ ]*\).*/\1/p' "$state/gate17-a/console.log" | tail -n 1)
 boot_b=$(sed -n 's/.*boot-id=\([^ ]*\).*/\1/p' "$state/gate17-b/console.log" | tail -n 1)
@@ -176,7 +187,7 @@ proc_b=$(sed -n 's/.*name=gate17-b .*pids=\([^ ]*\).*/\1/p' "$state/gate17-b/con
 case ,$proc_a, in *,$pid_b,*) exit 1 ;; esac
 case ,$proc_b, in *,$pid_a,*) exit 1 ;; esac
 
-runtime_a=$(awk 'NR == 1 { print $1 }' "$state/gate17-a/runtime.pid")
+runtime_a=$(awk 'NR == 1 { print $1 }' "$run_state/gate17-a/runtime.pid")
 kill -TERM "$pid_a"
 loss_attempt=0
 while kill -0 "$pid_a" 2>/dev/null || kill -0 "$runtime_a" 2>/dev/null; do
@@ -200,10 +211,10 @@ test "$($controller status gate17-a | sed -n 's/^state: //p')" = running
 test "$($controller status gate17-b | sed -n 's/^state: //p')" = running
 "$controller" stop gate17-a
 
-printf '999999 1\n' >"$state/gate17-a/supervisor.pid"
+printf '999999 1\n' >"$run_state/gate17-a/supervisor.pid"
 test "$($controller status gate17-a | sed -n 's/^state: //p')" = stopped
 "$controller" stop gate17-a
-test ! -e "$state/gate17-a/supervisor.pid"
+test ! -e "$run_state/gate17-a/supervisor.pid"
 
 "$controller" stop gate17-b
 trap - 0 HUP INT TERM

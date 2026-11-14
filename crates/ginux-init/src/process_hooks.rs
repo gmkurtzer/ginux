@@ -2,7 +2,9 @@
 //!
 //! The `process-native` loop runs supported fork, clone, vfork, and exec
 //! calls under ptrace, then records their outcomes in `ProcessTable`.
-//! Unsupported clone flags and execveat forms return ENOSYS before execution.
+//! Unsupported clone flags and execveat forms fail before execution. Host
+//! namespace creation returns EPERM so callers can take their documented
+//! container fallback without mistaking the ABI for absent.
 //! Clone3 is unsupported.
 //!
 //! The loop also handles virtual identities, blocking/nonblocking child
@@ -11,7 +13,7 @@
 //! Signal handlers, job control, and PI futex operations are unsupported.
 //! These hooks do not enable process creation in configured `launch`.
 
-use crate::supervisor::{ENOSYS, SYS_FORK};
+use crate::supervisor::{ENOSYS, EPERM, SYS_FORK};
 
 /// Raw clone entry: what glibc `fork()` and the `posix_spawn` fallback emit.
 pub const SYS_CLONE: u64 = 56;
@@ -52,6 +54,14 @@ pub const CLONE_NEWUSER: u64 = 0x1000_0000;
 pub const CLONE_NEWPID: u64 = 0x2000_0000;
 pub const CLONE_NEWNET: u64 = 0x4000_0000;
 pub const CLONE_NEWTIME: u64 = 0x0000_0080;
+pub const HOST_NAMESPACES: u64 = CLONE_NEWNS
+    | CLONE_NEWCGROUP
+    | CLONE_NEWUTS
+    | CLONE_NEWIPC
+    | CLONE_NEWUSER
+    | CLONE_NEWPID
+    | CLONE_NEWNET
+    | CLONE_NEWTIME;
 /// `CLONE_UNTRACED` flag (bit 23): an untraced child would escape
 /// supervision; thread shapes carrying it are denied.
 pub const CLONE_UNTRACED: u64 = 0x0080_0000;
@@ -169,17 +179,9 @@ pub const fn claims(syscall: u64) -> bool {
 /// group's own memory. Anything else with `CLONE_THREAD` fails explicitly
 /// with `-ENOSYS` and never executes on the host.
 pub fn thread_supported(flags: u64) -> bool {
-    const NAMESPACES: u64 = CLONE_NEWNS
-        | CLONE_NEWCGROUP
-        | CLONE_NEWUTS
-        | CLONE_NEWIPC
-        | CLONE_NEWUSER
-        | CLONE_NEWPID
-        | CLONE_NEWNET
-        | CLONE_NEWTIME;
     flags & CLONE_THREAD != 0
         && flags & (CLONE_VM | CLONE_SIGHAND) == (CLONE_VM | CLONE_SIGHAND)
-        && flags & (CLONE_VFORK | CLONE_PARENT | CLONE_UNTRACED | NAMESPACES) == 0
+        && flags & (CLONE_VFORK | CLONE_PARENT | CLONE_UNTRACED | HOST_NAMESPACES) == 0
         && flags & CLONE_EXIT_SIGNAL_MASK == 0
 }
 
@@ -188,6 +190,12 @@ pub fn thread_supported(flags: u64) -> bool {
 /// it is not permission for other callers to execute a host syscall.
 pub fn claim(syscall: u64, rdi: u64, _rsi: u64, _rdx: u64) -> Option<i64> {
     if syscall == SYS_CLONE {
+        // The syscall exists, but Ginux deliberately refuses host namespace
+        // creation. EPERM is both accurate and lets container-aware callers
+        // select their safe no-namespace fallback.
+        if rdi & HOST_NAMESPACES != 0 {
+            return Some(-EPERM);
+        }
         // Accept only the flags represented by managed process ownership.
         // CLONE_UNTRACED and CLONE_PARENT must be rejected for processes too.
         const ALLOWED: u64 = CLONE_VM

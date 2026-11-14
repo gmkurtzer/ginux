@@ -115,6 +115,7 @@ const SYS_FUTEX_HOST: usize = 202;
 const SYS_CLOSE_RANGE_HOST: usize = 436;
 const FUTEX_WAIT: usize = 0;
 const FUTEX_WAKE: usize = 1;
+const EAFNOSUPPORT: i64 = 97;
 const PR_SET_PDEATHSIG: usize = 1;
 const SECCOMP_IOCTL_NOTIF_RECV: usize = 0xc050_2100;
 const SECCOMP_IOCTL_NOTIF_SEND: usize = 0xc018_2101;
@@ -6657,7 +6658,11 @@ fn supervise_native(
                     }
                 }
             }
-            if task.syscall == 247 {
+            // WNOWAIT intentionally leaves a waitable child behind. Retiring
+            // its virtual identity after the peek makes the following reap
+            // return a host PID that no longer has a managed translation.
+            const WNOWAIT: u64 = 0x0100_0000;
+            if task.syscall == 247 && registers.r10 & WNOWAIT == 0 {
                 for slot in 0..tasks.len() {
                     let Some(child) = tasks[slot] else {
                         continue;
@@ -6942,6 +6947,21 @@ fn supervise_native(
                     external_port: 0,
                 };
             }
+            if matches!(task.syscall, 43 | 288) && registers.rax as i64 >= 0 {
+                let listener_protocol = native_socket_protocol(&task, registers.rdi);
+                if listener_protocol != 0 {
+                    let Some(slot) = task.socket_fds.iter_mut().find(|entry| entry.fd < 0) else {
+                        native_fail(instance, pid, b"native accepted socket table full");
+                    };
+                    *slot = NativeSocketFd {
+                        fd: registers.rax as i64,
+                        protocol: listener_protocol,
+                        source_bound: false,
+                        internal_port: 0,
+                        external_port: 0,
+                    };
+                }
+            }
             if task.syscall == 3 && registers.rax as i64 == 0 {
                 // A close emulated for a protected descriptor never ran, and
                 // the kernel's descriptor is still open.
@@ -7141,7 +7161,9 @@ fn supervise_native(
             mode == 3 && instance.config().network_backend == NetworkBackend::Shared;
         let socket_table_full =
             shared_network && syscall == 41 && !task.socket_fds.iter().any(|entry| entry.fd < 0);
-        if shared_network && syscall == 41 && !socket_table_full {
+        let unsupported_socket_family =
+            shared_network && syscall == 41 && !matches!(registers.rdi, 1 | 2 | 10);
+        if shared_network && syscall == 41 && !socket_table_full && !unsupported_socket_family {
             task.pending_socket_type = (registers.rsi & 0xf) as u8;
         }
         if shared_network
@@ -7837,6 +7859,20 @@ fn supervise_native(
                     || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
                 {
                     native_fail(instance, pid, b"native sysinfo emulation failed");
+                }
+            }
+            Action::Mediate if unsupported_socket_family => {
+                write_all(b"deny surface=virtual-network result=-");
+                write_u64(EAFNOSUPPORT as u64);
+                write_all(b" reason=unsupported-address-family\n");
+                registers.orig_rax = u64::MAX;
+                task.awaiting_exit = true;
+                task.override_exit = true;
+                task.override_result = -EAFNOSUPPORT;
+                if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+                {
+                    native_fail(instance, pid, b"native socket family denial failed");
                 }
             }
             Action::Mediate if socket_table_full => {
@@ -8837,8 +8873,17 @@ fn supervise_native(
                         && tracee_string_equals(host_pid, registers.rsi as usize, b"/proc"));
                 let credentials_read_only_remount = registers.rdi == 0
                     && registers.rdx == 0
-                    && registers.r10
-                        == MS_RDONLY | MS_NOSUID | MS_NODEV | MS_NOEXEC | MS_REMOUNT | MS_BIND
+                    && matches!(
+                        registers.r10,
+                        flags if flags == MS_RDONLY | MS_NOSUID | MS_NODEV | MS_REMOUNT | MS_BIND
+                            || flags
+                                == MS_RDONLY
+                                    | MS_NOSUID
+                                    | MS_NODEV
+                                    | MS_NOEXEC
+                                    | MS_REMOUNT
+                                    | MS_BIND
+                    )
                     && tracee_decimal_fd_path(host_pid, registers.rsi as usize);
                 let credentials_move = registers.rdx == 0
                     && registers.r10 == MS_MOVE
@@ -9765,18 +9810,24 @@ fn supervise_native(
                 } else {
                     None
                 };
-                let fs_type = virtual_path
-                    .or_else(|| target_len.map(|length| &target[..length]))
-                    .and_then(|path| {
-                        if path == b"/proc" || path.starts_with(b"/proc/") {
-                            Some(0x9fa0u64)
-                        } else if path == b"/sys/fs/cgroup" || path.starts_with(b"/sys/fs/cgroup/")
-                        {
-                            Some(0x6367_7270u64)
-                        } else {
-                            None
-                        }
-                    });
+                let target_path =
+                    virtual_path.or_else(|| target_len.map(|length| &target[..length]));
+                let fs_type = target_path.and_then(|path| {
+                    if path == b"/proc" || path.starts_with(b"/proc/") {
+                        Some(0x9fa0u64)
+                    } else if path == b"/sys/fs/cgroup" || path.starts_with(b"/sys/fs/cgroup/") {
+                        Some(0x6367_7270u64)
+                    } else if path.starts_with(b"/") {
+                        // The descriptor resolver above proves that this
+                        // object is below the tracee's chroot. Return a
+                        // stable generic filesystem view rather than
+                        // leaking host mount identity or passing the
+                        // request through to the host.
+                        Some(0xef53u64)
+                    } else {
+                        None
+                    }
+                });
                 let Some(fs_type) = fs_type else {
                     line(b"deny result=-1 reason=non-virtual-fstatfs");
                     registers.orig_rax = u64::MAX;
@@ -9797,10 +9848,10 @@ fn supervise_native(
                 statfs[64..72].copy_from_slice(&255u64.to_ne_bytes());
                 statfs[72..80].copy_from_slice(&4096u64.to_ne_bytes());
                 let allowed = write_tracee_bytes(host_pid, registers.rsi as usize, &statfs);
-                write_all(if fs_type == 0x9fa0 {
-                    b"emulate surface=virtual-procfs result="
-                } else {
-                    b"emulate surface=virtual-cgroup result="
+                write_all(match fs_type {
+                    0x9fa0 => b"emulate surface=virtual-procfs result=",
+                    0x6367_7270 => b"emulate surface=virtual-cgroup result=",
+                    _ => b"emulate surface=instance-filesystem result=",
                 });
                 write_i64(if allowed { 0 } else { -EPERM });
                 write_all(b"\n");

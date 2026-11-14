@@ -9,7 +9,12 @@ expected='SR-01
 SR-02
 SR-03
 SR-04
-SR-05'
+SR-05
+SR-06
+SR-07
+SR-08
+SR-09
+SR-10'
 actual=$(sed -n 's/^| \(SR-[0-9][0-9]\) |.*$/\1/p' "$document")
 test "$actual" = "$expected" || {
     printf '%s\n' 'security finding ledger has missing, duplicate, or reordered IDs' >&2
@@ -23,4 +28,4 @@ fi
 
 grep -Fq 'No unresolved high- or critical-impact finding remains' "$document"
 grep -Fq 'not an independent audit' "$document"
-printf '%s\n' 'SECURITY_FINDINGS: PASS (5 fixed findings, evidence mapped)'
+printf '%s\n' 'SECURITY_FINDINGS: PASS (10 fixed findings, evidence mapped)'
