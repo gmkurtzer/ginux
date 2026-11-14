@@ -2,8 +2,8 @@
 
 ## Source
 
-[Issue #283](https://github.com/gmkurtzer/ginux/issues/283), reviewed against
-`main` at `33948c62b0eb59546f0b8a0a0d05592a083c481b`.
+[Issue #283](https://github.com/gmkurtzer/ginux/issues/283), implemented from
+`main` at `f5ee0402b64ed0765dfcc0e43adac52466f2f91f`.
 
 ## Goal
 
@@ -71,9 +71,39 @@ supervisor-owned immutable arguments for the host effect.
   including 44, 46, and 307, without inspecting their destinations.
 - The issue's dynamic oracle demonstrates denied `connect` returning `EPERM`
   while `sendto` to the same UDP port succeeds.
+- `make check` -> passed after the immutable network-send implementation.
+- `make test-unit` -> passed all component tests.
+- `PYTHONPYCACHEPREFIX=/private/tmp/ginux-pycache-283 python3 -m py_compile
+  scripts/test-native-supervision.py scripts/test-native-network-snapshot.py`
+  -> passed.
+- Native fixture compilation on the macOS arm64 development host is not a
+  valid Linux/x86-64 check; the repository's Ubuntu CI job is the required
+  execution environment for `sudo make test-native-supervision`.
+
+## Completed work
+
+- [x] Added bounded read-only snapshots for `sendto` and `sendmsg` payload,
+  destination, iovec, and control metadata.
+- [x] Replayed bounded `sendmmsg` batches through snapshot-backed `sendmsg`
+  calls while preserving Linux partial-result and `msg_len` behavior.
+- [x] Applied outbound protocol/port policy to every explicit destination and
+  retained connected sends with no supplied destination.
+- [x] Added positive, denied, malformed, oversized, connected-send, and
+  deterministic post-capture mutation regressions.
+
+## Remaining work
+
+- [ ] Run the exact branch head through Linux native-supervision CI.
+- [ ] Run the remaining contract, security, and aggregate regression commands.
+- [ ] Deliver the pull request and reciprocal links, then stop for exact-head
+  security review.
 
 ## Status
 
-- Confirmed and aligned. Implementation is active; no pull request exists yet
-  because the delivery must include the complete corrective code and tests.
+- Implementation and regressions are committed. Local static and unit evidence
+  passes; Linux integration and aggregate verification remain active.
 
+## Actual commits
+
+- `8476539c` — immutable bounded native network-send snapshots.
+- `b2812bdc` — positive, negative, bounds, connected-send, and mutation tests.
