@@ -18,6 +18,7 @@ mod dispatch;
 mod fs_hooks;
 mod launch;
 mod native_clone;
+mod native_network;
 mod process_hooks;
 mod supervisor;
 
@@ -3383,6 +3384,7 @@ fn native_tracee_setup_fail(code: usize) -> ! {
 struct NativeSupervisorTask {
     host_pid: usize,
     clone_call: native_clone::Pending,
+    network_call: native_network::Pending,
     lifetime_pidfd: isize,
     virtual_id: TaskId,
     start_ticks: u64,
@@ -5716,6 +5718,8 @@ fn supervise_native(
     let control_available = unsafe { syscall2(SYS_FCNTL as usize, 10, F_GETFD as usize) } >= 0;
     let mut control_broker_pid = 0isize;
     let mut tasks: [Option<NativeSupervisorTask>; 128] = [None; 128];
+    let mut network_buffers: [native_network::Buffer; 128] =
+        core::array::from_fn(|_| native_network::Buffer::empty());
     let mut retired_credentials = [EMPTY_RETIRED_CREDENTIAL; 128];
     let mut next_retired_credential = 0usize;
     let mut virtual_kernel_fds = [EMPTY_VIRTUAL_KERNEL_FD; NATIVE_VIRTUAL_KERNEL_FD_LIMIT];
@@ -5732,6 +5736,7 @@ fn supervise_native(
     tasks[0] = Some(NativeSupervisorTask {
         host_pid: pid,
         clone_call: native_clone::Pending::empty(),
+        network_call: native_network::Pending::empty(),
         lifetime_pidfd: -1,
         virtual_id: root_virtual,
         start_ticks: 0,
@@ -5956,6 +5961,7 @@ fn supervise_native(
                 } else {
                     native_clone::Pending::empty()
                 },
+                network_call: native_network::Pending::empty(),
                 lifetime_pidfd,
                 virtual_id: child_virtual,
                 start_ticks: child_start_ticks,
@@ -6306,6 +6312,22 @@ fn supervise_native(
             }
             continue;
         }
+        if seccomp_entry
+            && matches!(
+                task.network_call.phase,
+                native_network::Phase::Call | native_network::Phase::Unmap
+            )
+        {
+            if !task.network_call.matches_entry(&registers) {
+                native_fail(instance, pid, b"native network replay mismatch");
+            }
+            task.awaiting_exit = true;
+            tasks[task_index] = Some(task);
+            if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
+                native_fail(instance, pid, b"native network replay resume failed");
+            }
+            continue;
+        }
         if !seccomp_entry && !task.awaiting_exit && registers.orig_rax == u64::MAX {
             tasks[task_index] = Some(task);
             if ptrace(PTRACE_CONT, host_pid, 0, 0) < 0 {
@@ -6314,9 +6336,60 @@ fn supervise_native(
             continue;
         }
 
+        let mut network_reissued = false;
+        if !seccomp_entry
+            && task.awaiting_exit
+            && task.network_call.phase != native_network::Phase::Idle
+        {
+            use native_network::Phase;
+            match task.network_call.phase {
+                Phase::Map if registers.rax as i64 >= 0 => {
+                    task.network_call
+                        .mapped(host_pid, &network_buffers[task_index], &mut registers)
+                        .unwrap_or_else(|_| {
+                            native_fail(instance, pid, b"native network snapshot write failed")
+                        });
+                    task.awaiting_exit = false;
+                    tasks[task_index] = Some(task);
+                    if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                        || ptrace(PTRACE_CONT, host_pid, 0, 0) < 0
+                    {
+                        native_fail(instance, pid, b"native network snapshot resume failed");
+                    }
+                    continue;
+                }
+                Phase::Call => {
+                    task.network_call
+                        .completed_call(host_pid, &mut registers)
+                        .unwrap_or_else(|_| {
+                            native_fail(instance, pid, b"native network snapshot result failed")
+                        });
+                    task.awaiting_exit = false;
+                    tasks[task_index] = Some(task);
+                    if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                        || ptrace(PTRACE_CONT, host_pid, 0, 0) < 0
+                    {
+                        native_fail(instance, pid, b"native network cleanup resume failed");
+                    }
+                    continue;
+                }
+                Phase::Map | Phase::Unmap => {
+                    if task.network_call.phase == Phase::Map {
+                        task.network_call.result = registers.rax as i64;
+                    } else if registers.rax as i64 != 0 {
+                        native_fail(instance, pid, b"native network snapshot cleanup failed");
+                    }
+                    network_reissued = task.network_call.restore(&mut registers);
+                    task.override_exit = true;
+                    task.override_result = registers.rax as i64;
+                }
+                Phase::Idle => {}
+            }
+        }
+
         if !seccomp_entry && task.awaiting_exit {
             use native_clone::Phase;
-            let mut reissued = false;
+            let mut reissued = network_reissued;
             match task.clone_call.phase {
                 Phase::Map if registers.rax as i64 >= 0 => {
                     task.clone_call
@@ -6908,6 +6981,88 @@ fn supervise_native(
                 }
             }
         }
+        if shared_network && matches!(syscall, 44 | 46 | 307) {
+            let protocol = native_socket_protocol(&task, registers.rdi);
+            let network_protocol = match protocol {
+                1 => Some(NetworkProtocol::Tcp),
+                2 => Some(NetworkProtocol::Udp),
+                _ => None,
+            };
+            let snapshot = native_network::Pending::snapshot(
+                host_pid,
+                task_index,
+                &registers,
+                &mut network_buffers[task_index],
+            );
+            let mut error = None;
+            if network_protocol.is_none() {
+                error = Some(-EPERM);
+            }
+            if let Ok(candidate) = &snapshot {
+                for destination in candidate.destinations().iter().flatten() {
+                    if !instance.config().network_allows(
+                        false,
+                        network_protocol.unwrap_or(NetworkProtocol::Tcp),
+                        destination.port,
+                    ) {
+                        write_all(b"GINUX_NETWORK_AUDIT: action=deny direction=egress port=");
+                        write_u64(destination.port as u64);
+                        write_all(b" result=-");
+                        write_u64(EPERM as u64);
+                        write_all(b"\n");
+                        error = Some(-EPERM);
+                        break;
+                    }
+                }
+            } else if let Err(snapshot_error) = &snapshot {
+                error = Some(*snapshot_error);
+            }
+            if error.is_none() {
+                if let Some(source) = instance.config().network_source_ipv4() {
+                    let socket_index = task
+                        .socket_fds
+                        .iter()
+                        .position(|entry| entry.fd == registers.rdi as i64);
+                    let source_bound =
+                        socket_index.is_some_and(|index| task.socket_fds[index].source_bound);
+                    if !source_bound {
+                        if !native_bind_socket_source(host_pid, registers.rdi as i64, source) {
+                            native_fail(instance, pid, b"native source-address bind failed");
+                        }
+                        if let Some(index) = socket_index {
+                            task.socket_fds[index].source_bound = true;
+                        }
+                        write_all(b"GINUX_NETWORK_AUDIT: action=source-bind address=");
+                        write_all(instance.config().network_source.as_bytes());
+                        write_all(b"\n");
+                    }
+                }
+            }
+            task.awaiting_exit = true;
+            match (snapshot, error) {
+                (Ok(snapshot), None) => {
+                    task.network_call = snapshot;
+                    task.network_call.map(&mut registers);
+                    line(b"mediate surface=immutable-network-send result=pending");
+                }
+                (_, Some(error)) => {
+                    write_all(b"emulate surface=immutable-network-send result=");
+                    write_i64(error);
+                    write_all(b"\n");
+                    registers.orig_rax = u64::MAX;
+                    task.override_exit = true;
+                    task.override_result = error;
+                }
+                _ => unreachable!(),
+            }
+            tasks[task_index] = Some(task);
+            if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+            {
+                native_fail(instance, pid, b"native network snapshot setup failed");
+            }
+            continue;
+        }
         let implementation_decision = if mode == 3 {
             if let Some(result) =
                 process_hooks::claim(syscall, registers.rdi, registers.rsi, registers.rdx)
@@ -7108,7 +7263,10 @@ fn supervise_native(
                 _ => false,
             };
         let clone_memory_denied = mode == 3 && native_clone::changes_snapshot(syscall, &registers);
+        let network_memory_denied =
+            mode == 3 && native_network::changes_snapshot(syscall, &registers);
         let local_policy_denied = clone_memory_denied
+            || network_memory_denied
             || path_policy_denied
             || setid_policy_denied
             || device_node_policy_denied;
@@ -7116,6 +7274,8 @@ fn supervise_native(
             write_all(b"GINUX_POLICY_AUDIT: action=deny policy=");
             write_all(if clone_memory_denied {
                 b"clone-arguments"
+            } else if network_memory_denied {
+                b"network-arguments"
             } else if path_policy_denied {
                 b"filesystem-write"
             } else if setid_policy_denied {
