@@ -71,6 +71,14 @@ static void print_result(const char *label, long value)
     call3(1, 1, (word)line, length);
 }
 
+/* The supervisor answers TIOCGPGRP itself on a descriptor it tracks as the
+ * console; any other descriptor gets the host's answer (ENOTTY or EBADF). */
+static long tracked_as_console(long fd)
+{
+    int group = 0;
+    return call3(16, fd, 0x540f /* TIOCGPGRP */, (word)&group) == 0;
+}
+
 static volatile long yield_signals;
 
 static void yield_signal_handler(int signal)
@@ -130,7 +138,108 @@ __asm__(".global native_clone_spawn\n"
         "ud2\n"
         "1: ret\n");
 
-long native_fixture_main(void)
+/* A CLONE_THREAD child that stores the result of syscall `number` with
+ * arguments a and b in *result and exits. */
+long native_thread_call(word flags, word stack, word number, word a, word b,
+                        volatile long *result);
+__asm__(".global native_thread_call\n"
+        "native_thread_call:\n"
+        "push %r12\n"
+        "push %r13\n"
+        "push %r14\n"
+        "push %r15\n"
+        "mov %rdx, %r12\n"
+        "mov %rcx, %r13\n"
+        "mov %r8, %r14\n"
+        "mov %r9, %r15\n"
+        "xor %edx, %edx\n"
+        "xor %r10d, %r10d\n"
+        "xor %r8d, %r8d\n"
+        "mov $56, %eax\n"
+        "syscall\n"
+        "test %rax, %rax\n"
+        "jnz 1f\n"
+        "mov %r12, %rax\n"
+        "mov %r13, %rdi\n"
+        "mov %r14, %rsi\n"
+        "xor %edx, %edx\n"
+        "syscall\n"
+        "mov %rax, (%r15)\n"
+        "mov $60, %eax\n"
+        "xor %edi, %edi\n"
+        "syscall\n"
+        "ud2\n"
+        "1: pop %r15\n"
+        "pop %r14\n"
+        "pop %r13\n"
+        "pop %r12\n"
+        "ret\n");
+
+static volatile long descriptor_mutation_start;
+static volatile long descriptor_mutation_entered;
+static volatile long descriptor_mutation_result = -1000;
+static volatile long descriptor_sibling_start;
+static volatile long descriptor_sibling_entered;
+static volatile long descriptor_sibling_result = -1000;
+
+/* Two CLONE_FILES threads used to force a descriptor-table interleaving. The
+ * first blocks in F_SETLKW while the host test owns the conflicting lock. The
+ * second attempts dup only after the first entered its syscall. */
+long native_gated_fcntl(word flags, word stack, const void *lock);
+__asm__(".global native_gated_fcntl\n"
+        "native_gated_fcntl:\n"
+        "push %r12\n"
+        "mov %rdx, %r12\n"
+        "xor %edx, %edx\n"
+        "xor %r10d, %r10d\n"
+        "xor %r8d, %r8d\n"
+        "mov $56, %eax\n"
+        "syscall\n"
+        "test %rax, %rax\n"
+        "jnz 2f\n"
+        "1: cmpl $0, descriptor_mutation_start(%rip)\n"
+        "je 1b\n"
+        "movq $1, descriptor_mutation_entered(%rip)\n"
+        "mov $72, %eax\n"
+        "mov $1, %edi\n"
+        "mov $7, %esi\n"
+        "mov %r12, %rdx\n"
+        "syscall\n"
+        "mov %rax, descriptor_mutation_result(%rip)\n"
+        "mov $60, %eax\n"
+        "xor %edi, %edi\n"
+        "syscall\n"
+        "ud2\n"
+        "2: pop %r12\n"
+        "ret\n");
+
+long native_gated_dup(word flags, word stack, word source);
+__asm__(".global native_gated_dup\n"
+        "native_gated_dup:\n"
+        "push %r12\n"
+        "mov %rdx, %r12\n"
+        "xor %edx, %edx\n"
+        "xor %r10d, %r10d\n"
+        "xor %r8d, %r8d\n"
+        "mov $56, %eax\n"
+        "syscall\n"
+        "test %rax, %rax\n"
+        "jnz 2f\n"
+        "1: cmpl $0, descriptor_sibling_start(%rip)\n"
+        "je 1b\n"
+        "movq $1, descriptor_sibling_entered(%rip)\n"
+        "mov $32, %eax\n"
+        "mov %r12, %rdi\n"
+        "syscall\n"
+        "mov %rax, descriptor_sibling_result(%rip)\n"
+        "mov $60, %eax\n"
+        "xor %edi, %edi\n"
+        "syscall\n"
+        "ud2\n"
+        "2: pop %r12\n"
+        "ret\n");
+
+long native_fixture_main(const word *stack)
 {
     char scenario[16] = {0};
     long fd = call3(2, (word)"/scenario", 0, 0);
@@ -726,6 +835,151 @@ long native_fixture_main(void)
                      call3(83, (word)"/sys/fs/cgroup/escape/ginux-cgroup-escape-check", 0755, 0));
         return 0;
     }
+    case 'L': {
+        /* Console descriptor tracking follows the host descriptor table.
+         * The exec at the end runs this scenario again with "after-exec". */
+        const char *expected = "after-exec", *argument = stack[0] > 1 ? (const char *)stack[2] : "";
+        while (*expected && *argument == *expected) ++argument, ++expected;
+        if (*expected == 0 && *argument == 0) {
+            /* After the exec below: the scenario descriptor reused the
+             * number of the close-on-exec open of the console and is a plain
+             * file, the close-on-exec copies 30-32, 36-37 and 42 are gone, and
+             * 33-35 and 38 are still the console. */
+            print_result("GINUX_FIXTURE: exec-reused-console=", tracked_as_console(fd));
+            print_result("GINUX_FIXTURE: exec-write-reused=", call3(1, fd, (word)"L\n", 2));
+            print_result("GINUX_FIXTURE: exec-dropped-console=",
+                         tracked_as_console(30) + tracked_as_console(31) + tracked_as_console(32)
+                         + tracked_as_console(36) + tracked_as_console(37) + tracked_as_console(42));
+            print_result("GINUX_FIXTURE: exec-kept-console=",
+                         tracked_as_console(33) + tracked_as_console(34) + tracked_as_console(35)
+                         + tracked_as_console(38));
+            return 0;
+        }
+        struct { word flags, pidfd, child_tid, parent_tid, exit_signal, stack,
+            stack_size, tls, set_tid, set_tid_size, cgroup; } args = {0};
+        int status = 0;
+        /* The protected console descriptor survives close, which is only
+         * emulated. */
+        call3(3, 241, 0, 0);
+        print_result("GINUX_FIXTURE: protected-close-console=", tracked_as_console(241));
+        long console = call3(2, (word)"/dev/console", 1 /* O_WRONLY */, 0);
+        print_result("GINUX_FIXTURE: console-open-ok=", console >= 0);
+        /* The kernel reads a descriptor argument as 32 bits. */
+        long high = call3(32, (1UL << 32) | (word)console, 0, 0);
+        print_result("GINUX_FIXTURE: high-bits-dup-console=", tracked_as_console(high));
+        call3(3, high, 0, 0);
+        /* A CLONE_FILES child shares the table: its duplicate is the
+         * parent's console descriptor too. */
+        long pid = call5(56, 0x400 /* CLONE_FILES */ | 17, 0, 0, 0, 0);
+        if (pid == 0) call3(231, call3(32, console, 0, 0), 0, 0);
+        long shared = pid > 0 && call4(61, pid, (word)&status, 0, 0) == pid ? (status >> 8) & 0xff : -1;
+        print_result("GINUX_FIXTURE: shared-dup-console=", tracked_as_console(shared));
+        /* A console descriptor it closes and reuses for a file is not. */
+        long copy = call3(32, console, 0, 0);
+        args.flags = 0x400; args.exit_signal = 17;
+        pid = call3(435, (word)&args, sizeof args, 0);
+        if (pid == 0) {
+            call3(3, copy, 0, 0);
+            call3(231, call3(2, (word)"/scenario", 0, 0) == copy, 0, 0);
+        }
+        print_result("GINUX_FIXTURE: shared-reuse-same-number=",
+                     pid > 0 && call4(61, pid, (word)&status, 0, 0) == pid && status == 256);
+        print_result("GINUX_FIXTURE: shared-reuse-console=", tracked_as_console(copy));
+        /* Without CLONE_FILES the child closes only its own copy. */
+        long kept = call3(32, console, 0, 0);
+        pid = call3(57, 0, 0, 0);
+        if (pid == 0) call3(231, call3(3, kept, 0, 0), 0, 0);
+        if (pid > 0) call4(61, pid, (word)&status, 0, 0);
+        print_result("GINUX_FIXTURE: private-close-console=", tracked_as_console(kept));
+        /* A thread shares the table as well, and its open of the console is
+         * the latest open for the other threads too. */
+        volatile long threaded = -1000, opened = -1000;
+        word thread_stack = call6(9, 0, 16384, 3, 0x22, -1, 0);
+        const word thread = 0x50f00; /* VM|FS|FILES|SIGHAND|THREAD|SYSVSEM */
+        if (native_thread_call(thread, thread_stack + 16384, 32, console, 0, &threaded) > 0)
+            while (threaded == -1000) call3(24, 0, 0, 0);
+        print_result("GINUX_FIXTURE: thread-dup-console=", tracked_as_console(threaded));
+        if (native_thread_call(thread, thread_stack + 16384, 2, (word)"/dev/console", 1,
+                               &opened) > 0)
+            while (opened == -1000) call3(24, 0, 0, 0);
+        print_result("GINUX_FIXTURE: write-thread-open=", call3(1, opened, (word)"L\n", 2));
+        /* dup2 and dup3 of a file over a console copy replace it. */
+        call3(72, console, 0, 39);
+        call3(33, fd, 39, 0);
+        call3(72, console, 0, 40);
+        call3(292, fd, 40, 0x80000);
+        print_result("GINUX_FIXTURE: overwritten-console=",
+                     tracked_as_console(39) + tracked_as_console(40));
+        /* close_range without flags closes. */
+        call3(72, console, 0, 41);
+        call3(436, 41, 41, 0);
+        print_result("GINUX_FIXTURE: closed-range-console=", tracked_as_console(41));
+        call3(3, console, 0, 0);
+        call3(3, shared, 0, 0);
+        call3(3, copy, 0, 0);
+        call3(3, kept, 0, 0);
+        call3(3, threaded, 0, 0);
+        call3(3, opened, 0, 0);
+        /* Exec closes the close-on-exec descriptors, however they got the
+         * flag, and keeps the rest. The open itself must give the kernel
+         * descriptor the flag and leave the caller's arguments in place. */
+        word path = (word)"/dev/console", flags = 1 | 0x80000 /* O_CLOEXEC */, mode = 0;
+        __asm__ volatile("syscall" : "=a"(console), "+D"(path), "+S"(flags), "+d"(mode)
+                         : "a"(2L)
+                         : "rcx", "r11", "memory");
+        print_result("GINUX_FIXTURE: console-cloexec=", call3(72, console, 1 /* F_GETFD */, 0));
+        print_result("GINUX_FIXTURE: open-arguments-kept=",
+                     path == (word)"/dev/console" && flags == (1 | 0x80000) && mode == 0);
+        call3(292, console, 30, 0x80000);
+        call3(72, console, 1030 /* F_DUPFD_CLOEXEC */, 31);
+        call3(72, call3(72, console, 0 /* F_DUPFD */, 32), 2 /* F_SETFD */, 1 /* FD_CLOEXEC */);
+        call3(72, console, 0, 33);
+        call3(33, console, 34, 0);
+        call3(72, call3(72, console, 1030, 35), 2, 0);
+        call3(16, call3(72, console, 0, 36), 0x5451 /* FIOCLEX */, 0);
+        call3(72, console, 0, 37);
+        call3(436, 37, 37, 4 /* CLOSE_RANGE_CLOEXEC */);
+        print_result("GINUX_FIXTURE: cloexec-range-console=", tracked_as_console(37));
+        call3(292, console, 38, 0x80000);
+        call3(16, 38, 0x5450 /* FIONCLEX */, 0);
+        call3(72, console, 1030, 42);
+        call3(33, 42, 42, 0); /* dup2 onto itself keeps close-on-exec */
+        word exec_argv[] = {(word)"/usr/bin/bash", (word)"after-exec", 0}, exec_env[] = {0};
+        print_result("GINUX_FIXTURE: exec=",
+                     call3(59, (word)"/usr/bin/bash", (word)exec_argv, (word)exec_env));
+        return 0;
+    }
+    case 'M': {
+        /* stdout is a regular file whose conflicting host-process lock is
+         * released after this test observes the sibling waiting. */
+        struct {
+            short type, whence;
+            long start, length;
+            int pid;
+        } lock = {0 /* F_RDLCK */, 0 /* SEEK_SET */, 0, 1, 0};
+        const word thread = 0x50f00; /* VM|FS|FILES|SIGHAND|THREAD|SYSVSEM */
+        word first_stack = call6(9, 0, 16384, 3, 0x22, -1, 0);
+        word second_stack = call6(9, 0, 16384, 3, 0x22, -1, 0);
+        long console = call3(2, (word)"/dev/console", 1 /* O_WRONLY */, 0);
+        long first = native_gated_fcntl(thread, first_stack + 16384, &lock);
+        long second = native_gated_dup(thread, second_stack + 16384, console);
+        print_result("GINUX_FIXTURE: barrier-threads=", first > 0 && second > 0);
+        descriptor_mutation_start = 1;
+        while (!descriptor_mutation_entered) __asm__ volatile("pause");
+        /* Give the first thread time to reach the blocked host fcntl before
+         * the sibling reaches its seccomp stop. */
+        for (volatile word spin = 0; spin < 1000000; ++spin) __asm__ volatile("pause");
+        descriptor_sibling_start = 1;
+        while (!descriptor_sibling_entered) __asm__ volatile("pause");
+        for (volatile word spin = 0; spin < 10000000; ++spin) __asm__ volatile("pause");
+        print_result("GINUX_FIXTURE: sibling-deferred=", descriptor_sibling_result == -1000);
+        while (descriptor_mutation_result == -1000 || descriptor_sibling_result == -1000)
+            __asm__ volatile("pause");
+        print_result("GINUX_FIXTURE: mutation-result=", descriptor_mutation_result);
+        print_result("GINUX_FIXTURE: sibling-console=",
+                     tracked_as_console(descriptor_sibling_result));
+        return 0;
+    }
     default:
         return 81;
     }
@@ -733,6 +987,7 @@ long native_fixture_main(void)
 
 __asm__(".global _start\n"
         "_start:\n"
+        "mov %rsp, %rdi\n"
         "and $-16, %rsp\n"
         "call native_fixture_main\n"
         "mov %rax, %rdi\n"
