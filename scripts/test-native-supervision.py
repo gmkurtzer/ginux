@@ -127,6 +127,14 @@ sys_read = ["/"]
             "GINUX_FIXTURE: pi_word=0", "GINUX_FIXTURE: futex_lock_pi_flags=-1",
             "GINUX_FIXTURE: pi_flags_word=0"] and "GINUX_NATIVE_CHECK: PASS" in out, code, out)
 
+        code, out = run("virtual-tid", configured)
+        fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
+        check("configured thread identity is virtual", code == 0 and fixture == [
+            "GINUX_FIXTURE: set_tid_address=1", "GINUX_FIXTURE: getpid=1",
+            "GINUX_FIXTURE: gettid=1", "GINUX_FIXTURE: futex_lock_pi=-1",
+            "GINUX_FIXTURE: pi_word=0", "GINUX_FIXTURE: futex_lock_pi_flags=-1",
+            "GINUX_FIXTURE: pi_flags_word=0"] and "GINUX_NATIVE_CHECK: PASS" in out, code, out)
+
         code, out = run("ysinfo")
         fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
         check("sysinfo is deterministic and private", code == 0 and fixture == [

@@ -6508,6 +6508,13 @@ fn supervise_native(
                     task.override_result = registers.rax as i64;
                 }
             }
+            if task.syscall == SYS_SET_TID_ADDRESS && registers.rax as i64 > 0 {
+                // The host must retain the clear-on-exit registration, but
+                // its return value is the caller's host TID. Publish the
+                // configured workload's virtual identity instead.
+                task.override_exit = true;
+                task.override_result = task.virtual_id.pid as i64;
+            }
             if task.override_exit {
                 if task.syscall != 61 || registers.rax as i64 <= 0 {
                     registers.rax = task.override_result as u64;
