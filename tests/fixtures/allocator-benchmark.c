@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include <pthread.h>
+#include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -56,7 +57,12 @@ static void *worker(void *argument) {
         free(slots[slot]);
         size_t size = 16 + ((i * 73 + id * 31) % 4096);
         slots[slot] = malloc(size);
-        if (slots[slot] == NULL) return (void *)4;
+        if (slots[slot] == NULL) {
+            fprintf(stderr,
+                    "allocator allocation failed: thread=%zu iteration=%zu size=%zu errno=%d\n",
+                    (size_t)id, i, size, errno);
+            return (void *)4;
+        }
         slots[slot][0] = (unsigned char)i;
         slots[slot][size - 1] = (unsigned char)id;
     }
@@ -81,7 +87,13 @@ int main(int argc, char **argv) {
     if (wait_at(&start_barrier) != 0) return 6;
     for (size_t i = 0; i < count; ++i) {
         void *result = NULL;
-        if (pthread_join(threads[i], &result) != 0 || result != NULL) return 7;
+        int join_status = pthread_join(threads[i], &result);
+        if (join_status != 0 || result != NULL) {
+            fprintf(stderr,
+                    "allocator worker failed: thread=%zu join_status=%d worker_status=%zu\n",
+                    i, join_status, (size_t)result);
+            return 7;
+        }
     }
     uint64_t elapsed = nanoseconds() - start;
     size_t operations = count * (size_t)ITERATIONS;

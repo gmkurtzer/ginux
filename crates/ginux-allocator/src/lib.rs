@@ -309,6 +309,10 @@ fn thread_shard() -> usize {
     identity.wrapping_mul(0x9e37_79b9_7f4a_7c15) >> (usize::BITS as usize - 3)
 }
 
+fn shard_probe(preferred: usize, probe: usize) -> usize {
+    (preferred + probe) % ARENA_SHARDS
+}
+
 fn reserve_arena_bytes(index: usize, size: usize) -> bool {
     let arena = &ARENAS[index];
     let previous = arena.live_bytes.fetch_add(size, Ordering::AcqRel);
@@ -402,36 +406,38 @@ fn allocate_slab(requested: usize, zero: bool) -> *mut c_void {
     let Some(class_index) = class_index(requested) else {
         return ptr::null_mut();
     };
-    let index = class_index * ARENA_SHARDS + thread_shard();
     let class = SIZE_CLASSES[class_index];
-    if !reserve_arena_bytes(index, class) {
-        set_errno(libc::ENOMEM);
-        return ptr::null_mut();
-    }
-    let Some(payload) = initialize_arena(index) else {
-        ARENAS[index].live_bytes.fetch_sub(class, Ordering::AcqRel);
-        set_errno(libc::ENOMEM);
-        return ptr::null_mut();
-    };
-    let slots = ARENA_BYTES / class;
-    let start = ARENAS[index].cursor.fetch_add(1, Ordering::Relaxed) % slots;
-    for step in 0..slots {
-        let slot = (start + step) % slots;
-        let word = slot / 64;
-        let mask = 1u64 << (slot % 64);
-        if ARENAS[index].live[word].fetch_or(mask, Ordering::AcqRel) & mask == 0 {
-            let user = payload + slot * class;
-            if zero {
-                // SAFETY: this thread owns the selected live slot.
-                unsafe { ptr::write_bytes(user as *mut u8, 0, requested) };
-            }
-            ARENAS[index]
-                .live_allocations
-                .fetch_add(1, Ordering::Relaxed);
-            return user as *mut c_void;
+    let preferred = thread_shard();
+    for probe in 0..ARENA_SHARDS {
+        let shard = shard_probe(preferred, probe);
+        let index = class_index * ARENA_SHARDS + shard;
+        if !reserve_arena_bytes(index, class) {
+            continue;
         }
+        let Some(payload) = initialize_arena(index) else {
+            ARENAS[index].live_bytes.fetch_sub(class, Ordering::AcqRel);
+            continue;
+        };
+        let slots = ARENA_BYTES / class;
+        let start = ARENAS[index].cursor.fetch_add(1, Ordering::Relaxed) % slots;
+        for step in 0..slots {
+            let slot = (start + step) % slots;
+            let word = slot / 64;
+            let mask = 1u64 << (slot % 64);
+            if ARENAS[index].live[word].fetch_or(mask, Ordering::AcqRel) & mask == 0 {
+                let user = payload + slot * class;
+                if zero {
+                    // SAFETY: this thread owns the selected live slot.
+                    unsafe { ptr::write_bytes(user as *mut u8, 0, requested) };
+                }
+                ARENAS[index]
+                    .live_allocations
+                    .fetch_add(1, Ordering::Relaxed);
+                return user as *mut c_void;
+            }
+        }
+        ARENAS[index].live_bytes.fetch_sub(class, Ordering::AcqRel);
     }
-    ARENAS[index].live_bytes.fetch_sub(class, Ordering::AcqRel);
     set_errno(libc::ENOMEM);
     ptr::null_mut()
 }
@@ -1001,6 +1007,21 @@ mod tests {
             if index > 0 {
                 assert!(SIZE_CLASSES[index - 1] < size);
             }
+        }
+    }
+
+    #[test]
+    fn shard_fallback_visits_every_arena_once() {
+        for preferred in 0..ARENA_SHARDS {
+            let mut seen = 0usize;
+            for probe in 0..ARENA_SHARDS {
+                let shard = shard_probe(preferred, probe);
+                assert!(shard < ARENA_SHARDS);
+                let bit = 1usize << shard;
+                assert_eq!(seen & bit, 0);
+                seen |= bit;
+            }
+            assert_eq!(seen, (1usize << ARENA_SHARDS) - 1);
         }
     }
 
