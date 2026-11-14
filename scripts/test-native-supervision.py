@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Check `ginux native` supervision edges with a fixture as /usr/bin/bash (Linux/root)."""
 import os
+import fcntl
 import resource
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 
 def main():
@@ -319,6 +321,36 @@ sys_read = ["/"]
                                   "GINUX_FIXTURE: exec-write-reused=-9",
                                   "GINUX_FIXTURE: exec-dropped-console=0",
                                   "GINUX_FIXTURE: exec-kept-console=4"], code, out)
+
+        # Force a shared-table mutation to remain in the host kernel while a
+        # sibling reaches another descriptor operation. The host process owns
+        # the conflicting byte-range lock; without the supervisor barrier the
+        # sibling dup completes before that lock is released.
+        barrier_output = work / "descriptor-barrier-output"
+        with barrier_output.open("w+b") as output:
+            fcntl.lockf(output, fcntl.LOCK_EX, 1)
+            (root / "scenario").write_text("M-descriptor-barrier")
+            proc = subprocess.Popen(
+                [str(work / "ginux"), "native", str(denied_console), str(root), "configured"],
+                stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.PIPE)
+            try:
+                time.sleep(1)
+                fcntl.lockf(output, fcntl.LOCK_UN, 1)
+                _, error = proc.communicate(timeout=30)
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.wait()
+                fcntl.lockf(output, fcntl.LOCK_UN, 1)
+            output.flush()
+            output.seek(0)
+            out = output.read().decode(errors="replace") + (error or b"").decode(errors="replace")
+        fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
+        check("shared descriptor mutations are serialized", proc.returncode == 0 and fixture == [
+            "GINUX_FIXTURE: barrier-threads=1",
+            "GINUX_FIXTURE: sibling-deferred=1",
+            "GINUX_FIXTURE: mutation-result=0",
+            "GINUX_FIXTURE: sibling-console=1"], proc.returncode, out)
 
         # Upstream owns cgroups in memory. Retain the public API and
         # containment regressions without requiring obsolete host files.

@@ -175,6 +175,70 @@ __asm__(".global native_thread_call\n"
         "pop %r12\n"
         "ret\n");
 
+static volatile long descriptor_mutation_start;
+static volatile long descriptor_mutation_entered;
+static volatile long descriptor_mutation_result = -1000;
+static volatile long descriptor_sibling_start;
+static volatile long descriptor_sibling_entered;
+static volatile long descriptor_sibling_result = -1000;
+
+/* Two CLONE_FILES threads used to force a descriptor-table interleaving. The
+ * first blocks in F_SETLKW while the host test owns the conflicting lock. The
+ * second attempts dup only after the first entered its syscall. */
+long native_gated_fcntl(word flags, word stack, const void *lock);
+__asm__(".global native_gated_fcntl\n"
+        "native_gated_fcntl:\n"
+        "push %r12\n"
+        "mov %rdx, %r12\n"
+        "xor %edx, %edx\n"
+        "xor %r10d, %r10d\n"
+        "xor %r8d, %r8d\n"
+        "mov $56, %eax\n"
+        "syscall\n"
+        "test %rax, %rax\n"
+        "jnz 2f\n"
+        "1: cmpl $0, descriptor_mutation_start(%rip)\n"
+        "je 1b\n"
+        "movq $1, descriptor_mutation_entered(%rip)\n"
+        "mov $72, %eax\n"
+        "mov $1, %edi\n"
+        "mov $7, %esi\n"
+        "mov %r12, %rdx\n"
+        "syscall\n"
+        "mov %rax, descriptor_mutation_result(%rip)\n"
+        "mov $60, %eax\n"
+        "xor %edi, %edi\n"
+        "syscall\n"
+        "ud2\n"
+        "2: pop %r12\n"
+        "ret\n");
+
+long native_gated_dup(word flags, word stack, word source);
+__asm__(".global native_gated_dup\n"
+        "native_gated_dup:\n"
+        "push %r12\n"
+        "mov %rdx, %r12\n"
+        "xor %edx, %edx\n"
+        "xor %r10d, %r10d\n"
+        "xor %r8d, %r8d\n"
+        "mov $56, %eax\n"
+        "syscall\n"
+        "test %rax, %rax\n"
+        "jnz 2f\n"
+        "1: cmpl $0, descriptor_sibling_start(%rip)\n"
+        "je 1b\n"
+        "movq $1, descriptor_sibling_entered(%rip)\n"
+        "mov $32, %eax\n"
+        "mov %r12, %rdi\n"
+        "syscall\n"
+        "mov %rax, descriptor_sibling_result(%rip)\n"
+        "mov $60, %eax\n"
+        "xor %edi, %edi\n"
+        "syscall\n"
+        "ud2\n"
+        "2: pop %r12\n"
+        "ret\n");
+
 long native_fixture_main(const word *stack)
 {
     char scenario[16] = {0};
@@ -883,6 +947,37 @@ long native_fixture_main(const word *stack)
         word exec_argv[] = {(word)"/usr/bin/bash", (word)"after-exec", 0}, exec_env[] = {0};
         print_result("GINUX_FIXTURE: exec=",
                      call3(59, (word)"/usr/bin/bash", (word)exec_argv, (word)exec_env));
+        return 0;
+    }
+    case 'M': {
+        /* stdout is a regular file whose conflicting host-process lock is
+         * released after this test observes the sibling waiting. */
+        struct {
+            short type, whence;
+            long start, length;
+            int pid;
+        } lock = {0 /* F_RDLCK */, 0 /* SEEK_SET */, 0, 1, 0};
+        const word thread = 0x50f00; /* VM|FS|FILES|SIGHAND|THREAD|SYSVSEM */
+        word first_stack = call6(9, 0, 16384, 3, 0x22, -1, 0);
+        word second_stack = call6(9, 0, 16384, 3, 0x22, -1, 0);
+        long console = call3(2, (word)"/dev/console", 1 /* O_WRONLY */, 0);
+        long first = native_gated_fcntl(thread, first_stack + 16384, &lock);
+        long second = native_gated_dup(thread, second_stack + 16384, console);
+        print_result("GINUX_FIXTURE: barrier-threads=", first > 0 && second > 0);
+        descriptor_mutation_start = 1;
+        while (!descriptor_mutation_entered) __asm__ volatile("pause");
+        /* Give the first thread time to reach the blocked host fcntl before
+         * the sibling reaches its seccomp stop. */
+        for (volatile word spin = 0; spin < 1000000; ++spin) __asm__ volatile("pause");
+        descriptor_sibling_start = 1;
+        while (!descriptor_sibling_entered) __asm__ volatile("pause");
+        for (volatile word spin = 0; spin < 10000000; ++spin) __asm__ volatile("pause");
+        print_result("GINUX_FIXTURE: sibling-deferred=", descriptor_sibling_result == -1000);
+        while (descriptor_mutation_result == -1000 || descriptor_sibling_result == -1000)
+            __asm__ volatile("pause");
+        print_result("GINUX_FIXTURE: mutation-result=", descriptor_mutation_result);
+        print_result("GINUX_FIXTURE: sibling-console=",
+                     tracked_as_console(descriptor_sibling_result));
         return 0;
     }
     default:
