@@ -269,6 +269,70 @@ long native_fixture_main(void)
         print_result("GINUX_FIXTURE: getrandom=", call3(318, (word)random, sizeof random, 0));
         return 0;
     }
+    case 'N': {
+        struct address { unsigned short family, port; unsigned address; char zero[8]; };
+        struct iovec { void *base; word length; };
+        struct message {
+            void *name; unsigned name_length, name_padding;
+            struct iovec *iov; word iov_count;
+            void *control; word control_length;
+            unsigned flags, flags_padding;
+        };
+        struct multimessage { struct message message; unsigned length, padding; };
+        struct address allowed = {2, 0xa146, 0x0100007f, {0}}; /* 18081 */
+        struct address denied = {2, 0xa246, 0x0100007f, {0}}; /* 18082 */
+        struct address unsupported = {1, 0, 0, {0}};
+        char payload = 'x';
+        static char oversized[17000];
+        struct iovec iov = {&payload, 1}, large = {oversized, sizeof oversized};
+        struct iovec many[17];
+        struct message allowed_message = {&allowed, sizeof allowed, 0, &iov, 1, 0, 0, 0, 0};
+        struct message denied_message = {&denied, sizeof denied, 0, &iov, 1, 0, 0, 0, 0};
+        struct message connected_message = {0, 0, 0, &iov, 1, 0, 0, 0, 0};
+        struct message large_message = {&allowed, sizeof allowed, 0, &large, 1, 0, 0, 0, 0};
+        struct message many_message = {&allowed, sizeof allowed, 0, many, 17, 0, 0, 0, 0};
+        struct multimessage batch[17] = {0};
+        long receiver = call3(41, 2, 2, 0), sender = call3(41, 2, 2, 0);
+        if (receiver < 0 || sender < 0 || call3(49, receiver, (word)&allowed, sizeof allowed) < 0)
+            return 89;
+        print_result("GINUX_FIXTURE: sendto-allowed=",
+                     call6(44, sender, (word)&payload, 1, 0, (word)&allowed, sizeof allowed));
+        print_result("GINUX_FIXTURE: sendto-denied=",
+                     call6(44, sender, (word)&payload, 1, 0, (word)&denied, sizeof denied));
+        print_result("GINUX_FIXTURE: sendmsg-allowed=", call3(46, sender, (word)&allowed_message, 0));
+        print_result("GINUX_FIXTURE: sendmsg-denied=", call3(46, sender, (word)&denied_message, 0));
+        batch[0].message = allowed_message; batch[1].message = allowed_message;
+        print_result("GINUX_FIXTURE: sendmmsg-allowed=", call4(307, sender, (word)batch, 2, 0));
+        print_result("GINUX_FIXTURE: sendmmsg-lengths=", batch[0].length == 1 && batch[1].length == 1);
+        batch[0].message = denied_message;
+        print_result("GINUX_FIXTURE: sendmmsg-denied=", call4(307, sender, (word)batch, 1, 0));
+        print_result("GINUX_FIXTURE: sendto-family=",
+                     call6(44, sender, (word)&payload, 1, 0, (word)&unsupported, sizeof unsupported));
+        print_result("GINUX_FIXTURE: sendmsg-oversized=", call3(46, sender, (word)&large_message, 0));
+        print_result("GINUX_FIXTURE: sendmsg-many-iov=", call3(46, sender, (word)&many_message, 0));
+        print_result("GINUX_FIXTURE: sendmmsg-many=", call4(307, sender, (word)batch, 17, 0));
+        print_result("GINUX_FIXTURE: connect=", call3(42, sender, (word)&allowed, sizeof allowed));
+        print_result("GINUX_FIXTURE: connected-sendto=",
+                     call6(44, sender, (word)&payload, 1, 0, 0, 0));
+        print_result("GINUX_FIXTURE: connected-sendmsg=",
+                     call3(46, sender, (word)&connected_message, 0));
+        return 0;
+    }
+    case 'R': {
+        struct address { unsigned short family, port; unsigned address; char zero[8]; };
+        static struct address allowed = {2, 0xa146, 0x0100007f, {0}};
+        char payload = 'x', received = 0;
+        long receiver = call3(41, 2, 2, 0), sender = call3(41, 2, 2, 0);
+        if (receiver < 0 || sender < 0 || call3(49, receiver, (word)&allowed, sizeof allowed) < 0)
+            return 90;
+        print_result("GINUX_FIXTURE: network-race-address=", (word)&allowed);
+        print_result("GINUX_FIXTURE: network-race-send=",
+                     call6(44, sender, (word)&payload, 1, 0, (word)&allowed, sizeof allowed));
+        print_result("GINUX_FIXTURE: network-race-recv=",
+                     call6(45, receiver, (word)&received, 1, 0, 0, 0));
+        print_result("GINUX_FIXTURE: network-race-mutated=", allowed.port == 0xa246);
+        return 0;
+    }
     case 'd': {
         /* descriptors: the launcher passed a host directory as 239, 242 and
          * 300; only the protected null (240) and console (241) stay open. */
