@@ -3,7 +3,7 @@ rustc 1.92.0 (ded5c06cf 2025-12-08) (Red Hat 1.92.0-2.el10_2)
 cargo 1.92.0 (344c4567c 2025-10-21) (Red Hat 1.92.0-2.el10_2)
 cc (GCC) 14.3.1 20251022 (Red Hat 14.3.1-4)
 jemalloc-5.3.0-10.el10_1.x86_64
-15fc582192f1e2670b4288bec04b4746c25f453c6acb5cde2f50ed51a49a509f  /var/tmp/ginux-rpmbuild/CARGO_TARGET/release/libginux_allocator.so
-fcfd142da8195c4e625b12d13bb8f7a3fd6b58c908fee76af950293954eb9bba  /var/tmp/allocator-benchmark
+8e656da96765f0ccc5994be08b08f05a355912b92d59d8516922e1a99164fe08  /var/tmp/ginux-rpmbuild/CARGO_TARGET/release/libginux_allocator.so
+48e3630e15f88be7b7d0b66e614ce697589089319f184ade5ef0f363728b8fc9  /var/tmp/allocator-benchmark
 environment=Rocky Linux QEMU TCG
-source_commit=76209bc813164b3ab255da70bd6bca02079d4669
+source_commit=da24dff705a694b155aba5e26769b605a30d1329

@@ -4,14 +4,14 @@ This matched Rocky Linux 10 x86-64 QEMU/TCG run compares the native distribution
 
 | Threads | Allocator | Samples | Mean ops/s | Stddev | Mean ns/op | Mean peak RSS KiB | Mean live RSS/requested | Versus native |
 |---:|---|---:|---:|---:|---:|---:|---:|---:|
-| 1 | native | 5 | 1968651 | 304039 | 520.4 | 2241 | 1.116x | 1.000x |
-| 1 | jemalloc | 5 | 8473412 | 2830211 | 140.6 | 12334 | 8.481x | 4.304x |
-| 1 | ginux-guarded | 5 | 4523166 | 153229 | 221.3 | 2676 | 1.671x | 2.298x |
-| 2 | native | 5 | 4085997 | 55352 | 244.8 | 2859 | 1.118x | 1.000x |
-| 2 | jemalloc | 5 | 19306628 | 667798 | 51.8 | 16452 | 8.475x | 4.725x |
-| 2 | ginux-guarded | 5 | 8785447 | 226306 | 113.9 | 3349 | 1.609x | 2.150x |
-| 4 | native | 5 | 7206329 | 457260 | 139.2 | 4199 | 1.077x | 1.000x |
-| 4 | jemalloc | 5 | 29859293 | 6875166 | 35.3 | 24676 | 8.427x | 4.143x |
-| 4 | ginux-guarded | 5 | 12253638 | 3117770 | 86.4 | 4753 | 1.578x | 1.700x |
+| 1 | native | 5 | 2062505 | 34889 | 485.0 | 2220 | 1.043x | 1.000x |
+| 1 | jemalloc | 5 | 7925321 | 2371273 | 143.1 | 12338 | 8.507x | 3.843x |
+| 1 | ginux-guarded | 5 | 1402030 | 25004 | 713.4 | 6469 | 1.786x | 0.680x |
+| 2 | native | 5 | 3999126 | 34758 | 250.1 | 2866 | 1.080x | 1.000x |
+| 2 | jemalloc | 5 | 16543941 | 1399531 | 60.8 | 16450 | 8.475x | 4.137x |
+| 2 | ginux-guarded | 5 | 2658915 | 57578 | 376.2 | 11078 | 1.666x | 0.665x |
+| 4 | native | 5 | 6982580 | 853561 | 145.3 | 4122 | 1.064x | 1.000x |
+| 4 | jemalloc | 5 | 30972323 | 934879 | 32.3 | 25070 | 8.630x | 4.436x |
+| 4 | ginux-guarded | 5 | 4002184 | 1316581 | 277.1 | 19107 | 1.580x | 0.573x |
 
 Raw samples and exact environment provenance are retained under `benchmarks/allocator/`. The benchmark keeps a touched 16-4096 byte working set while replacing allocations, and reports throughput, latency, peak RSS, and live-set RSS/requested as a bounded fragmentation proxy. It does not represent every application allocation pattern.
