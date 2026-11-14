@@ -4,6 +4,8 @@ use ginux_contract::Action;
 
 pub const X86_64_AUDIT_ARCH: u32 = 0xc000_003e;
 pub const ENOSYS: i32 = 38;
+pub const ABI_REFERENCE: &str =
+    "Linux v6.12 arch/x86/entry/syscalls/syscall_64.tbl plus Linux man-pages semantics";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ContractAuthorization {
@@ -353,6 +355,15 @@ pub static OPERATIONS: &[Operation] = &[
         "legacy native path route"
     ),
     op!(
+        7,
+        "poll",
+        DescriptorCore,
+        "fds,count,timeout",
+        "poll events",
+        "descriptor set",
+        "descriptor mediation"
+    ),
+    op!(
         8,
         "lseek",
         DescriptorCore,
@@ -369,6 +380,15 @@ pub static OPERATIONS: &[Operation] = &[
         "map flags",
         "descriptor:mmap",
         "memory mediation"
+    ),
+    op!(
+        16,
+        "ioctl",
+        DescriptorCore,
+        "fd,request,arg",
+        "request-specific",
+        "descriptor+ioctl contract",
+        "descriptor mediation"
     ),
     op!(
         17,
@@ -416,6 +436,24 @@ pub static OPERATIONS: &[Operation] = &[
         "legacy native path route"
     ),
     op!(
+        22,
+        "pipe",
+        DescriptorCore,
+        "pipefd",
+        "none",
+        "descriptor table:create",
+        "process descriptor mediation"
+    ),
+    op!(
+        23,
+        "select",
+        DescriptorCore,
+        "nfds,readfds,writefds,exceptfds,timeout",
+        "descriptor sets",
+        "descriptor set",
+        "descriptor mediation"
+    ),
+    op!(
         32,
         "dup",
         DescriptorCore,
@@ -459,6 +497,15 @@ pub static OPERATIONS: &[Operation] = &[
         "command",
         "descriptor",
         "descriptor table"
+    ),
+    op!(
+        73,
+        "flock",
+        DescriptorCore,
+        "fd,operation",
+        "lock operation",
+        "descriptor:metadata",
+        "descriptor mediation"
     ),
     op!(
         74,
@@ -659,6 +706,15 @@ pub static OPERATIONS: &[Operation] = &[
         "process lane"
     ),
     op!(
+        132,
+        "utime",
+        FilesystemLane,
+        "path,times",
+        "none",
+        "resolved object:metadata",
+        "legacy native path route"
+    ),
+    op!(
         133,
         "mknod",
         FilesystemLane,
@@ -686,12 +742,30 @@ pub static OPERATIONS: &[Operation] = &[
         "descriptor mediation"
     ),
     op!(
+        155,
+        "pivot_root",
+        ExplicitDeny,
+        "new_root,put_old",
+        "none",
+        "mount capability",
+        "explicit denial"
+    ),
+    op!(
         161,
         "chroot",
         ExplicitDeny,
         "path",
         "none",
         "instance root authority",
+        "explicit denial"
+    ),
+    op!(
+        162,
+        "sync",
+        ExplicitDeny,
+        "none",
+        "none",
+        "host-global filesystem authority",
         "explicit denial"
     ),
     op!(
@@ -737,6 +811,24 @@ pub static OPERATIONS: &[Operation] = &[
         "path",
         "none",
         "host-global authority",
+        "explicit denial"
+    ),
+    op!(
+        179,
+        "quotactl",
+        ExplicitDeny,
+        "command,special,id,address",
+        "quota command",
+        "host-global filesystem authority",
+        "explicit denial"
+    ),
+    op!(
+        180,
+        "nfsservctl",
+        ExplicitDeny,
+        "command,arg,response",
+        "command-specific",
+        "host-global filesystem authority",
         "explicit denial"
     ),
     op!(
@@ -857,6 +949,60 @@ pub static OPERATIONS: &[Operation] = &[
         "descriptor mediation"
     ),
     op!(
+        206,
+        "io_setup",
+        ExplicitDeny,
+        "events,context",
+        "none",
+        "asynchronous I/O authority",
+        "explicit denial"
+    ),
+    op!(
+        207,
+        "io_destroy",
+        ExplicitDeny,
+        "context",
+        "none",
+        "asynchronous I/O authority",
+        "explicit denial"
+    ),
+    op!(
+        208,
+        "io_getevents",
+        ExplicitDeny,
+        "context,min,count,events,timeout",
+        "none",
+        "asynchronous I/O authority",
+        "explicit denial"
+    ),
+    op!(
+        209,
+        "io_submit",
+        ExplicitDeny,
+        "context,count,requests",
+        "request-specific",
+        "asynchronous descriptor rights",
+        "explicit denial"
+    ),
+    op!(
+        210,
+        "io_cancel",
+        ExplicitDeny,
+        "context,request,result",
+        "none",
+        "asynchronous I/O authority",
+        "explicit denial"
+    ),
+    op!(
+        213,
+        "epoll_create",
+        DescriptorCore,
+        "size",
+        "none",
+        "descriptor table:create",
+        "descriptor mediation"
+    ),
+    op!(
         217,
         "getdents64",
         DescriptorCore,
@@ -872,6 +1018,24 @@ pub static OPERATIONS: &[Operation] = &[
         "fd,offset,length,advice",
         "advice",
         "descriptor",
+        "descriptor mediation"
+    ),
+    op!(
+        232,
+        "epoll_wait",
+        DescriptorCore,
+        "epfd,events,count,timeout",
+        "none",
+        "descriptor set",
+        "descriptor mediation"
+    ),
+    op!(
+        233,
+        "epoll_ctl",
+        DescriptorCore,
+        "epfd,operation,fd,event",
+        "control operation",
+        "two descriptors",
         "descriptor mediation"
     ),
     op!(
@@ -1064,6 +1228,15 @@ pub static OPERATIONS: &[Operation] = &[
         "legacy native path route"
     ),
     op!(
+        281,
+        "epoll_pwait",
+        DescriptorCore,
+        "epfd,events,count,timeout,sigmask,size",
+        "none",
+        "descriptor set",
+        "descriptor mediation"
+    ),
+    op!(
         285,
         "fallocate",
         DescriptorCore,
@@ -1073,6 +1246,33 @@ pub static OPERATIONS: &[Operation] = &[
         "descriptor mediation"
     ),
     op!(
+        291,
+        "epoll_create1",
+        DescriptorCore,
+        "flags",
+        "create flags",
+        "descriptor table:create",
+        "descriptor mediation"
+    ),
+    op!(
+        292,
+        "dup3",
+        DescriptorCore,
+        "oldfd,newfd,flags",
+        "duplicate flags",
+        "descriptor table",
+        "descriptor mediation"
+    ),
+    op!(
+        293,
+        "pipe2",
+        DescriptorCore,
+        "pipefd,flags",
+        "create flags",
+        "descriptor table:create",
+        "process descriptor mediation"
+    ),
+    op!(
         294,
         "inotify_init1",
         DescriptorCore,
@@ -1080,6 +1280,42 @@ pub static OPERATIONS: &[Operation] = &[
         "create flags",
         "instance notification table",
         "legacy descriptor mediation"
+    ),
+    op!(
+        295,
+        "preadv",
+        DescriptorCore,
+        "fd,iov,count,offset",
+        "none",
+        "descriptor:read",
+        "descriptor mediation"
+    ),
+    op!(
+        296,
+        "pwritev",
+        DescriptorCore,
+        "fd,iov,count,offset",
+        "none",
+        "descriptor:write",
+        "descriptor mediation"
+    ),
+    op!(
+        300,
+        "fanotify_init",
+        ExplicitDeny,
+        "flags,event_flags",
+        "notification flags",
+        "filesystem observation authority",
+        "explicit denial"
+    ),
+    op!(
+        301,
+        "fanotify_mark",
+        ExplicitDeny,
+        "fd,flags,mask,dirfd,path",
+        "mark flags",
+        "descriptor+root+cwd",
+        "explicit denial"
     ),
     op!(
         303,
@@ -1107,6 +1343,15 @@ pub static OPERATIONS: &[Operation] = &[
         "none",
         "descriptor:write",
         "descriptor mediation"
+    ),
+    op!(
+        313,
+        "finit_module",
+        ExplicitDeny,
+        "fd,params,flags",
+        "module flags",
+        "host kernel authority",
+        "explicit denial"
     ),
     op!(
         316,
@@ -1170,6 +1415,42 @@ pub static OPERATIONS: &[Operation] = &[
         "at flags",
         "root+cwd+dirfd+read",
         "legacy native path route"
+    ),
+    op!(
+        333,
+        "io_pgetevents",
+        ExplicitDeny,
+        "context,min,count,events,timeout,signal",
+        "none",
+        "asynchronous I/O authority",
+        "explicit denial"
+    ),
+    op!(
+        425,
+        "io_uring_setup",
+        ExplicitDeny,
+        "entries,parameters",
+        "setup flags",
+        "asynchronous I/O authority",
+        "explicit denial"
+    ),
+    op!(
+        426,
+        "io_uring_enter",
+        ExplicitDeny,
+        "fd,submit,min_complete,flags,sigmask,size",
+        "enter flags",
+        "asynchronous descriptor rights",
+        "explicit denial"
+    ),
+    op!(
+        427,
+        "io_uring_register",
+        ExplicitDeny,
+        "fd,opcode,arg,count",
+        "opcode-specific",
+        "asynchronous descriptor rights",
+        "explicit denial"
     ),
     op!(
         428,
@@ -1244,6 +1525,15 @@ pub static OPERATIONS: &[Operation] = &[
         "legacy native path route"
     ),
     op!(
+        438,
+        "pidfd_getfd",
+        ExplicitDeny,
+        "pidfd,targetfd,flags",
+        "none",
+        "external descriptor import authority",
+        "explicit denial"
+    ),
+    op!(
         439,
         "faccessat2",
         FilesystemLane,
@@ -1251,6 +1541,15 @@ pub static OPERATIONS: &[Operation] = &[
         "at flags",
         "root+cwd+dirfd+read",
         "legacy native path route"
+    ),
+    op!(
+        441,
+        "epoll_pwait2",
+        DescriptorCore,
+        "epfd,events,count,timeout,sigmask,size",
+        "none",
+        "descriptor set",
+        "descriptor mediation"
     ),
     op!(
         442,
@@ -1262,6 +1561,42 @@ pub static OPERATIONS: &[Operation] = &[
         "explicit denial"
     ),
     op!(
+        444,
+        "landlock_create_ruleset",
+        ExplicitDeny,
+        "attribute,size,flags",
+        "ruleset flags",
+        "nested filesystem-policy authority",
+        "explicit denial"
+    ),
+    op!(
+        445,
+        "landlock_add_rule",
+        ExplicitDeny,
+        "ruleset,rule_type,attribute,flags",
+        "rule flags",
+        "nested filesystem-policy authority",
+        "explicit denial"
+    ),
+    op!(
+        446,
+        "landlock_restrict_self",
+        ExplicitDeny,
+        "ruleset,flags",
+        "restriction flags",
+        "nested filesystem-policy authority",
+        "explicit denial"
+    ),
+    op!(
+        451,
+        "cachestat",
+        DescriptorCore,
+        "fd,range,output,flags",
+        "query flags",
+        "descriptor:metadata",
+        "descriptor mediation"
+    ),
+    op!(
         452,
         "fchmodat2",
         FilesystemLane,
@@ -1269,6 +1604,24 @@ pub static OPERATIONS: &[Operation] = &[
         "at flags",
         "resolved object:metadata",
         "legacy native path route"
+    ),
+    op!(
+        457,
+        "statmount",
+        ExplicitDeny,
+        "request,buffer,size,flags",
+        "query flags",
+        "mount capability",
+        "explicit denial"
+    ),
+    op!(
+        458,
+        "listmount",
+        ExplicitDeny,
+        "request,mounts,count,flags",
+        "query flags",
+        "mount capability",
+        "explicit denial"
     ),
 ];
 
@@ -1439,13 +1792,19 @@ mod tests {
                 .iter()
                 .any(|other| other.syscall == operation.syscall));
         }
+        assert!(OPERATIONS
+            .windows(2)
+            .all(|pair| pair[0].syscall < pair[1].syscall));
         for syscall in [2, 82, 264, 316, 332, 437, 452] {
             assert_eq!(
                 operation(syscall).map(|entry| entry.owner),
                 Some(Owner::FilesystemLane)
             );
         }
-        for syscall in [161, 165, 304, 428, 442] {
+        for syscall in [
+            155, 161, 162, 165, 179, 206, 209, 300, 304, 313, 425, 426, 427, 428, 438, 442, 444,
+            445, 446, 457, 458,
+        ] {
             assert_eq!(
                 operation(syscall).map(|entry| entry.owner),
                 Some(Owner::ExplicitDeny)
