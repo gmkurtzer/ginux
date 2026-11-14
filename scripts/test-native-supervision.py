@@ -380,7 +380,12 @@ backend = "shared"'''))
             code, out = run("K-console-descriptors", denied_console, stdin=console, configured_launch=True)
             fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
             check("denied console write covers duplicates and vectored writes", code == 0
-                  and fixture == ["GINUX_FIXTURE: console-open-ok=1",
+                  and fixture == ["GINUX_FIXTURE: stdin-console=1",
+                                  "GINUX_FIXTURE: stdout-console=0",
+                                  "GINUX_FIXTURE: stderr-console=0",
+                                  "GINUX_FIXTURE: console-open-ok=1",
+                                  "GINUX_FIXTURE: stderr-after-dup-console=1",
+                                  "GINUX_FIXTURE: write-stderr-console=-1",
                                   "GINUX_FIXTURE: write-duplicate=-1",
                                   "GINUX_FIXTURE: writev-console=-1",
                                   "GINUX_FIXTURE: pwrite-duplicate=-1",
@@ -391,10 +396,15 @@ backend = "shared"'''))
             code, out = run("K-console-descriptors", configured, stdin=console)
             fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
             check("allowed console write still reaches the console", code == 0
-                  and fixture[:3] == ["GINUX_FIXTURE: console-open-ok=1",
+                  and fixture[:8] == ["GINUX_FIXTURE: stdin-console=1",
+                                      "GINUX_FIXTURE: stdout-console=0",
+                                      "GINUX_FIXTURE: stderr-console=0",
+                                      "GINUX_FIXTURE: console-open-ok=1",
+                                      "GINUX_FIXTURE: stderr-after-dup-console=1",
+                                      "GINUX_FIXTURE: write-stderr-console=2",
                                       "GINUX_FIXTURE: write-duplicate=2",
                                       "GINUX_FIXTURE: writev-console=2"]
-                  and (work / "console-output").read_bytes().startswith(b"K\nK\n"), code, out)
+                  and (work / "console-output").read_bytes().startswith(b"K\nK\nK\n"), code, out)
 
         # Upstream owns cgroups in memory. Retain the public API and
         # containment regressions without requiring obsolete host files.

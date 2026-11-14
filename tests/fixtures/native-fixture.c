@@ -1047,10 +1047,16 @@ long native_fixture_main(const word *stack)
     case 'K': {
         /* console writes through a duplicate and through the vectored and
          * positional calls are console writes like write on the open itself. */
+        print_result("GINUX_FIXTURE: stdin-console=", tracked_as_console(0));
+        print_result("GINUX_FIXTURE: stdout-console=", tracked_as_console(1));
+        print_result("GINUX_FIXTURE: stderr-console=", tracked_as_console(2));
         long console = call3(2, (word)"/dev/console", 1 /* O_WRONLY */, 0);
         long copy = call3(32, console, 0, 0);
         struct { const char *base; word length; } vector = {"K\n", 2};
         print_result("GINUX_FIXTURE: console-open-ok=", console >= 0);
+        call3(33, console, 2, 0);
+        print_result("GINUX_FIXTURE: stderr-after-dup-console=", tracked_as_console(2));
+        print_result("GINUX_FIXTURE: write-stderr-console=", call3(1, 2, (word)"K\n", 2));
         print_result("GINUX_FIXTURE: write-duplicate=", call3(1, copy, (word)"K\n", 2));
         print_result("GINUX_FIXTURE: writev-console=", call3(20, console, (word)&vector, 1));
         print_result("GINUX_FIXTURE: pwrite-duplicate=", call4(18, copy, (word)"K\n", 2, 0));

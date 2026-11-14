@@ -5767,7 +5767,10 @@ fn supervise_native(
     let mut peak_managed_tasks = 1usize;
     let mut yield_broker_pid = 0usize;
     let mut root_console_fds = [0u64; NATIVE_PROC_FD_LIMIT / 64];
-    for descriptor in [0, 1, 2, INSTANCE_CONSOLE_FD] {
+    // The protected console aliases inherited stdin. Stdout and stderr keep
+    // their actual inherited file descriptions and become console
+    // descriptors only if the workload duplicates a console onto them.
+    for descriptor in [0, INSTANCE_CONSOLE_FD] {
         if !native_fd_set(&mut root_console_fds, descriptor) {
             native_fail(instance, pid, b"native console descriptor table full");
         }
@@ -7536,13 +7539,11 @@ fn supervise_native(
             write_all(b" result=-1\n");
         }
 
-        // A console descriptor is one the shared descriptor table tracks:
-        // every duplicate, and any number above 2. Numbers 0-2 are in the set
-        // from the start, so only the latest open of the console on one of
-        // them counts; console_fd alone would outlive a close of that number.
+        // Descriptor numbers have no special meaning here. Console authority
+        // follows the shared descriptor table across dup, close, exec, and
+        // reuse exactly like the underlying Linux file description.
         let descriptor_table = &descriptor_tables[task.descriptor_table];
-        let on_console = native_fd_contains(&descriptor_table.console_fds, registers.rdi as usize)
-            && (registers.rdi > 2 || registers.rdi as i64 == descriptor_table.console_fd);
+        let on_console = native_fd_contains(&descriptor_table.console_fds, registers.rdi as usize);
         let semantic_operation = if mode == 3 && syscall == 257 {
             if tracee_string_starts_with(host_pid, registers.rsi as usize, b"/proc") {
                 Some("proc.process.read")
