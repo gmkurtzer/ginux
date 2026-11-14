@@ -12,6 +12,7 @@ printf '%s\n' "$files" | grep -Fxq /usr/bin/ginux
 printf '%s\n' "$files" | grep -Fxq /usr/libexec/ginux/ginux-runtime
 printf '%s\n' "$files" | grep -Fxq /usr/libexec/ginux/ginux-helper
 printf '%s\n' "$files" | grep -Fxq /usr/libexec/ginux/ginux-image
+printf '%s\n' "$files" | grep -Fxq /usr/lib64/ginux/libginux_allocator.so
 printf '%s\n' "$files" | grep -Fxq /usr/lib/tmpfiles.d/ginux.conf
 printf '%s\n' "$files" | grep -Fxq /etc/ginux/examples/rocky10-systemd.toml
 printf '%s\n' "$files" | grep -Fxq /etc/ginux/examples/rocky10-agent-workspace.toml

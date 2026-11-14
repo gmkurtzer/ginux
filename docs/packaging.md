@@ -1,8 +1,8 @@
 # Rocky Linux RPM packaging
 
 Ginux ships as one x86-64 RPM for Rocky Linux 10. The package contains the
-public CLI, the private runtime, image preparation tool and privileged helper, and
-complete example recipes. It does not pull an image, create an instance, start
+public CLI, the private runtime, image preparation tool, privileged helper,
+optional guarded allocator, and complete example recipes. It does not pull an image, create an instance, start
 a service, add sudo policy, or change SELinux or firewall policy at install
 time.
 
@@ -48,6 +48,12 @@ ginux validate /etc/ginux/examples/rocky10-systemd.toml
 The public command is `/usr/bin/ginux`. Private implementation programs are
 under `/usr/libexec/ginux/` and are not public CLI aliases. Example recipes are
 installed as `%config(noreplace)` under `/etc/ginux/examples/`.
+
+The optional allocator is installed at
+`/usr/lib64/ginux/libginux_allocator.so`. Instance preparation copies it into
+the same path below the instance root. A recipe opts in explicitly by adding
+`LD_PRELOAD=/usr/lib64/ginux/libginux_allocator.so` to
+`instance.environment`; it is never enabled silently.
 
 ## State and lifecycle
 

@@ -377,6 +377,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ginux-allocator"
+version = "0.1.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "ginux-cli"
 version = "0.1.0"
 dependencies = [

@@ -3,6 +3,7 @@ set -eu
 
 sudo dnf -y install /var/tmp/ginux.rpm
 sudo rpm -V ginux
+sudo test -x /usr/lib64/ginux/libginux_allocator.so
 ginux --version
 ginux --help >/dev/null
 ginux create --help >/dev/null
@@ -10,6 +11,7 @@ ginux validate /etc/ginux/examples/alpine3.22-native.toml
 ginux import rpm-alpine /etc/ginux/examples/alpine3.22-native.toml
 ginux status rpm-alpine | grep -Fq 'state: stopped'
 sudo test -x /var/lib/ginux/instances/rpm-alpine/root/bin/busybox
+sudo test -x /var/lib/ginux/instances/rpm-alpine/root/usr/lib64/ginux/libginux_allocator.so
 test -n "$(sudo find /var/lib/ginux/cache/oci/blobs/sha256 -type f -print -quit)"
 test -z "$(sudo find /var/lib/ginux -name rootfs.tar -print -quit)"
 ginux start rpm-alpine
@@ -35,6 +37,7 @@ ginux stop rpm-cache
 
 sudo dnf -y reinstall /var/tmp/ginux.rpm
 sudo rpm -V ginux
+sudo test -x /usr/lib64/ginux/libginux_allocator.so
 sudo test -f /var/lib/ginux/instances/rpm-alpine/rpm-state-marker
 ginux list | grep -Fq rpm-alpine
 
