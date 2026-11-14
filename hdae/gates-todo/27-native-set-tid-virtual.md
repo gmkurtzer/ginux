@@ -50,7 +50,13 @@ Keep configured native workloads from observing their host TID through
 - `make check` passed on macOS.
 - `make test-unit` passed on macOS.
 - The privileged Linux integration is delegated to pull-request CI.
+- Delivery: [PR #286](https://github.com/gmkurtzer/ginux/pull/286).
+- Source update:
+  https://github.com/gmkurtzer/ginux/issues/285#issuecomment-6870903120
+- Reciprocal PR update:
+  https://github.com/gmkurtzer/ginux/pull/286#issuecomment-6870903441
 
 ## Status
 
-- Implemented and locally verified; awaiting Linux CI and pull-request review.
+- Implemented, locally verified, pushed, and delivered in PR #286; awaiting
+  Linux CI and pull-request review.
