@@ -121,6 +121,10 @@ replace it.
     and SRPM for the accepted public CLI, private runtime, helper, image tools,
     examples, and state layout; verify clean install, operation, upgrade,
     state-preserving erase, reinstall, and complete package metadata.
+31. **Filesystem mediation foundation**: establish complete immutable syscall
+    context, explicit operation ownership, typed root/cwd/descriptor authority,
+    and independent host-effect oracles before the filesystem lane claims any
+    syscall.
 
 Gates are stored in `hdae/gates-todo/` and remain there until they pass and are
 accepted at their checkpoint. Closed gate records move unchanged to

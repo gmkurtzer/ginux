@@ -6,6 +6,7 @@ members = [
     "crates/ginux-cli",
     "crates/ginux-instance",
     "crates/ginux-devices",
+    "crates/ginux-fs-policy",
     "crates/ginux-init",
     "crates/ginux-kernel-views",
     "crates/ginux-oci",

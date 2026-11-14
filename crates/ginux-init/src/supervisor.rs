@@ -402,6 +402,21 @@ pub fn standard_stream_refusal() -> Option<&'static [u8]> {
     })
 }
 
+/// Stable object identity for an already-open host descriptor. Future
+/// filesystem operation gates authorize against this identity rather than
+/// reopening a pathname. The layout is the Linux x86-64 `struct stat` ABI.
+pub fn descriptor_object_id(fd: usize) -> Option<ginux_fs_policy::ObjectId> {
+    let mut stat = [0u64; 18];
+    if unsafe { syscall2(SYS_FSTAT, fd, stat.as_mut_ptr() as usize) } != 0 {
+        return None;
+    }
+    let object = ginux_fs_policy::ObjectId {
+        device: stat[0],
+        inode: stat[1],
+    };
+    object.is_available().then_some(object)
+}
+
 pub fn line(message: &[u8]) {
     write_all(message);
     write_all(b"\n");

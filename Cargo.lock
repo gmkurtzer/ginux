@@ -401,12 +401,20 @@ name = "ginux-devices"
 version = "0.1.0"
 
 [[package]]
+name = "ginux-fs-policy"
+version = "0.1.0"
+dependencies = [
+ "ginux-contract",
+]
+
+[[package]]
 name = "ginux-init"
 version = "0.1.0"
 dependencies = [
  "ginux-contract",
  "ginux-core",
  "ginux-devices",
+ "ginux-fs-policy",
  "ginux-instance",
  "ginux-kernel-views",
  "ginux-process",

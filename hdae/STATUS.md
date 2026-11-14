@@ -2,7 +2,41 @@
 
 ## Current checkpoint
 
-### Active implementation: Gate 26 Rocky Linux RPM packaging
+### Active checkpoint: Gate 31 filesystem mediation foundation
+
+- Gate 31 is approved for implementation and dedicated pull-request delivery
+  from `hdae/filesystem-mediation-foundation` against `main`.
+- The gate establishes complete filesystem call context, operation ownership,
+  typed root/cwd/descriptor authority, and independent host-effect oracles
+  without making `fs_hooks` claim a syscall.
+- Issue #290 remains the umbrella source. Gate 31 does not close it or enable an
+  operation family.
+- Implementation, generated ownership inventory, route interlocks, independent
+  tripwire/race/mutation tests, and explicit security review are complete. The
+  filesystem lane still claims no syscall and adds no host effect.
+- The security review resolved contract-before-hook ordering, fail-closed
+  descriptor-generation overflow, overly broad root rights, and missing
+  alternate filesystem ABI inventory entries. No unresolved in-scope high- or
+  critical-impact finding remains.
+- `make check`, `make test-unit`, focused clippy/check, aggregate `make test`,
+  and `make test-security` pass. `make test-recovery test-systemd` reaches the
+  systemd leg and then fails because IPv4 loopback setup returns `EINVAL` and
+  PID 1 exits.
+- The identical `test-systemd` failure reproduces at clean `origin/main`
+  (`285d025b`) with a separate fresh Rocky host overlay, so it is a pre-existing
+  baseline blocker rather than a Gate 31 regression. The gate remains partial
+  because its mandatory final matrix is not fully green.
+- Draft pull request https://github.com/gmkurtzer/ginux/pull/291 contains the
+  bounded implementation and discloses the baseline blocker; it references but
+  does not close issue #290.
+- Active skill: `hdae-development`
+- Skill path: `.agents/skills/hdae-development/SKILL.md`
+- Reload after context shift: required
+- Exact next action: stop for human review and direction on a separate
+  corrective gate for the pre-existing systemd failure; do not accept or close
+  Gate 31 while its mandatory matrix remains red.
+
+### Prior checkpoint: Gate 26 Rocky Linux RPM packaging
 
 - Gate 26 is technically passed locally on `hdae/rpm-packaging` and remains a
   human checkpoint in `gates-todo/`.

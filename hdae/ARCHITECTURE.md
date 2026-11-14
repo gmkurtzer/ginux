@@ -67,6 +67,11 @@ boundary and limitations remain authoritative in
 10. Benchmark optimizations may expand the reviewed catalog of direct-safe
     operations, but may not infer direct execution merely from an allow rule or
     weaken paranoid dispatch, denial, or complex-operation mediation.
+11. A native filesystem hook may run only with one immutable complete call
+    context and the conjunction of contract permission, route-local
+    confinement, typed object authority, required rights, and current instance,
+    root, cwd, and descriptor generations. Path text and numeric descriptors
+    are not authority.
 
 ## Major components
 
