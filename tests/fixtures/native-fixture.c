@@ -79,6 +79,26 @@ static long tracked_as_console(long fd)
     return call3(16, fd, 0x540f /* TIOCGPGRP */, (word)&group) == 0;
 }
 
+/* Run one call in a child, which owns a copy of the descriptor table, and
+ * report whether 240 is still the instance /dev/null and 241 the console,
+ * neither one close-on-exec. With a probe label the child also reports
+ * F_GETFD of the workload's descriptor 300 after the call. */
+static void protected_step(const char *label, const char *intact, const char *probe,
+                           long number, word a, word b, word c)
+{
+    int status = 0;
+    long pid = call3(57, 0, 0, 0);
+    if (pid == 0) {
+        print_result(label, call3(number, a, b, c));
+        if (probe) print_result(probe, call3(72, 300, 1 /* F_GETFD */, 0));
+        call3(231, call3(72, 240, 1, 0) == 0 && call3(72, 241, 1, 0) == 0
+                   && call3(1, 240, (word)"P\n", 2) == 2 && call3(1, 241, (word)"P\n", 2) == 2
+                   && tracked_as_console(241), 0, 0);
+    }
+    print_result(intact, pid > 0 && call4(61, pid, (word)&status, 0, 0) == pid
+                         && status == 256);
+}
+
 static volatile long yield_signals;
 
 static void yield_signal_handler(int signal)
@@ -1042,6 +1062,72 @@ long native_fixture_main(const word *stack)
         print_result("GINUX_FIXTURE: mutation-result=", descriptor_mutation_result);
         print_result("GINUX_FIXTURE: sibling-console=",
                      tracked_as_console(descriptor_sibling_result));
+        return 0;
+    }
+    case 'P': {
+        /* Nothing the workload calls closes, replaces or marks close-on-exec
+         * the protected null and console descriptors, with descriptor
+         * arguments read as the kernel reads them, as 32 bits. */
+        const word high = 1UL << 32;
+        int status = 0;
+#define PROTECTED_STEP(name, number, a, b, c) \
+        protected_step("GINUX_FIXTURE: " name "=", "GINUX_FIXTURE: " name "-intact=", 0, \
+                       number, a, b, c)
+#define PROTECTED_RANGE_STEP(name, a, b, c) \
+        protected_step("GINUX_FIXTURE: " name "=", "GINUX_FIXTURE: " name "-intact=", \
+                       "GINUX_FIXTURE: " name "-fd-300=", 436, a, b, c)
+        PROTECTED_STEP("close-high-console", 3, high | 241, 0, 0);
+        PROTECTED_STEP("close-high-null", 3, high | 240, 0, 0);
+        PROTECTED_STEP("dup2-console", 33, fd, 241, 0);
+        PROTECTED_STEP("dup2-high-console", 33, fd, high | 241, 0);
+        PROTECTED_STEP("dup2-console-self", 33, 241, 241, 0);
+        PROTECTED_STEP("dup3-null", 292, fd, 240, 0x80000 /* O_CLOEXEC */);
+        PROTECTED_STEP("dup3-high-console", 292, fd, high | 241, 0);
+        PROTECTED_STEP("setfd-console", 72, 241, 2 /* F_SETFD */, 1 /* FD_CLOEXEC */);
+        PROTECTED_STEP("setfd-high-null", 72, high | 240, high | 2, 1);
+        PROTECTED_STEP("fioclex-console", 16, 241, 0x5451 /* FIOCLEX */, 0);
+        PROTECTED_STEP("fioclex-high-null", 16, high | 240, 0x5451, 0);
+        PROTECTED_STEP("fionclex-console", 16, 241, 0x5450 /* FIONCLEX */, 0);
+        PROTECTED_STEP("cloexec-range", 436, 3, ~0U, 4 /* CLOSE_RANGE_CLOEXEC */);
+        PROTECTED_STEP("console-range", 436, 241, 241, 0);
+        PROTECTED_STEP("high-range", 436, high | 3, ~0U, 0);
+        /* A range the kernel rejects closes nothing either. */
+        PROTECTED_STEP("inverted-high-range", 436, 3, high | 2, 0);
+        /* A range from a protected descriptor still closes, or marks, the
+         * workload's descriptors above them; one from below stops at 239. */
+        print_result("GINUX_FIXTURE: fd-300=", call3(72, fd, 0 /* F_DUPFD */, 300));
+        PROTECTED_RANGE_STEP("null-range", 240, 300, 0);
+        PROTECTED_RANGE_STEP("null-cloexec-range", 240, 300, 4 /* CLOSE_RANGE_CLOEXEC */);
+        PROTECTED_RANGE_STEP("unshare-range", 239, 300, 2 /* CLOSE_RANGE_UNSHARE */);
+#undef PROTECTED_RANGE_STEP
+#undef PROTECTED_STEP
+        /* A range within them still gives a CLONE_FILES child a private
+         * table: its open does not appear in this one. */
+        long pid = call5(56, 0x400 /* CLONE_FILES */ | 17, 0, 0, 0, 0);
+        if (pid == 0) {
+            long result = call3(436, 241, 241, 2 /* CLOSE_RANGE_UNSHARE */);
+            long opened = call3(2, (word)"/scenario", 0, 0);
+            call3(231, result == 0 && call3(72, 241, 1, 0) == 0 ? opened : 255, 0, 0);
+        }
+        long opened = pid > 0 && call4(61, pid, (word)&status, 0, 0) == pid
+                      ? (status >> 8) & 0xff : 255;
+        print_result("GINUX_FIXTURE: unshare-console-range=",
+                     opened < 255 && call3(72, opened, 1, 0) == -9);
+        /* The caller keeps its arguments when Ginux changes the bounds the
+         * kernel gets: 239-241 runs as 239-239, 240-241 as an empty range. */
+        word first = 239, last = 241, flags = 0;
+        long result;
+        __asm__ volatile("syscall" : "=a"(result), "+D"(first), "+S"(last), "+d"(flags)
+                         : "a"(436L)
+                         : "rcx", "r11", "memory");
+        print_result("GINUX_FIXTURE: cut-range-arguments-kept=",
+                     result == 0 && first == 239 && last == 241 && flags == 0);
+        first = 240;
+        __asm__ volatile("syscall" : "=a"(result), "+D"(first), "+S"(last), "+d"(flags)
+                         : "a"(436L)
+                         : "rcx", "r11", "memory");
+        print_result("GINUX_FIXTURE: protected-range-arguments-kept=",
+                     result == 0 && first == 240 && last == 241 && flags == 0);
         return 0;
     }
     case 'K': {
