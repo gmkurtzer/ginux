@@ -11,21 +11,25 @@
   without making `fs_hooks` claim a syscall.
 - Issue #290 remains the umbrella source. Gate 31 does not close it or enable an
   operation family.
-- Implementation, generated ownership inventory, route interlocks, independent
-  tripwire/race/mutation tests, and explicit security review are complete. The
-  filesystem lane still claims no syscall and adds no host effect.
-- The security review resolved contract-before-hook ordering, fail-closed
-  descriptor-generation overflow, overly broad root rights, and missing
-  alternate filesystem ABI inventory entries. No unresolved in-scope high- or
-  critical-impact finding remains.
+- The human selected normal Linux filesystem semantics inside the instance with
+  an invariant that paths, descriptors, procfs references, races, and lifecycle
+  transitions cannot escape or reconnect outside the instance. Unsupported
+  capabilities must fail explicitly.
+- The current implementation, generated ownership inventory, route interlocks,
+  tripwire/race/mutation tests, and initial security review are present. The
+  filesystem lane still claims no syscall and adds no intended filesystem host
+  effect.
+- Exact-head review at `c4609fbe` found that future claimed-but-unauthorized
+  filesystem operations can fall through to the legacy executor, inventory
+  completeness is not checked against an independently pinned ABI set, and the
+  host-effect oracle does not prove that it detects injected effects.
 - `make check`, `make test-unit`, focused clippy/check, aggregate `make test`,
   `make test-security`, and the complete `make test-systemd` matrix pass.
-- The systemd blocker was traced beyond the Gate 31 filesystem work. Shared
-  networking incorrectly treated every `sendmsg` as an Internet datagram,
-  returning `EINVAL` for systemd's netlink loopback request. Internet policy
-  now applies only to tracked `AF_INET` and `AF_INET6` sockets. Namespace clone
-  requests are denied with `EPERM`, allowing systemd's documented optional
-  sandbox fallback without granting a host namespace.
+- The systemd blocker was traced beyond the Gate 31 filesystem work. The
+  attempted repair stopped treating netlink `sendmsg` as an Internet datagram,
+  but it also let tracked non-IP socket sends reach the generic host executor
+  without bounded validation or emulation. This unrelated repair must be
+  separated or replaced with explicit fail-closed family/message ownership.
 - An installed-RPM reproduction also exposed persisted contract metadata from
   an older catalog revision. The instance was repaired explicitly by
   recompiling its unchanged recipe; silent contract migration remains
@@ -42,9 +46,10 @@
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Exact next action: push the final evidence to pull request 291 and stop for
-  human review. Do not accept or close Gate 31 without explicit human
-  acceptance.
+- Exact next action: repair the four recorded exact-head findings on the
+  existing Gate 31 branch, rerun every criterion at the new exact head, update
+  pull request 291, and stop for human review. Do not accept or close Gate 31
+  without explicit human acceptance.
 
 ### Prior checkpoint: Gate 26 Rocky Linux RPM packaging
 
