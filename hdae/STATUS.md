@@ -19,17 +19,16 @@
   tripwire/race/mutation tests, and initial security review are present. The
   filesystem lane still claims no syscall and adds no intended filesystem host
   effect.
-- Exact-head review at `c4609fbe` found that future claimed-but-unauthorized
-  filesystem operations can fall through to the legacy executor, inventory
-  completeness is not checked against an independently pinned ABI set, and the
-  host-effect oracle does not prove that it detects injected effects.
-- `make check`, `make test-unit`, focused clippy/check, aggregate `make test`,
-  `make test-security`, and the complete `make test-systemd` matrix pass.
-- The systemd blocker was traced beyond the Gate 31 filesystem work. The
-  attempted repair stopped treating netlink `sendmsg` as an Internet datagram,
-  but it also let tracked non-IP socket sends reach the generic host executor
-  without bounded validation or emulation. This unrelated repair must be
-  separated or replaced with explicit fail-closed family/message ownership.
+- Exact-head repair makes every future claimed filesystem operation return a
+  handled result or explicit denial, checks inventory equality against an
+  independently pinned x86-64 ABI set, and proves the host-effect oracle detects
+  injected protected read, write, metadata, handle, and transient effects.
+- Generic non-IP host sends are removed. Systemd receives only explicit bounded
+  loopback netlink handling and instance-root pathname Unix sockets; arbitrary
+  netlink and abstract-Unix sends fail before host effect.
+- `make check`, `make test-unit`, focused native supervision, aggregate
+  `make test`, `make test-security`, `make test-rpm`, and the complete
+  `make test-systemd` matrix pass.
 - An installed-RPM reproduction also exposed persisted contract metadata from
   an older catalog revision. The instance was repaired explicitly by
   recompiling its unchanged recipe; silent contract migration remains
@@ -40,16 +39,13 @@
   install, `rpm -V`, packaged Alpine start/stop, packaged Rocky systemd boot to
   its login prompt, offline cached reuse, reinstall, erase/reinstall, and
   persistent instance-state checks.
-- Draft pull request https://github.com/gmkurtzer/ginux/pull/291 contains the
-  bounded implementation and discloses the baseline blocker; it references but
-  does not close issue #290.
+- Pull request https://github.com/gmkurtzer/ginux/pull/291 contains the repaired
+  bounded implementation and references but does not close issue #290.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Exact next action: repair the four recorded exact-head findings on the
-  existing Gate 31 branch, rerun every criterion at the new exact head, update
-  pull request 291, and stop for human review. Do not accept or close Gate 31
-  without explicit human acceptance.
+- Exact next action: stop for explicit human review and testing of pull request
+  291. Do not accept or close Gate 31 without explicit human acceptance.
 
 ### Prior checkpoint: Gate 26 Rocky Linux RPM packaging
 

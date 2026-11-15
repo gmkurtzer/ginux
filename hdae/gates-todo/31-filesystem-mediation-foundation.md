@@ -71,8 +71,8 @@ before the native filesystem lane claims any syscall.
   races, lexical-prefix rejection, and stale-generation mutations.
 - [x] Interlocked configured launch and configured-native mode 3 without making
   the filesystem lane claim any syscall or adding a host effect.
-- [x] Completed an explicit security review and recorded its unresolved
-  implementation findings below.
+- [x] Completed an explicit security review and remediated every in-scope
+  implementation finding.
 - [x] Ran the focused, security, recovery, aggregate, and systemd suites; all
   Gate 31 and aggregate coverage passed.
 - [x] Reproduced and diagnosed the pre-existing systemd startup blocker; its
@@ -84,19 +84,19 @@ before the native filesystem lane claims any syscall.
 
 ## Remaining work
 
-- [ ] Make a claimed filesystem operation fail closed when contract,
+- [x] Make a claimed filesystem operation fail closed when contract,
   confinement, ownership, context, or capability validation fails; it must not
   fall through to a legacy executor.
-- [ ] Validate the operation inventory by exact set equality against an
+- [x] Validate the operation inventory by exact set equality against an
   independently maintained, pinned x86-64 filesystem-capable syscall set.
-- [ ] Make the host-effect oracle prove its own sensitivity by deliberately
+- [x] Make the host-effect oracle prove its own sensitivity by deliberately
   injecting and detecting protected read, write, metadata, handle, and
   transient effects.
-- [ ] Remove the unrelated non-IP socket-family passthrough from this gate.
+- [x] Remove the unrelated non-IP socket-family passthrough from this gate.
   Required netlink behavior belongs to an explicit bounded owner with
   validated or emulated semantics; unsupported socket families and message
   shapes fail before host effect.
-- [ ] Re-run the complete verification matrix at the repaired exact pull-request
+- [x] Re-run the complete verification matrix at the repaired exact pull-request
   head, update the evidence, and stop for explicit human review.
 
 ## Acceptance criteria
@@ -182,11 +182,14 @@ before the native filesystem lane claims any syscall.
   descriptor I/O, single-path mutation, two-path mutation, then special
   interfaces and lifecycle recovery.
 - The implementation security review corrected contract-before-hook ordering,
-  descriptor-generation overflow, overly broad root rights, and missing
-  alternate filesystem inventory entries. Exact-head review subsequently found
-  unresolved fail-closed dispatch, independently pinned inventory, oracle
-  sensitivity, and non-IP socket-boundary defects. Those findings keep this
-  gate partial.
+  descriptor-generation overflow, overly broad root rights, missing alternate
+  filesystem inventory entries, claimed-operation fallthrough, self-referential
+  inventory validation, oracle sensitivity, and generic non-IP host sends.
+- The supported systemd network exception is now explicit and bounded: Ginux
+  snapshots and validates only immutable loopback link/address netlink
+  messages, correlates their acknowledgements by sequence, rejects arbitrary
+  netlink and abstract-Unix sends before host effect, confines pathname Unix
+  sockets to the instance root, and reports host audit netlink as unavailable.
 - Final repeated verification also found that parallel host-effect tests could
   collide when the platform clock returned the same timestamp. Fixture names
   now include a process-local atomic sequence; the oracle passed ten consecutive
@@ -200,12 +203,9 @@ before the native filesystem lane claims any syscall.
   compatibility claim. Their existing regressions ran, but later gates must add
   the operation-specific mutation, proc-magic-link, fault, and effect oracles
   before enabling each filesystem family.
-- The systemd failure was not caused by Gate 31. Its attempted repair correctly
-  stopped parsing netlink messages as Internet socket addresses, but then let
-  tracked non-IP socket sends reach the generic host executor without bounded
-  validation or emulation. That repair is not accepted as part of this gate and
-  must be separated or replaced with explicit fail-closed socket-family
-  ownership.
+- The systemd failure was not caused by Gate 31. The accepted repair replaces
+  the rejected generic non-IP passthrough with explicit, fail-closed ownership
+  for the minimum loopback and pathname-Unix behavior systemd requires.
 - Ginux denies host namespace creation with `EPERM`. This preserves the
   security boundary while allowing systemd to disable an optional generator
   sandbox and continue inside the already confined instance. Truly
@@ -220,9 +220,12 @@ before the native filesystem lane claims any syscall.
 ## Evidence
 
 - `make check` -> passed strict formatting, lint, generated inventory, and
-  ownership checks.
+  ownership checks, including exact equality with the independent pinned
+  x86-64 filesystem-capable syscall set.
 - `make test-unit` -> passed all workspace unit tests, including six policy
-  mutations and four independent host-effect oracles.
+  mutations, claimed-operation fail-closed dispatch, five independent
+  host-effect oracles, and deliberate oracle sensitivity for protected read,
+  write, metadata, handle, and transient effects.
 - Ten consecutive `cargo test -p ginux-fs-policy --test host_effect_oracle`
   runs -> passed after eliminating parallel temporary-directory collisions.
 - `cargo clippy -p ginux-fs-policy --all-targets -- -D warnings` -> passed.
@@ -236,7 +239,11 @@ before the native filesystem lane claims any syscall.
   views, teardown, and host-effect checks.
 - `make test-systemd` -> passed cold and warm cached Rocky boots, repeated
   lifecycle, offline-cache reuse, failed-DNF recovery, startup failure, and
-  controlled shutdown after the netlink and namespace-denial corrections.
+  controlled shutdown with bounded loopback netlink handling and no generic
+  non-IP socket passthrough.
+- Focused `sudo python3 scripts/test-native-supervision.py` in isolated Rocky
+  QEMU -> passed the complete native-supervision matrix, including rejection
+  of arbitrary route-netlink and abstract-Unix sends before host effect.
 - `make test-security test` -> passed deterministic security coverage and the
   complete aggregate suite after the startup correction.
 - Clean detached `origin/main` at `285d025b`, fresh host overlay,
@@ -256,7 +263,8 @@ before the native filesystem lane claims any syscall.
 - Final source review traced configured launch and mode 3 from immutable context
   construction through contract, confinement, inventory, capability, and hook
   guards; inspected every added unsafe/host syscall site and authority lifetime;
-  confirmed no filesystem claim or new host effect was enabled.
+  confirmed no filesystem claim or new filesystem host effect was enabled and
+  no unresolved in-scope high- or critical-impact finding remains.
 
 ## Delivery strategy
 
