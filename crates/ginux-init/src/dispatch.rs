@@ -76,11 +76,11 @@ pub fn decide_native(context: &CallContext) -> NativeDecision {
             None => NativeDecision::Contract(decide_balanced(syscall)),
         },
         Lane::Filesystem => match crate::fs_hooks::claim(context, true) {
-            Some(result) => NativeDecision::Hooked {
+            crate::fs_hooks::Claim::Denied(result) => NativeDecision::Hooked {
                 lane: Lane::Filesystem,
                 result,
             },
-            None => NativeDecision::Contract(decide_balanced(syscall)),
+            crate::fs_hooks::Claim::Unclaimed => NativeDecision::Contract(decide_balanced(syscall)),
         },
         Lane::Channel => match crate::channel_hooks::claim(
             syscall,

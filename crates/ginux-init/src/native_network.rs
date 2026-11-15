@@ -46,6 +46,7 @@ pub struct Pending {
     rip: u64,
     address: u64,
     pub result: i64,
+    pub netlink_sequence: u32,
 }
 
 pub struct Buffer {
@@ -143,6 +144,7 @@ impl Pending {
             rip: 0,
             address: 0,
             result: 0,
+            netlink_sequence: 0,
         }
     }
 
@@ -166,6 +168,56 @@ impl Pending {
             SYS_SENDMSG => pending.snapshot_sendmsg(pid, regs, buffer)?,
             SYS_SENDMMSG => pending.snapshot_sendmmsg(pid, regs, buffer)?,
             _ => return Err(-EINVAL),
+        }
+        Ok(pending)
+    }
+
+    /// Snapshot the one host-routed netlink operation currently required by
+    /// systemd: adding the IPv4 loopback address. The immutable replay keeps
+    /// mutable tracee memory out of the host call, and the validator rejects
+    /// every other netlink family, message, interface, and address shape.
+    pub fn snapshot_loopback_netlink(
+        pid: usize,
+        slot: usize,
+        regs: &UserRegs,
+        buffer: &mut Buffer,
+    ) -> Result<Self, i64> {
+        buffer.reset();
+        let mut pending = Self {
+            phase: Phase::Map,
+            original_syscall: regs.orig_rax,
+            original: arguments(regs),
+            rip: regs.rip,
+            address: BASE + slot as u64 * STRIDE,
+            ..Self::empty()
+        };
+        pending.message_count = 1;
+        match regs.orig_rax {
+            SYS_SENDTO => {
+                let length = regs.rdx as usize;
+                if !(24..=256).contains(&length) {
+                    return Err(-7);
+                }
+                let payload = buffer.copy_from_tracee(pid, regs.rsi, length, 8)?;
+                pending.netlink_sequence =
+                    validate_loopback_netlink(&buffer.bytes[payload..payload + length])?;
+                let name = snapshot_netlink_name(pid, regs.r8, regs.r9, buffer)?;
+                pending.replay[0] = [
+                    regs.rdi,
+                    pending.address + payload as u64,
+                    regs.rdx,
+                    regs.r10,
+                    offset_address(pending.address, name, regs.r9 as usize),
+                    regs.r9,
+                ];
+            }
+            SYS_SENDMSG => {
+                let (header, sequence) =
+                    snapshot_loopback_netlink_msghdr(pid, regs.rsi, buffer, pending.address)?;
+                pending.netlink_sequence = sequence;
+                pending.replay[0] = [regs.rdi, pending.address + header as u64, regs.rdx, 0, 0, 0];
+            }
+            _ => return Err(-38),
         }
         Ok(pending)
     }
@@ -375,6 +427,237 @@ fn snapshot_msghdr(
     buffer.write_u64(header + 16, offset_address(base, iov_copy, iov_count * 16));
     buffer.write_u64(header + 32, offset_address(base, control, control_length));
     Ok((header, destination))
+}
+
+fn snapshot_loopback_netlink_msghdr(
+    pid: usize,
+    address: u64,
+    buffer: &mut Buffer,
+    base: u64,
+) -> Result<(usize, u32), i64> {
+    let source = buffer.copy_from_tracee(pid, address, 56, 8)?;
+    let name_pointer = buffer.read_u64(source);
+    let name_length = u64::from(buffer.read_u32(source + 8));
+    let iov_pointer = buffer.read_u64(source + 16);
+    let iov_count = buffer.read_u64(source + 24) as usize;
+    let control_pointer = buffer.read_u64(source + 32);
+    let control_length = buffer.read_u64(source + 40) as usize;
+    if iov_count != 1 || control_pointer != 0 || control_length != 0 {
+        return Err(-EINVAL);
+    }
+    let name = snapshot_netlink_name(pid, name_pointer, name_length, buffer)?;
+    let iov_source = buffer.copy_from_tracee(pid, iov_pointer, 16, 8)?;
+    let payload_pointer = buffer.read_u64(iov_source);
+    let payload_length = buffer.read_u64(iov_source + 8) as usize;
+    if !(24..=256).contains(&payload_length) {
+        return Err(-EINVAL);
+    }
+    let payload = buffer.copy_from_tracee(pid, payload_pointer, payload_length, 8)?;
+    let sequence = validate_loopback_netlink(&buffer.bytes[payload..payload + payload_length])?;
+    let iov_copy = buffer.reserve(16, 8)?;
+    buffer.write_u64(iov_copy, base + payload as u64);
+    buffer.write_u64(iov_copy + 8, payload_length as u64);
+    let header = buffer.reserve(56, 8)?;
+    let mut source_header = [0u8; 56];
+    source_header.copy_from_slice(&buffer.bytes[source..source + 56]);
+    buffer.bytes[header..header + 56].copy_from_slice(&source_header);
+    buffer.write_u64(
+        header,
+        offset_address(base, name, if name == 0 { 0 } else { 12 }),
+    );
+    buffer.write_u64(header + 16, base + iov_copy as u64);
+    buffer.write_u64(header + 32, 0);
+    Ok((header, sequence))
+}
+
+fn snapshot_netlink_name(
+    pid: usize,
+    address: u64,
+    length: u64,
+    buffer: &mut Buffer,
+) -> Result<usize, i64> {
+    if length == 0 {
+        return Ok(0);
+    }
+    if address == 0 || !(12..=128).contains(&length) {
+        return Err(-EINVAL);
+    }
+    let offset = buffer.copy_from_tracee(pid, address, length as usize, 4)?;
+    if u16::from_ne_bytes(buffer.bytes[offset..offset + 2].try_into().unwrap()) != 16
+        || buffer.bytes[offset + 2..offset + length as usize]
+            .iter()
+            .any(|byte| *byte != 0)
+    {
+        return Err(-EINVAL);
+    }
+    Ok(offset)
+}
+
+fn validate_loopback_netlink(payload: &[u8]) -> Result<u32, i64> {
+    let message_length = u32::from_ne_bytes(payload[0..4].try_into().unwrap()) as usize;
+    let message_type = u16::from_ne_bytes(payload[4..6].try_into().unwrap());
+    let flags = u16::from_ne_bytes(payload[6..8].try_into().unwrap());
+    if message_length < 24
+        || message_length > payload.len()
+        || payload[message_length..].iter().any(|byte| *byte != 0)
+        || flags & 1 == 0
+    {
+        return Err(-EINVAL);
+    }
+    if matches!(message_type, 16 | 19) {
+        if message_length < 32
+            || payload[16] != 0
+            || i32::from_ne_bytes(payload[20..24].try_into().unwrap()) != 1
+            || u32::from_ne_bytes(payload[24..28].try_into().unwrap()) & 1 == 0
+            || u32::from_ne_bytes(payload[28..32].try_into().unwrap()) != 1
+        {
+            return Err(-EINVAL);
+        }
+        let mut offset = 32;
+        while offset < message_length {
+            if message_length - offset < 4 {
+                return Err(-EINVAL);
+            }
+            let length =
+                u16::from_ne_bytes(payload[offset..offset + 2].try_into().unwrap()) as usize;
+            let kind = u16::from_ne_bytes(payload[offset + 2..offset + 4].try_into().unwrap());
+            if length != 7 || kind != 3 || &payload[offset + 4..offset + 7] != b"lo\0" {
+                return Err(-EINVAL);
+            }
+            offset = (offset + length + 3) & !3;
+        }
+        return if offset == (message_length + 3) & !3 {
+            Ok(u32::from_ne_bytes(payload[8..12].try_into().unwrap()))
+        } else {
+            Err(-EINVAL)
+        };
+    }
+    // RTM_NEWADDR + ifaddrmsg: IPv4 127.0.0.1/8 or IPv6 ::1/128,
+    // host scope, and the loopback interface index only.
+    let family = payload[16];
+    if message_type != 20 {
+        return Err(-EINVAL);
+    }
+    if !matches!((family, payload[17]), (2, 8) | (10, 128))
+        || payload[19] != 254
+        || u32::from_ne_bytes(payload[20..24].try_into().unwrap()) != 1
+    {
+        return Err(-EINVAL);
+    }
+    let mut offset = 24;
+    let mut saw_address = false;
+    while offset < message_length {
+        if message_length - offset < 4 {
+            return Err(-EINVAL);
+        }
+        let length = u16::from_ne_bytes(payload[offset..offset + 2].try_into().unwrap()) as usize;
+        let kind = u16::from_ne_bytes(payload[offset + 2..offset + 4].try_into().unwrap());
+        if length < 4
+            || offset
+                .checked_add(length)
+                .is_none_or(|end| end > message_length)
+        {
+            return Err(-EINVAL);
+        }
+        if matches!(kind, 1 | 2) {
+            let address_is_loopback = if family == 2 {
+                length == 8 && payload[offset + 4..offset + 8] == [127, 0, 0, 1]
+            } else {
+                length == 20
+                    && payload[offset + 4..offset + 19]
+                        .iter()
+                        .all(|byte| *byte == 0)
+                    && payload[offset + 19] == 1
+            };
+            if !address_is_loopback {
+                return Err(-EINVAL);
+            }
+            saw_address = true;
+        } else {
+            match kind {
+                3 if length == 7 && &payload[offset + 4..offset + 7] == b"lo\0" => {}
+                4 if family == 2
+                    && length == 8
+                    && payload[offset + 4..offset + 8] == [127, 255, 255, 255] => {}
+                6 if length == 20 => {}
+                8 if length == 8 => {}
+                11 if length == 5 => {}
+                _ => return Err(-EINVAL),
+            }
+        }
+        offset = (offset + length + 3) & !3;
+    }
+    if !saw_address || offset != (message_length + 3) & !3 {
+        return Err(-EINVAL);
+    }
+    Ok(u32::from_ne_bytes(payload[8..12].try_into().unwrap()))
+}
+
+pub fn accept_loopback_ack(
+    pid: usize,
+    header_address: usize,
+    sequences: &[u32],
+) -> Result<Option<usize>, i64> {
+    let mut buffer = Buffer::empty();
+    let header = buffer.copy_from_tracee(pid, header_address as u64, 56, 8)?;
+    let iov_pointer = buffer.read_u64(header + 16);
+    let iov_count = buffer.read_u64(header + 24);
+    if iov_count == 0 || iov_pointer == 0 {
+        return Err(-EINVAL);
+    }
+    let iov = buffer.copy_from_tracee(pid, iov_pointer, 16, 8)?;
+    let payload_pointer = buffer.read_u64(iov);
+    let payload_length = buffer.read_u64(iov + 8);
+    if payload_pointer == 0 || payload_length < 16 {
+        return Err(-EINVAL);
+    }
+    let copied_length = core::cmp::min(payload_length as usize, MAX_CONTROL);
+    let payload = buffer.copy_from_tracee(pid, payload_pointer, copied_length, 4)?;
+    let mut offset = 0usize;
+    while offset + 16 <= copied_length {
+        let message_length = u32::from_ne_bytes(
+            buffer.bytes[payload + offset..payload + offset + 4]
+                .try_into()
+                .unwrap(),
+        ) as usize;
+        if message_length < 16 || offset + message_length > copied_length {
+            return Err(-EINVAL);
+        }
+        let kind = u16::from_ne_bytes(
+            buffer.bytes[payload + offset + 4..payload + offset + 6]
+                .try_into()
+                .unwrap(),
+        );
+        if kind == 2 && message_length >= 20 {
+            let acknowledgement = i32::from_ne_bytes(
+                buffer.bytes[payload + offset + 16..payload + offset + 20]
+                    .try_into()
+                    .unwrap(),
+            );
+            let sequence = u32::from_ne_bytes(
+                buffer.bytes[payload + offset + 8..payload + offset + 12]
+                    .try_into()
+                    .unwrap(),
+            );
+            if acknowledgement <= 0 {
+                if let Some(index) = sequences
+                    .iter()
+                    .position(|candidate| *candidate == sequence)
+                {
+                    poke_tracee_bytes(
+                        pid,
+                        payload_pointer as usize + offset + 16,
+                        &0i32.to_ne_bytes(),
+                    )?;
+                    return Ok(Some(index));
+                }
+            }
+        }
+        offset = offset
+            .checked_add((message_length + 3) & !3)
+            .ok_or(-EINVAL)?;
+    }
+    Ok(None)
 }
 
 fn snapshot_destination(

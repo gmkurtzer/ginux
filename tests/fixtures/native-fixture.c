@@ -427,6 +427,21 @@ long native_fixture_main(const word *stack)
                      call3(46, sender, (word)&connected_message, 0));
         return 0;
     }
+    case 'W': {
+        struct local_address { unsigned short family; char path[108]; };
+        struct netlink_address { unsigned short family, pad; unsigned pid, groups; };
+        struct local_address abstract = {1, {0, 'g', 'i', 'n', 'u', 'x'}};
+        struct netlink_address netlink = {16, 0, 0, 0};
+        char payload = 'x';
+        long local = call3(41, 1, 2, 0);
+        long route = call3(41, 16, 3, 0);
+        if (local < 0 || route < 0) return 91;
+        print_result("GINUX_FIXTURE: abstract-unix-send=",
+                     call6(44, local, (word)&payload, 1, 0, (word)&abstract, sizeof abstract));
+        print_result("GINUX_FIXTURE: netlink-send=",
+                     call6(44, route, (word)&payload, 1, 0, (word)&netlink, sizeof netlink));
+        return 0;
+    }
     case 'R': {
         struct address { unsigned short family, port; unsigned address; char zero[8]; };
         static struct address allowed = {2, 0xa146, 0x0100007f, {0}};

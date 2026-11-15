@@ -1,5 +1,8 @@
 #![no_std]
 
+#[cfg(test)]
+mod x86_64_filesystem_abi;
+
 use ginux_contract::Action;
 
 pub const X86_64_AUDIT_ARCH: u32 = 0xc000_003e;
@@ -1795,6 +1798,14 @@ mod tests {
         assert!(OPERATIONS
             .windows(2)
             .all(|pair| pair[0].syscall < pair[1].syscall));
+        assert_eq!(
+            OPERATIONS
+                .iter()
+                .map(|operation| operation.syscall)
+                .collect::<std::vec::Vec<_>>(),
+            x86_64_filesystem_abi::SYSCALLS,
+            "operation inventory must exactly match the independent pinned ABI catalog"
+        );
         for syscall in [2, 82, 264, 316, 332, 437, 452] {
             assert_eq!(
                 operation(syscall).map(|entry| entry.owner),
