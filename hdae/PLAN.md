@@ -150,6 +150,10 @@ replace it.
 42. **Allocator compatibility, assurance, and performance**: close the
     initiative with differential compatibility, proof/model evidence, matched
     benchmarks, packaging, and documented limitations.
+43. **Guarded allocator performance parity**: keep the guarded allocator
+    opt-in while profiling and optimizing it against a stable, matched workload
+    matrix that requires every 1/2/4-thread row to remain within 5% of native
+    without weakening accepted security properties.
 
 Gates are stored in `hdae/gates-todo/` and remain there until they pass and are
 accepted at their checkpoint. Closed gate records move unchanged to
@@ -227,6 +231,8 @@ define their expected result.
   32 through 37.
 - The conditional allocator initiative is decided and, if approved, implemented
   and verified by Gates 38 through 42.
+- Guarded allocator performance readiness is independently judged by Gate 43;
+  passing it does not by itself authorize changing the default allocator.
 
 ## Deferred roadmap
 

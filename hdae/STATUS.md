@@ -2,6 +2,12 @@
 
 ## Approved future gate records
 
+- On 2026-11-14 the human requested Gate 43 to require no more than 5%
+  guarded-allocator overhead and a full profiling and test matrix. The gate is
+  recorded as a separate follow-up dependent on acceptance and merge of Gate
+  42 and pull request 292. Its implementation map awaits human confirmation;
+  no default-allocator change is authorized.
+
 - On 2026-11-14 the human authorized Gates 32 through 42 as one autonomous
   execution batch on `hdae/security-allocator-initiative`, delivered through one
   combined pull request. Gates 32 through 37 remain strictly defensive and
