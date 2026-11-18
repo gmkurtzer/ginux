@@ -11,6 +11,10 @@ use ginux_core::{
     balanced_surface, decide, decide_systemd, systemd_surface, Action, SYS_EXIT, SYS_EXIT_GROUP,
     SYS_GETPID, SYS_UNAME, SYS_WRITE,
 };
+use ginux_fs_policy::{
+    identity_token, AuthorityContext, CallContext, Capability, CapabilityKind,
+    ContractAuthorization, InstanceContext, ObjectId, Rights, TaskContext,
+};
 use ginux_instance::{AuditMode, HookFailurePolicy};
 
 mod channel_hooks;
@@ -36,20 +40,20 @@ use crate::process_hooks::{
     SYS_PIPE2, SYS_READ, SYS_RSEQ, SYS_SET_ROBUST_LIST, SYS_SET_TID_ADDRESS,
 };
 use crate::supervisor::{
-    exit_process, install_trace_filter, line, managed_host_identity, ptrace, read_tracee_word,
-    standard_stream_refusal, stopped, syscall0, syscall1, syscall2, syscall3, syscall4, syscall5,
-    syscall6, virtual_sysinfo, wait, write_all, write_i64, write_u64, UserRegs, AT_FDCWD,
-    CLOCK_MONOTONIC, CLOCK_PROCESS_CPUTIME_ID, EBADF, ECHILD, EINVAL, EMFILE, ENOSYS, EPERM, ESRCH,
-    O_RDONLY, O_RDWR, PR_SET_NO_NEW_PRIVS, PTRACE_CONT, PTRACE_EVENT_EXEC, PTRACE_EVENT_FORK,
-    PTRACE_EVENT_SECCOMP, PTRACE_GETEVENTMSG, PTRACE_GETREGS, PTRACE_KILL, PTRACE_O_EXITKILL,
-    PTRACE_O_TRACEEXEC, PTRACE_O_TRACEFORK, PTRACE_O_TRACESECCOMP, PTRACE_O_TRACESYSGOOD,
-    PTRACE_PEEKTEXT, PTRACE_POKETEXT, PTRACE_SETOPTIONS, PTRACE_SETREGS, PTRACE_SYSCALL,
-    PTRACE_SYSEMU, PTRACE_TRACEME, SIGCHLD, SIGCONT, SIGINT, SIGKILL, SIGSTOP, SIGTERM, SIGTSTP,
-    SIG_BLOCK, SYS_CHDIR, SYS_CHROOT, SYS_CLOCK_GETTIME, SYS_CLOSE_HOST, SYS_EXECVE, SYS_EXIT_HOST,
-    SYS_FORK, SYS_FSTAT, SYS_FSYNC, SYS_KILL, SYS_OPENAT_HOST, SYS_PAUSE, SYS_PIDFD_GETFD,
-    SYS_PIDFD_OPEN, SYS_PRCTL, SYS_PREAD64, SYS_PTRACE, SYS_PWRITE64, SYS_READ_HOST,
-    SYS_RT_SIGPROCMASK, SYS_SETGID, SYS_SETGROUPS, SYS_SETUID, SYS_SIGNALFD4, SYS_WAIT4,
-    SYS_WRITE_HOST, VIRTUAL_PID,
+    descriptor_object_id, exit_process, install_trace_filter, line, managed_host_identity, ptrace,
+    read_tracee_word, standard_stream_refusal, stopped, syscall0, syscall1, syscall2, syscall3,
+    syscall4, syscall5, syscall6, virtual_sysinfo, wait, write_all, write_i64, write_u64, UserRegs,
+    AT_FDCWD, CLOCK_MONOTONIC, CLOCK_PROCESS_CPUTIME_ID, EBADF, ECHILD, EINVAL, EMFILE, ENOSYS,
+    EPERM, ESRCH, O_RDONLY, O_RDWR, PR_SET_NO_NEW_PRIVS, PTRACE_CONT, PTRACE_EVENT_EXEC,
+    PTRACE_EVENT_FORK, PTRACE_EVENT_SECCOMP, PTRACE_GETEVENTMSG, PTRACE_GETREGS, PTRACE_KILL,
+    PTRACE_O_EXITKILL, PTRACE_O_TRACEEXEC, PTRACE_O_TRACEFORK, PTRACE_O_TRACESECCOMP,
+    PTRACE_O_TRACESYSGOOD, PTRACE_PEEKTEXT, PTRACE_POKETEXT, PTRACE_SETOPTIONS, PTRACE_SETREGS,
+    PTRACE_SYSCALL, PTRACE_SYSEMU, PTRACE_TRACEME, SIGCHLD, SIGCONT, SIGINT, SIGKILL, SIGSTOP,
+    SIGTERM, SIGTSTP, SIG_BLOCK, SYS_CHDIR, SYS_CHROOT, SYS_CLOCK_GETTIME, SYS_CLOSE_HOST,
+    SYS_EXECVE, SYS_EXIT_HOST, SYS_FORK, SYS_FSTAT, SYS_FSYNC, SYS_KILL, SYS_OPENAT_HOST,
+    SYS_PAUSE, SYS_PIDFD_GETFD, SYS_PIDFD_OPEN, SYS_PRCTL, SYS_PREAD64, SYS_PTRACE, SYS_PWRITE64,
+    SYS_READ_HOST, SYS_RT_SIGPROCMASK, SYS_SETGID, SYS_SETGROUPS, SYS_SETUID, SYS_SIGNALFD4,
+    SYS_WAIT4, SYS_WRITE_HOST, VIRTUAL_PID,
 };
 use crate::supervisor::{fault_errno, write_tracee_bytes as write_tracee_bytes_result, EFAULT};
 use ginux_devices::{
@@ -3404,6 +3408,7 @@ struct NativeSupervisorTask {
     pipe2_address: usize,
     pipe_fds: [i64; 8],
     socket_fds: [NativeSocketFd; NATIVE_SOCKET_FD_LIMIT],
+    pending_socket_family: u16,
     pending_socket_type: u8,
     pending_sockaddr: usize,
     pending_sockaddr_word: u64,
@@ -3436,6 +3441,7 @@ struct NativeSupervisorTask {
 #[derive(Clone, Copy)]
 struct NativeDescriptorTable {
     in_use: bool,
+    generation: u64,
     console_fd: i64,
     console_fds: [u64; NATIVE_PROC_FD_LIMIT / 64],
     // Close-on-exec flags are meaningful only for console_fds entries.
@@ -3446,6 +3452,7 @@ struct NativeDescriptorTable {
 
 const EMPTY_NATIVE_DESCRIPTOR_TABLE: NativeDescriptorTable = NativeDescriptorTable {
     in_use: false,
+    generation: 0,
     console_fd: -1,
     console_fds: [0; NATIVE_PROC_FD_LIMIT / 64],
     console_cloexec: [0; NATIVE_PROC_FD_LIMIT / 64],
@@ -3479,10 +3486,13 @@ const EMPTY_RETIRED_CREDENTIAL: NativeRetiredCredential = NativeRetiredCredentia
 #[derive(Clone, Copy)]
 struct NativeSocketFd {
     fd: i64,
+    address_family: u16,
     protocol: u8,
     source_bound: bool,
     internal_port: u16,
     external_port: u16,
+    netlink_sequences: [u32; 4],
+    netlink_count: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -3583,10 +3593,13 @@ const EMPTY_VIRTUAL_KERNEL_FD: NativeVirtualKernelFd = NativeVirtualKernelFd {
 
 const EMPTY_SOCKET_FD: NativeSocketFd = NativeSocketFd {
     fd: -1,
+    address_family: 0,
     protocol: 0,
     source_bound: false,
     internal_port: 0,
     external_port: 0,
+    netlink_sequences: [0; 4],
+    netlink_count: 0,
 };
 
 struct NativeProcSample {
@@ -5701,6 +5714,22 @@ fn supervise_native(
     };
     let instance_start_ns = clock_nanoseconds(CLOCK_MONOTONIC);
     let instance_start_realtime_seconds = clock_nanoseconds(CLOCK_REALTIME) / 1_000_000_000;
+    let instance_token = identity_token(instance.config().id.as_bytes());
+    let root_object = descriptor_object_id(root_descriptor)
+        .unwrap_or_else(|| native_fail(instance, pid, b"native root capability lost"));
+    let root_capability = Capability::new(
+        CapabilityKind::Root,
+        instance_token,
+        instance_start_ns.max(1),
+        1,
+        root_object,
+        Rights::LOOKUP.union(Rights::READ),
+    );
+    let cwd_capability = Capability::unavailable(
+        CapabilityKind::WorkingDirectory,
+        instance_token,
+        instance_start_ns.max(1),
+    );
 
     let mut status = 0i32;
     if wait(pid, &mut status) < 0 {
@@ -5800,11 +5829,13 @@ fn supervise_native(
     let mut descriptor_tables = [EMPTY_NATIVE_DESCRIPTOR_TABLE; 128];
     descriptor_tables[0] = NativeDescriptorTable {
         in_use: true,
+        generation: 1,
         console_fd: INSTANCE_CONSOLE_FD as i64,
         console_fds: root_console_fds,
         console_cloexec: [0; NATIVE_PROC_FD_LIMIT / 64],
         mutation_owner: 0,
     };
+    let mut next_descriptor_generation = 2u64;
     let mut deferred_stops = [0i32; 128];
     tasks[0] = Some(NativeSupervisorTask {
         host_pid: pid,
@@ -5825,6 +5856,7 @@ fn supervise_native(
         pipe2_address: 0,
         pipe_fds: [-1; 8],
         socket_fds: [EMPTY_SOCKET_FD; NATIVE_SOCKET_FD_LIMIT],
+        pending_socket_family: 0,
         pending_socket_type: 0,
         pending_sockaddr: 0,
         pending_sockaddr_word: 0,
@@ -6090,6 +6122,12 @@ fn supervise_native(
                 };
                 descriptor_tables[table] = descriptor_tables[task.descriptor_table];
                 descriptor_tables[table].in_use = true;
+                descriptor_tables[table].generation = next_descriptor_generation;
+                next_descriptor_generation = next_descriptor_generation
+                    .checked_add(1)
+                    .unwrap_or_else(|| {
+                        native_fail(instance, pid, b"native descriptor generation exhausted")
+                    });
                 descriptor_tables[table].mutation_owner = 0;
                 table
             };
@@ -6116,6 +6154,7 @@ fn supervise_native(
                 pipe2_address: 0,
                 pipe_fds: task.pipe_fds,
                 socket_fds: task.socket_fds,
+                pending_socket_family: 0,
                 pending_socket_type: 0,
                 pending_sockaddr: 0,
                 pending_sockaddr_word: 0,
@@ -6191,6 +6230,12 @@ fn supervise_native(
                 };
                 descriptor_tables[table] = descriptor_tables[old_table];
                 descriptor_tables[table].in_use = true;
+                descriptor_tables[table].generation = next_descriptor_generation;
+                next_descriptor_generation = next_descriptor_generation
+                    .checked_add(1)
+                    .unwrap_or_else(|| {
+                        native_fail(instance, pid, b"native descriptor generation exhausted")
+                    });
                 descriptor_tables[table].mutation_owner = 0;
                 task.descriptor_table = table;
             }
@@ -6886,6 +6931,27 @@ fn supervise_native(
                 task.pending_cgroup_procs_open = false;
             }
             if task.pending_recvmsg != 0 {
+                if registers.rax as i64 >= 0 {
+                    if let Some(socket) = task.socket_fds.iter_mut().find(|entry| {
+                        entry.fd == registers.rdi as i64
+                            && entry.address_family == 16
+                            && entry.netlink_count != 0
+                    }) {
+                        let accepted = native_network::accept_loopback_ack(
+                            host_pid,
+                            task.pending_recvmsg,
+                            &socket.netlink_sequences[..socket.netlink_count],
+                        )
+                        .ok()
+                        .flatten();
+                        if let Some(accepted) = accepted {
+                            socket
+                                .netlink_sequences
+                                .copy_within(accepted + 1..socket.netlink_count, accepted);
+                            socket.netlink_count -= 1;
+                        }
+                    }
+                }
                 if registers.rax as i64 >= 0
                     && !native_rewrite_recvmsg_credentials(
                         host_pid,
@@ -6941,10 +7007,13 @@ fn supervise_native(
                 };
                 *slot = NativeSocketFd {
                     fd: registers.rax as i64,
+                    address_family: task.pending_socket_family,
                     protocol: task.pending_socket_type,
                     source_bound: false,
                     internal_port: 0,
                     external_port: 0,
+                    netlink_sequences: [0; 4],
+                    netlink_count: 0,
                 };
             }
             if matches!(task.syscall, 43 | 288) && registers.rax as i64 >= 0 {
@@ -7081,6 +7150,16 @@ fn supervise_native(
                         };
                         descriptor_tables[new_table] = descriptor_tables[old_table];
                         descriptor_tables[new_table].in_use = true;
+                        descriptor_tables[new_table].generation = next_descriptor_generation;
+                        next_descriptor_generation = next_descriptor_generation
+                            .checked_add(1)
+                            .unwrap_or_else(|| {
+                                native_fail(
+                                    instance,
+                                    pid,
+                                    b"native descriptor generation exhausted",
+                                )
+                            });
                         descriptor_tables[new_table].mutation_owner = 0;
                         task.descriptor_table = new_table;
                     }
@@ -7107,6 +7186,7 @@ fn supervise_native(
             task.wait_status = 0;
             task.waitid_info = 0;
             task.pipe2_address = 0;
+            task.pending_socket_family = 0;
             task.pending_socket_type = 0;
             task.pending_getsockname = 0;
             task.close_range_first = -1;
@@ -7163,7 +7243,22 @@ fn supervise_native(
             shared_network && syscall == 41 && !task.socket_fds.iter().any(|entry| entry.fd < 0);
         let unsupported_socket_family =
             shared_network && syscall == 41 && !matches!(registers.rdi, 1 | 2 | 10);
+        if shared_network && syscall == 41 && registers.rdi == 16 && registers.rdx == 9 {
+            line(b"emulate surface=instance-audit-netlink result=-97");
+            registers.orig_rax = u64::MAX;
+            task.awaiting_exit = true;
+            task.override_exit = true;
+            task.override_result = -97;
+            tasks[task_index] = Some(task);
+            if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+            {
+                native_fail(instance, pid, b"native audit-netlink refusal failed");
+            }
+            continue;
+        }
         if shared_network && syscall == 41 && !socket_table_full && !unsupported_socket_family {
+            task.pending_socket_family = registers.rdi as u16;
             task.pending_socket_type = (registers.rsi & 0xf) as u8;
         }
         if shared_network
@@ -7176,6 +7271,24 @@ fn supervise_native(
             task.pending_getsockname = registers.rsi as usize;
         }
         if shared_network && matches!(syscall, 42 | 49) {
+            if native_socket_family(&task, registers.rdi) == Some(1)
+                && !native_unix_address_allowed(host_pid, registers.rsi as usize, registers.rdx)
+            {
+                write_all(b"emulate surface=unsupported-unix-address length=");
+                write_u64(registers.rdx);
+                write_all(b" result=-1\n");
+                registers.orig_rax = u64::MAX;
+                task.awaiting_exit = true;
+                task.override_exit = true;
+                task.override_result = -EPERM;
+                tasks[task_index] = Some(task);
+                if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+                {
+                    native_fail(instance, pid, b"native Unix-address denial failed");
+                }
+                continue;
+            }
             let protocol = native_socket_protocol(&task, registers.rdi);
             if let Some((word, port)) =
                 native_sockaddr_port(host_pid, registers.rsi as usize, registers.rdx)
@@ -7277,7 +7390,85 @@ fn supervise_native(
                 }
             }
         }
-        if shared_network && matches!(syscall, 44 | 46 | 307) {
+        if shared_network
+            && matches!(syscall, 44 | 46)
+            && native_socket_family(&task, registers.rdi) == Some(16)
+        {
+            let snapshot = native_network::Pending::snapshot_loopback_netlink(
+                host_pid,
+                task_index,
+                &registers,
+                &mut network_buffers[task_index],
+            );
+            task.awaiting_exit = true;
+            match snapshot {
+                Ok(snapshot) => {
+                    let sequence = snapshot.netlink_sequence;
+                    if let Some(socket) = task
+                        .socket_fds
+                        .iter_mut()
+                        .find(|entry| entry.fd == registers.rdi as i64)
+                    {
+                        if socket.netlink_count == socket.netlink_sequences.len() {
+                            native_fail(
+                                instance,
+                                pid,
+                                b"native netlink acknowledgement queue full",
+                            );
+                        }
+                        socket.netlink_sequences[socket.netlink_count] = sequence;
+                        socket.netlink_count += 1;
+                    }
+                    task.network_call = snapshot;
+                    task.network_call.map(&mut registers);
+                    line(b"mediate surface=validated-loopback-netlink result=pending");
+                }
+                Err(error) => {
+                    write_all(b"emulate surface=unsupported-netlink result=");
+                    write_i64(error);
+                    write_all(b"\n");
+                    registers.orig_rax = u64::MAX;
+                    task.override_exit = true;
+                    task.override_result = error;
+                }
+            }
+            tasks[task_index] = Some(task);
+            if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+            {
+                native_fail(instance, pid, b"native netlink snapshot setup failed");
+            }
+            continue;
+        }
+        if shared_network
+            && matches!(syscall, 44 | 46 | 307)
+            && native_socket_family(&task, registers.rdi)
+                .is_some_and(|family| family != 2 && family != 10)
+        {
+            let family = native_socket_family(&task, registers.rdi).unwrap_or_default();
+            if family != 1 || !native_unix_send_allowed(host_pid, syscall, &registers) {
+                // Non-Internet socket families have no generic host-send
+                // route. Pathname Unix sockets are contained by the tracee's
+                // instance root; abstract Unix and every other family require
+                // a separate bounded owner.
+                line(b"emulate surface=unsupported-socket-family result=-1");
+                registers.orig_rax = u64::MAX;
+                task.awaiting_exit = true;
+                task.override_exit = true;
+                task.override_result = -EPERM;
+                tasks[task_index] = Some(task);
+                if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+                {
+                    native_fail(instance, pid, b"native socket-family denial failed");
+                }
+                continue;
+            }
+        }
+        if shared_network
+            && matches!(syscall, 44 | 46 | 307)
+            && native_socket_is_ip(&task, registers.rdi)
+        {
             let protocol = native_socket_protocol(&task, registers.rdi);
             let network_protocol = match protocol {
                 1 => Some(NetworkProtocol::Tcp),
@@ -7310,7 +7501,10 @@ fn supervise_native(
                         break;
                     }
                 }
-            } else if let Err(snapshot_error) = &snapshot {
+            } else if error.is_none() {
+                let Err(snapshot_error) = &snapshot else {
+                    unreachable!();
+                };
                 error = Some(*snapshot_error);
             }
             if error.is_none() {
@@ -7359,46 +7553,6 @@ fn supervise_native(
             }
             continue;
         }
-        let implementation_decision = if mode == 3 {
-            if let Some(result) =
-                process_hooks::claim(syscall, registers.rdi, registers.rsi, registers.rdx)
-            {
-                ginux_core::Decision {
-                    syscall,
-                    action: Action::Deny((-result) as i32),
-                }
-            } else {
-                decide_systemd(syscall, shared_network)
-            }
-        } else {
-            match decide_native(syscall, registers.rdi, registers.rsi, registers.rdx) {
-                NativeDecision::Contract(decision) => decision,
-                NativeDecision::Hooked { lane, result } => {
-                    let lane_name: &[u8] = match lane {
-                        Lane::Process => b"process",
-                        Lane::Filesystem => b"filesystem",
-                        Lane::Channel => b"channel",
-                        Lane::Contract => b"contract",
-                    };
-                    write_all(b"emulate surface=lane-");
-                    write_all(lane_name);
-                    write_all(b" result=");
-                    write_i64(result);
-                    write_all(b"\n");
-                    registers.orig_rax = u64::MAX;
-                    task.awaiting_exit = true;
-                    task.override_exit = true;
-                    task.override_result = result;
-                    tasks[task_index] = Some(task);
-                    if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
-                        || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
-                    {
-                        native_fail(instance, pid, b"native lane emulation failed");
-                    }
-                    continue;
-                }
-            }
-        };
         let path_policy_denied = mode == 3
             && !bootstrap_phase
             && match syscall {
@@ -7621,6 +7775,107 @@ fn supervise_native(
         let contract_action = contract_rule
             .map(|rule| rule.action)
             .unwrap_or(ContractAction::Deny(38));
+        let table_generation = descriptor_tables[task.descriptor_table].generation;
+        let descriptor_capability = Capability::new(
+            CapabilityKind::DescriptorTable,
+            instance_token,
+            instance_start_ns.max(1),
+            table_generation,
+            ObjectId {
+                device: instance_token,
+                inode: table_generation,
+            },
+            Rights::LOOKUP
+                .union(Rights::READ)
+                .union(Rights::WRITE)
+                .union(Rights::CREATE)
+                .union(Rights::METADATA),
+        );
+        let call = CallContext::x86_64(
+            syscall,
+            [
+                registers.rdi,
+                registers.rsi,
+                registers.rdx,
+                registers.r10,
+                registers.r8,
+                registers.r9,
+            ],
+            TaskContext {
+                host: host_pid as u64,
+                virtual_id: task.virtual_id.pid as u64,
+                generation: task.virtual_id.generation() as u64,
+            },
+            InstanceContext {
+                identity: instance_token,
+                lifetime: instance_start_ns.max(1),
+                root_generation: 1,
+            },
+            AuthorityContext {
+                root: root_capability,
+                cwd: cwd_capability,
+                descriptor_table: descriptor_capability,
+                cwd_generation: 0,
+                descriptor_generation: table_generation,
+            },
+            ContractAuthorization::from(contract_action),
+        );
+        let implementation_decision =
+            if local_policy_denied || matches!(contract_action, ContractAction::Deny(_)) {
+                NativeDecision::Contract(ginux_core::Decision {
+                    syscall,
+                    action: Action::Deny(EPERM as i32),
+                })
+            } else if mode == 3 {
+                if fs_hooks::claims(syscall) {
+                    match fs_hooks::claim(&call, !local_policy_denied) {
+                        fs_hooks::Claim::Denied(result) => NativeDecision::Hooked {
+                            lane: Lane::Filesystem,
+                            result,
+                        },
+                        fs_hooks::Claim::Unclaimed => {
+                            NativeDecision::Contract(decide_systemd(syscall, shared_network))
+                        }
+                    }
+                } else if let Some(result) =
+                    process_hooks::claim(syscall, registers.rdi, registers.rsi, registers.rdx)
+                {
+                    NativeDecision::Contract(ginux_core::Decision {
+                        syscall,
+                        action: Action::Deny((-result) as i32),
+                    })
+                } else {
+                    NativeDecision::Contract(decide_systemd(syscall, shared_network))
+                }
+            } else {
+                decide_native(&call)
+            };
+        if !local_policy_denied && !matches!(contract_action, ContractAction::Deny(_)) {
+            if let NativeDecision::Hooked { lane, result } = implementation_decision {
+                let lane_name: &[u8] = match lane {
+                    Lane::Process => b"process",
+                    Lane::Filesystem => b"filesystem",
+                    Lane::Channel => b"channel",
+                    Lane::Contract => b"contract",
+                };
+                write_all(b"emulate surface=lane-");
+                write_all(lane_name);
+                write_all(b" result=");
+                write_i64(result);
+                write_all(b"\n");
+                registers.orig_rax = u64::MAX;
+                task.awaiting_exit = true;
+                task.override_exit = true;
+                task.override_result = result;
+                tasks[task_index] = Some(task);
+                if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+                {
+                    native_fail(instance, pid, b"native lane emulation failed");
+                }
+                continue;
+            }
+        }
         let decision = if local_policy_denied {
             ginux_core::Decision {
                 syscall,
@@ -7632,7 +7887,14 @@ fn supervise_native(
                     syscall,
                     action: Action::Deny(errno),
                 },
-                ContractAction::Emulate | ContractAction::Mediate => implementation_decision,
+                ContractAction::Emulate | ContractAction::Mediate => {
+                    match implementation_decision {
+                        NativeDecision::Contract(decision) => decision,
+                        NativeDecision::Hooked { .. } => {
+                            native_fail(instance, pid, b"native lane authorization state invalid")
+                        }
+                    }
+                }
             }
         };
         write_all(b"GINUX_NATIVE_AUDIT: sequence=");
@@ -7692,6 +7954,9 @@ fn supervise_native(
             write_u64(registers.rsi);
             write_all(b" options=");
             write_u64(registers.r10);
+        } else if mode == 3 && syscall == process_hooks::SYS_CLONE {
+            write_all(b" flags=");
+            write_u64(registers.rdi);
         } else if mode == 3 && syscall == 72 {
             write_all(b" fd=");
             write_u64(registers.rdi);
@@ -10121,11 +10386,10 @@ fn supervise_native(
             Action::Mediate if mode == 3 && syscall == 435 => {
                 let snapshot = native_clone::Pending::snapshot(host_pid, task_index, &registers)
                     .and_then(|mut snapshot| {
-                        if !process_hooks::clone3_supported(
-                            snapshot.flags(),
-                            snapshot.exit_signal(),
-                        ) {
-                            return Err(-ENOSYS);
+                        if let Some(error) =
+                            process_hooks::clone3_denial(snapshot.flags(), snapshot.exit_signal())
+                        {
+                            return Err(error);
                         }
                         if snapshot.flags() & 0x2_0000_0000 != 0 {
                             let owned = native_virtual_kernel_fd(
@@ -10683,6 +10947,17 @@ fn native_socket_protocol(task: &NativeSupervisorTask, fd: u64) -> u8 {
         .map_or(0, |entry| entry.protocol)
 }
 
+fn native_socket_family(task: &NativeSupervisorTask, fd: u64) -> Option<u16> {
+    task.socket_fds
+        .iter()
+        .find(|entry| entry.fd == fd as i64)
+        .map(|entry| entry.address_family)
+}
+
+fn native_socket_is_ip(task: &NativeSupervisorTask, fd: u64) -> bool {
+    native_socket_family(task, fd).is_some_and(|family| matches!(family, 2 | 10))
+}
+
 fn native_bind_socket_source(pid: usize, fd: i64, source: [u8; 4]) -> bool {
     const SYS_PIDFD_OPEN: usize = 434;
     const SYS_PIDFD_GETFD: usize = 438;
@@ -10726,6 +11001,42 @@ fn native_sockaddr_port(pid: usize, address: usize, length: u64) -> Option<(u64,
     }
     let port = ((((word >> 16) & 0xff) << 8) | ((word >> 24) & 0xff)) as u16;
     Some((word, port))
+}
+
+fn native_unix_address_allowed(pid: usize, address: usize, length: u64) -> bool {
+    if address == 0 || !(3..=110).contains(&length) {
+        return false;
+    }
+    let mut socket_address = [0u8; 110];
+    let length = length as usize;
+    if !read_tracee_bytes(pid, address, &mut socket_address[..length])
+        || u16::from_ne_bytes([socket_address[0], socket_address[1]]) != 1
+    {
+        return false;
+    }
+    socket_address[2] != 0
+}
+
+fn native_unix_send_allowed(pid: usize, syscall: u64, registers: &UserRegs) -> bool {
+    match syscall {
+        // A connected Unix socket has no per-send destination. Its connect(2)
+        // address was already restricted to an instance-root pathname.
+        44 if registers.r8 == 0 && registers.r9 == 0 => true,
+        44 => native_unix_address_allowed(pid, registers.r8 as usize, registers.r9),
+        46 => {
+            let mut header = [0u8; 16];
+            if registers.rsi == 0 || !read_tracee_bytes(pid, registers.rsi as usize, &mut header) {
+                return false;
+            }
+            let address = u64::from_ne_bytes(header[..8].try_into().unwrap());
+            let length = u32::from_ne_bytes(header[8..12].try_into().unwrap()) as u64;
+            (address == 0 && length == 0)
+                || native_unix_address_allowed(pid, address as usize, length)
+        }
+        // sendmmsg(2) needs its own bounded per-message pathname owner before
+        // it may reach a host Unix socket.
+        _ => false,
+    }
 }
 
 fn native_sockaddr_with_port(word: u64, port: u16) -> u64 {

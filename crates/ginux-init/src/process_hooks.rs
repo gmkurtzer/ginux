@@ -2,10 +2,11 @@
 //!
 //! The `process-native` loop runs supported fork, clone, vfork, and exec
 //! calls under ptrace, then records their outcomes in `ProcessTable`.
-//! Unsupported clone flags and execveat forms fail before execution. Host
-//! namespace creation returns EPERM so callers can take their documented
-//! container fallback without mistaking the ABI for absent.
-//! Clone3 is unsupported.
+//! Unsupported clone flags and execveat forms return ENOSYS before execution.
+//! Host-namespace creation is a supported Linux operation denied by the Ginux
+//! boundary, so it returns EPERM rather than pretending the syscall is absent.
+//! Supported clone3 shapes use the same managed process policy through an
+//! immutable argument snapshot.
 //!
 //! The loop also handles virtual identities, blocking/nonblocking child
 //! waits, termination signals, and descriptor inheritance. Pipes and stdio
@@ -54,7 +55,7 @@ pub const CLONE_NEWUSER: u64 = 0x1000_0000;
 pub const CLONE_NEWPID: u64 = 0x2000_0000;
 pub const CLONE_NEWNET: u64 = 0x4000_0000;
 pub const CLONE_NEWTIME: u64 = 0x0000_0080;
-pub const HOST_NAMESPACES: u64 = CLONE_NEWNS
+pub const CLONE_NAMESPACES: u64 = CLONE_NEWNS
     | CLONE_NEWCGROUP
     | CLONE_NEWUTS
     | CLONE_NEWIPC
@@ -181,7 +182,7 @@ pub const fn claims(syscall: u64) -> bool {
 pub fn thread_supported(flags: u64) -> bool {
     flags & CLONE_THREAD != 0
         && flags & (CLONE_VM | CLONE_SIGHAND) == (CLONE_VM | CLONE_SIGHAND)
-        && flags & (CLONE_VFORK | CLONE_PARENT | CLONE_UNTRACED | HOST_NAMESPACES) == 0
+        && flags & (CLONE_VFORK | CLONE_PARENT | CLONE_UNTRACED | CLONE_NAMESPACES) == 0
         && flags & CLONE_EXIT_SIGNAL_MASK == 0
 }
 
@@ -190,10 +191,7 @@ pub fn thread_supported(flags: u64) -> bool {
 /// it is not permission for other callers to execute a host syscall.
 pub fn claim(syscall: u64, rdi: u64, _rsi: u64, _rdx: u64) -> Option<i64> {
     if syscall == SYS_CLONE {
-        // The syscall exists, but Ginux deliberately refuses host namespace
-        // creation. EPERM is both accurate and lets container-aware callers
-        // select their safe no-namespace fallback.
-        if rdi & HOST_NAMESPACES != 0 {
+        if rdi & CLONE_NAMESPACES != 0 {
             return Some(-EPERM);
         }
         // Accept only the flags represented by managed process ownership.
@@ -232,15 +230,24 @@ pub fn claim(syscall: u64, rdi: u64, _rsi: u64, _rdx: u64) -> Option<i64> {
 
 /// Apply the legacy clone ownership policy to clone3's split flags and exit
 /// signal while preserving clone3-only features already mediated elsewhere.
-pub fn clone3_supported(flags: u64, exit_signal: u64) -> bool {
+/// Return the fail-closed errno for an unsupported clone3 shape. Namespace
+/// creation is denied as a privilege boundary; other unimplemented shapes
+/// remain ENOSYS so callers can distinguish policy from missing emulation.
+pub fn clone3_denial(flags: u64, exit_signal: u64) -> Option<i64> {
     const CLONE_PIDFD: u64 = 0x0000_1000;
     const CLONE_CLEAR_SIGHAND: u64 = 0x1_0000_0000;
     const CLONE_INTO_CGROUP: u64 = 0x2_0000_0000;
+    if flags & CLONE_NAMESPACES != 0 {
+        return Some(-EPERM);
+    }
     if flags & CLONE_CLEAR_SIGHAND != 0 && flags & CLONE_SIGHAND != 0 {
-        return false;
+        return Some(-ENOSYS);
     }
     let legacy = flags & !(CLONE_PIDFD | CLONE_CLEAR_SIGHAND | CLONE_INTO_CGROUP);
-    exit_signal <= u8::MAX as u64 && claim(SYS_CLONE, legacy | exit_signal, 0, 0).is_none()
+    if exit_signal > u8::MAX as u64 {
+        return Some(-ENOSYS);
+    }
+    claim(SYS_CLONE, legacy | exit_signal, 0, 0)
 }
 
 /// Whether an executable-replacement entry executes under supervision.

@@ -12,6 +12,10 @@ use ginux_core::{
     balanced_identity_result, balanced_mediated_result, balanced_surface,
     is_shared_network_syscall, Action, BalancedSurface, SYS_EXIT, SYS_EXIT_GROUP,
 };
+use ginux_fs_policy::{
+    identity_token, AuthorityContext, CallContext, Capability, CapabilityKind,
+    ContractAuthorization, InstanceContext, TaskContext,
+};
 use ginux_instance::{
     AuditMode, ConfigError, ExecutionBackend, ExecutionProfile, Instance, InstanceConfig,
 };
@@ -1044,6 +1048,16 @@ fn tracee_setup_fail(message: &[u8], code: usize) -> ! {
 }
 
 fn supervise_launch(pid: usize, instance: &mut Instance, contract: &EffectiveContract) -> ! {
+    let instance_token = identity_token(instance.config().id.as_bytes());
+    let lifetime = (instance_token ^ pid as u64).max(1);
+    // Launch does not retain a root descriptor or track cwd and descriptor
+    // object generations. Explicit absence prevents a later filesystem hook
+    // from treating this route as complete and avoids adding unused supervisor
+    // authority merely for a foundation interface.
+    let root = Capability::unavailable(CapabilityKind::Root, instance_token, lifetime);
+    let cwd = Capability::unavailable(CapabilityKind::WorkingDirectory, instance_token, lifetime);
+    let descriptors =
+        Capability::unavailable(CapabilityKind::DescriptorTable, instance_token, lifetime);
     let mut status = 0i32;
     if wait(pid, &mut status) < 0 {
         launch_fail(instance, pid, b"launch tracee wait after exec failed");
@@ -1178,14 +1192,42 @@ fn supervise_launch(pid: usize, instance: &mut Instance, contract: &EffectiveCon
         // The resolved instance contract is checked first: its denials apply
         // before any effect, and its allowances never widen the balanced surface.
         let rule = contract.runtime_rule(syscall, launch_semantic_operation(&registers));
-        let native = match rule.map_or(ContractAction::Deny(38), |rule| rule.action) {
+        let contract_action = rule.map_or(ContractAction::Deny(38), |rule| rule.action);
+        let call = CallContext::x86_64(
+            syscall,
+            [
+                registers.rdi,
+                registers.rsi,
+                registers.rdx,
+                registers.r10,
+                registers.r8,
+                registers.r9,
+            ],
+            TaskContext {
+                host: pid as u64,
+                virtual_id: 1,
+                generation: 1,
+            },
+            InstanceContext {
+                identity: instance_token,
+                lifetime,
+                root_generation: 0,
+            },
+            AuthorityContext {
+                root,
+                cwd,
+                descriptor_table: descriptors,
+                cwd_generation: 0,
+                descriptor_generation: 0,
+            },
+            ContractAuthorization::from(contract_action),
+        );
+        let native = match contract_action {
             ContractAction::Deny(errno) => NativeDecision::Contract(ginux_core::Decision {
                 syscall,
                 action: Action::Deny(errno),
             }),
-            ContractAction::Emulate | ContractAction::Mediate => {
-                decide_native(syscall, registers.rdi, registers.rsi, registers.rdx)
-            }
+            ContractAction::Emulate | ContractAction::Mediate => decide_native(&call),
         };
         let decision = match native {
             NativeDecision::Contract(decision) => decision,

@@ -61,7 +61,47 @@
 - Exact next action: stop for human testing and explicit acceptance of pull
   request https://github.com/gmkurtzer/ginux/pull/292.
 
-### Historical checkpoint: Gate 26 Rocky Linux RPM packaging
+### Prior checkpoint: Gate 31 filesystem mediation foundation
+
+- Gate 31 was merged through pull request 291 and is now part of the base for
+  the Gates 32-42 batch.
+- The gate establishes complete filesystem call context, operation ownership,
+  typed root/cwd/descriptor authority, and independent host-effect oracles
+  without making `fs_hooks` claim a syscall.
+- Issue #290 remains the umbrella source. Gate 31 does not close it or enable an
+  operation family.
+- The human selected normal Linux filesystem semantics inside the instance with
+  an invariant that paths, descriptors, procfs references, races, and lifecycle
+  transitions cannot escape or reconnect outside the instance. Unsupported
+  capabilities must fail explicitly.
+- The current implementation, generated ownership inventory, route interlocks,
+  tripwire/race/mutation tests, and initial security review are present. The
+  filesystem lane still claims no syscall and adds no intended filesystem host
+  effect.
+- Exact-head repair makes every future claimed filesystem operation return a
+  handled result or explicit denial, checks inventory equality against an
+  independently pinned x86-64 ABI set, and proves the host-effect oracle detects
+  injected protected read, write, metadata, handle, and transient effects.
+- Generic non-IP host sends are removed. Systemd receives only explicit bounded
+  loopback netlink handling and instance-root pathname Unix sockets; arbitrary
+  netlink and abstract-Unix sends fail before host effect.
+- `make check`, `make test-unit`, focused native supervision, aggregate
+  `make test`, `make test-security`, `make test-rpm`, and the complete
+  `make test-systemd` matrix pass.
+- An installed-RPM reproduction also exposed persisted contract metadata from
+  an older catalog revision. The instance was repaired explicitly by
+  recompiling its unchanged recipe; silent contract migration remains
+  prohibited because a catalog change can alter wildcard meaning. Package
+  upgrade/migration coverage is a recorded follow-up, not a weakened startup
+  check.
+- A clean committed-source RPM build now passes metadata validation, DNF
+  install, `rpm -V`, packaged Alpine start/stop, packaged Rocky systemd boot to
+  its login prompt, offline cached reuse, reinstall, erase/reinstall, and
+  persistent instance-state checks.
+- Pull request https://github.com/gmkurtzer/ginux/pull/291 contains the repaired
+  bounded implementation and references but does not close issue #290.
+
+### Prior checkpoint: Gate 26 Rocky Linux RPM packaging
 
 - Gate 26 is technically passed locally on `hdae/rpm-packaging` and remains a
   human checkpoint in `gates-todo/`.

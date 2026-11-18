@@ -295,6 +295,11 @@ backend = "shared"'''))
             "GINUX_FIXTURE: sendmmsg-many=-22", "GINUX_FIXTURE: connect=0",
             "GINUX_FIXTURE: connected-sendto=1", "GINUX_FIXTURE: connected-sendmsg=1"],
             code, out)
+        code, out = run("W-socket-families", credential_config, configured_launch=True)
+        fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
+        check("unsupported socket families fail before host effect", code == 0 and fixture == [
+            "GINUX_FIXTURE: abstract-unix-send=-1",
+            "GINUX_FIXTURE: netlink-send=-7"], code, out)
         code, out = run("expired-credentials", credential_config, configured_launch=True)
         fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
         check("queued credentials survive sender reap", code == 0 and fixture == [

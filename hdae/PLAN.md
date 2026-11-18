@@ -123,8 +123,8 @@ replace it.
     state-preserving erase, reinstall, and complete package metadata.
 31. **Filesystem mediation foundation**: establish complete immutable syscall
     context, explicit operation ownership, typed root/cwd/descriptor authority,
-    and independent host-effect oracles before filesystem operation families
-    are enabled.
+    and independent host-effect oracles before the filesystem lane claims any
+    syscall.
 32. **Security architecture and trust inventory**: inventory every trusted seam,
     host effect, authority owner, invariant, test, and limitation.
 33. **Contract enforcement and syscall mediation review**: defensively verify
