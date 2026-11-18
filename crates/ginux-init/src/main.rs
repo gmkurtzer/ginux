@@ -7017,17 +7017,24 @@ fn supervise_native(
                 };
             }
             if matches!(task.syscall, 43 | 288) && registers.rax as i64 >= 0 {
-                let listener_protocol = native_socket_protocol(&task, registers.rdi);
-                if listener_protocol != 0 {
+                let listener = task
+                    .socket_fds
+                    .iter()
+                    .find(|entry| entry.fd == registers.rdi as i64)
+                    .copied();
+                if let Some(listener) = listener.filter(|entry| entry.protocol != 0) {
                     let Some(slot) = task.socket_fds.iter_mut().find(|entry| entry.fd < 0) else {
                         native_fail(instance, pid, b"native accepted socket table full");
                     };
                     *slot = NativeSocketFd {
                         fd: registers.rax as i64,
-                        protocol: listener_protocol,
+                        address_family: listener.address_family,
+                        protocol: listener.protocol,
                         source_bound: false,
                         internal_port: 0,
                         external_port: 0,
+                        netlink_sequences: [0; 4],
+                        netlink_count: 0,
                     };
                 }
             }
