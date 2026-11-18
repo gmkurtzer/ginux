@@ -6800,9 +6800,12 @@ fn supervise_native(
                 task.override_exit = true;
                 task.override_result = task.virtual_id.pid as i64;
             }
+            // The close_range bookkeeping below follows the bounds the
+            // kernel ran with, which the restore replaces.
+            let (ran_first, ran_last) = (registers.rdi, registers.rsi);
             if let Some([rdi, rsi, rdx]) = task.pending_device_arguments.take() {
-                // The syscall ABI preserves the open's arguments, which the
-                // copy replaced.
+                // The syscall ABI preserves the arguments, which the copy of
+                // a device open or the bounds of a close_range replaced.
                 registers.rdi = rdi;
                 registers.rsi = rsi;
                 registers.rdx = rdx;
@@ -7091,8 +7094,8 @@ fn supervise_native(
                 // and CLOSE_RANGE_CLOEXEC marks the range instead of closing.
                 const CLOSE_RANGE_UNSHARE: u64 = 2;
                 const CLOSE_RANGE_CLOEXEC: u64 = 4;
-                let first = registers.rdi as u32 as usize;
-                let last = registers.rsi as u32 as usize;
+                let first = ran_first as u32 as usize;
+                let last = ran_last as u32 as usize;
                 if registers.rdx & CLOSE_RANGE_UNSHARE != 0 {
                     let old_table = task.descriptor_table;
                     let shared = tasks.iter().enumerate().any(|(slot, candidate)| {
@@ -8647,6 +8650,28 @@ fn supervise_native(
             }
             Action::Mediate
                 if mode == 3
+                    && native_protected_descriptor_result(syscall, &registers).is_some() =>
+            {
+                let result = native_protected_descriptor_result(syscall, &registers).unwrap_or(0);
+                write_all(b"emulate surface=protected-descriptor result=");
+                write_i64(result);
+                write_all(b"\n");
+                registers.orig_rax = u64::MAX;
+                task.awaiting_exit = true;
+                task.override_exit = true;
+                task.override_result = result;
+                if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+                {
+                    native_fail(
+                        instance,
+                        pid,
+                        b"native protected descriptor emulation failed",
+                    );
+                }
+            }
+            Action::Mediate
+                if mode == 3
                     && syscall == 3
                     && native_virtual_kernel_fd(
                         &virtual_kernel_fds,
@@ -10071,7 +10096,9 @@ fn supervise_native(
                 }
             }
             Action::Mediate
-                if mode == 3 && syscall == 3 && registers.rdi as usize == INSTANCE_NULL_FD =>
+                if mode == 3
+                    && syscall == 3
+                    && registers.rdi as u32 as usize == INSTANCE_NULL_FD =>
             {
                 line(b"mediate surface=virtual-device result=protected");
                 registers.orig_rax = u64::MAX;
@@ -10085,7 +10112,9 @@ fn supervise_native(
                 }
             }
             Action::Mediate
-                if mode == 3 && syscall == 3 && registers.rdi as usize == INSTANCE_CONSOLE_FD =>
+                if mode == 3
+                    && syscall == 3
+                    && registers.rdi as u32 as usize == INSTANCE_CONSOLE_FD =>
             {
                 line(b"mediate surface=virtual-console result=protected");
                 registers.orig_rax = u64::MAX;
@@ -10258,26 +10287,47 @@ fn supervise_native(
             Action::Mediate
                 if mode == 3
                     && syscall == ginux_core::SYS_CLOSE_RANGE
-                    && registers.rdi >= 3
-                    && registers.rdi < INSTANCE_NULL_FD as u64
-                    && registers.rsi >= registers.rdi
-                    && registers.rdx == 0 =>
+                    && registers.rdi as u32 as usize <= INSTANCE_CONSOLE_FD
+                    && registers.rsi as u32 >= registers.rdi as u32
+                    // Only CLOSE_RANGE_UNSHARE (2) and CLOSE_RANGE_CLOEXEC (4).
+                    && registers.rdx as u32 & !6 == 0 =>
             {
-                native_virtual_kernel_clear_range(
-                    &mut virtual_kernel_fds,
-                    host_pid,
-                    registers.rdi as i64,
-                    core::cmp::min(registers.rsi, i64::MAX as u64) as i64,
-                );
-                let last = core::cmp::min(registers.rsi, INSTANCE_NULL_FD as u64 - 1);
+                const CLOSE_RANGE_CLOEXEC: u64 = 4;
+                // The kernel reads the bounds and flags as 32 bits. Its range
+                // never reaches the protected descriptors: one from below
+                // them stops at 239, one from them starts at 242, and one
+                // within them becomes the empty range at u32::MAX, which the
+                // kernel accepts and which still unshares the table.
+                let requested_first = registers.rdi as u32 as u64;
+                let requested_last = registers.rsi as u32 as u64;
+                let (first, last) = if requested_first < INSTANCE_NULL_FD as u64 {
+                    (
+                        requested_first,
+                        core::cmp::min(requested_last, INSTANCE_NULL_FD as u64 - 1),
+                    )
+                } else if requested_last > INSTANCE_CONSOLE_FD as u64 {
+                    (INSTANCE_CONSOLE_FD as u64 + 1, requested_last)
+                } else {
+                    (u64::from(u32::MAX), u64::from(u32::MAX))
+                };
+                if registers.rdx & CLOSE_RANGE_CLOEXEC == 0 {
+                    native_virtual_kernel_clear_range(
+                        &mut virtual_kernel_fds,
+                        host_pid,
+                        requested_first as i64,
+                        requested_last as i64,
+                    );
+                    task.close_range_first = first as i64;
+                    task.close_range_last = last as i64;
+                }
                 write_all(b"mediate surface=task-close-range first=");
-                write_u64(registers.rdi);
+                write_u64(first);
                 write_all(b" last=");
                 write_u64(last);
                 write_all(b" result=pending\n");
+                task.pending_device_arguments = Some([registers.rdi, registers.rsi, registers.rdx]);
+                registers.rdi = first;
                 registers.rsi = last;
-                task.close_range_first = registers.rdi as i64;
-                task.close_range_last = last as i64;
                 task.awaiting_exit = true;
                 if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
                     || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
@@ -10726,6 +10776,34 @@ fn virtual_credential_target(current: u32, values: &[u64]) -> Option<u32> {
         target = Some(value);
     }
     Some(target.unwrap_or(current))
+}
+
+/// The result Ginux returns, without running the call, for a call that
+/// would replace or mark close-on-exec the protected null or console
+/// descriptor (close and close_range are handled where they are mediated).
+/// The kernel reads descriptors and commands as 32 bits. As with close,
+/// marking one close-on-exec only seems to succeed; a duplicate onto one
+/// fails with EBADF, as onto a number past the descriptor limit.
+fn native_protected_descriptor_result(syscall: u64, registers: &UserRegs) -> Option<i64> {
+    const FIONCLEX: u32 = 0x5450;
+    const FIOCLEX: u32 = 0x5451;
+    let protected = |fd: u64| matches!(fd as u32 as usize, INSTANCE_NULL_FD | INSTANCE_CONSOLE_FD);
+    match syscall {
+        // dup2 onto itself changes nothing, and dup3 onto itself or with
+        // unknown flags fails before the kernel checks the number.
+        SYS_DUP2 | SYS_DUP3
+            if protected(registers.rsi)
+                && registers.rdi as u32 != registers.rsi as u32
+                && (syscall == SYS_DUP2 || registers.rdx as u32 as u64 & !O_CLOEXEC == 0) =>
+        {
+            Some(-EBADF)
+        }
+        SYS_FCNTL if protected(registers.rdi) && registers.rsi as u32 as u64 == F_SETFD => Some(0),
+        16 if protected(registers.rdi) && matches!(registers.rsi as u32, FIONCLEX | FIOCLEX) => {
+            Some(0)
+        }
+        _ => None,
+    }
 }
 
 fn native_arguments_allowed(syscall: u64, registers: &UserRegs, mode: usize) -> bool {

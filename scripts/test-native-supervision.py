@@ -411,6 +411,36 @@ backend = "shared"'''))
                                       "GINUX_FIXTURE: writev-console=2"]
                   and (work / "console-output").read_bytes().startswith(b"K\nK\nK\n"), code, out)
 
+        # The protected null (240) and console (241) descriptors survive every
+        # call that would close, replace or mark them close-on-exec, with
+        # descriptor arguments read as 32 bits. Each step runs in its own
+        # child, which then writes through both and checks their flags. A
+        # range from them still reaches the workload's descriptor 300 and
+        # unshares; one from below stops at 239.
+        with open(work / "protected-console", "w+b") as console:
+            code, out = run("P-protected-descriptors", configured, stdin=console)
+            fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
+            steps = [("close-high-console", 0), ("close-high-null", 0), ("dup2-console", -9),
+                     ("dup2-high-console", -9), ("dup2-console-self", 241), ("dup3-null", -9),
+                     ("dup3-high-console", -9), ("setfd-console", 0), ("setfd-high-null", 0),
+                     ("fioclex-console", 0), ("fioclex-high-null", 0), ("fionclex-console", 0),
+                     ("cloexec-range", 0), ("console-range", 0), ("high-range", 0),
+                     ("inverted-high-range", -22)]
+            ranges = [("null-range", -9), ("null-cloexec-range", 1), ("unshare-range", 0)]
+            expected = [line for name, result in steps for line in (
+                f"GINUX_FIXTURE: {name}={result}", f"GINUX_FIXTURE: {name}-intact=1")]
+            expected.append("GINUX_FIXTURE: fd-300=300")
+            expected += [line for name, flags in ranges for line in (
+                f"GINUX_FIXTURE: {name}=0", f"GINUX_FIXTURE: {name}-fd-300={flags}",
+                f"GINUX_FIXTURE: {name}-intact=1")]
+            expected.append("GINUX_FIXTURE: unshare-console-range=1")
+            expected += ["GINUX_FIXTURE: cut-range-arguments-kept=1",
+                         "GINUX_FIXTURE: protected-range-arguments-kept=1"]
+            check("protected descriptors survive close, dup, close-on-exec and close_range",
+                  code == 0 and fixture == expected
+                  and (work / "protected-console").read_bytes()
+                  == b"P\n" * (len(steps) + len(ranges)), code, out)
+
         # Upstream owns cgroups in memory. Retain the public API and
         # containment regressions without requiring obsolete host files.
         cgroup_outside = work / "cgroup-outside"
