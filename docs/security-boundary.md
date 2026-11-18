@@ -49,6 +49,25 @@ The retained root descriptor and ptrace relationship remain security-critical
 Ginux authority; a defect in their validation or use can violate the intended
 boundary.
 
+### Filesystem mediation foundation
+
+The native filesystem lane currently claims no syscall. Before later gates can
+enable an operation family, both configured native routes now provide one
+immutable x86-64 call context containing all six syscall arguments, virtual and
+host task identity, instance lifetime and root generation, descriptor-table
+generation, typed root/cwd/descriptor authority, and the effective contract
+decision. A filesystem hook is eligible only when contract permission,
+route-local confinement, operation ownership, object identity, rights, and
+current generations all agree.
+
+The generated [filesystem operation inventory](fs-operation-inventory.md)
+assigns every currently identified filesystem-capable ABI entry to one owner or
+explicit denial. Unknown ABI entries, unknown operations, incomplete authority,
+stale generations, and contract denials fail closed. The retained root is
+identified from its already-open descriptor; path text cannot replace that
+identity. This foundation does not itself add filesystem compatibility or
+authorize any new host effect.
+
 ## Trusted and excluded components
 
 The Host kernel and ptrace implementation, CPU and hardware, boot chain,
@@ -116,10 +135,11 @@ limit, five seconds per target, a 60-second suite bound, and a 256 MiB process
 limit. A crash or timeout preserves its current input under
 `build/security-fuzz/`. `make test-security` exercises malformed contracts,
 selectors, ELF images, VFS indexes, kernel-view paths, device ranges, syscall
-dispatch, audit accounting, host-effect denial, host-view isolation, bounded
-resources, teardown, and live supervisor authority. `make test-recovery`
-exercises configured startup failure, supervisor loss, forced-stop cleanup,
-audit bounds, and controlled systemd shutdown.
+dispatch, filesystem capability generations, deterministic path-replacement
+races, peer/host tripwires, audit accounting, host-effect denial, host-view
+isolation, bounded resources, teardown, and live supervisor authority.
+`make test-recovery` exercises configured startup failure, supervisor loss,
+forced-stop cleanup, audit bounds, and controlled systemd shutdown.
 
 Passing these tests is regression evidence for the stated configuration. It
 does not replace careful source review, independent adversarial testing,
