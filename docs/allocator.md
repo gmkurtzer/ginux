@@ -41,8 +41,13 @@ attempting to preload this glibc library there is unsupported.
 The initial ABI includes `malloc`, `free`, `calloc`, `realloc`,
 `reallocarray`, `posix_memalign`, `aligned_alloc`, `memalign`, `valloc`,
 `pvalloc`, `cfree`, and `malloc_usable_size`. It also exports the common
-jemalloc extended allocation entry points. Unsupported `mallctl` names return
-`ENOENT` instead of pretending to change state.
+jemalloc extended allocation entry points. The extended allocation subset
+supports `MALLOCX_ALIGN` and `MALLOCX_ZERO`; unsupported flag classes fail with
+`EINVAL` (or return zero from `nallocx`) rather than being silently ignored.
+`nallocx` reports the same usable size that `sallocx` observes after the
+matching `mallocx`, and `rallocx` preserves alignment and zero-fills newly
+allocated growth when requested. Unsupported `mallctl` names return `ENOENT`
+instead of pretending to change state.
 
 ## Design
 

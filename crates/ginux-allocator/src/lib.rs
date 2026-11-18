@@ -79,6 +79,7 @@ static REGISTRY: Registry = Registry(UnsafeCell::new([Slot::EMPTY; MAX_ALLOCATIO
 static REGISTRY_LOCK: AtomicBool = AtomicBool::new(false);
 static PROCESS_ID: AtomicI32 = AtomicI32::new(0);
 static PAGE_SIZE: AtomicUsize = AtomicUsize::new(0);
+static RESERVED_BYTES: AtomicUsize = AtomicUsize::new(0);
 static LIVE_BYTES: AtomicUsize = AtomicUsize::new(0);
 static LIVE_ALLOCATIONS: AtomicUsize = AtomicUsize::new(0);
 static GENERATION: AtomicU64 = AtomicU64::new(1);
@@ -274,14 +275,19 @@ fn instance_memory_limit() -> usize {
     limit
 }
 
-fn reserve_live_bytes(size: usize) -> bool {
+fn reserve_capacity(size: usize) -> bool {
     let limit = instance_memory_limit();
-    let mut current = LIVE_BYTES.load(Ordering::Acquire);
+    let mut current = RESERVED_BYTES.load(Ordering::Acquire);
     loop {
         let Some(next) = bounded_add(current, size, limit) else {
             return false;
         };
-        match LIVE_BYTES.compare_exchange_weak(current, next, Ordering::AcqRel, Ordering::Acquire) {
+        match RESERVED_BYTES.compare_exchange_weak(
+            current,
+            next,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
             Ok(_) => return true,
             Err(observed) => current = observed,
         }
@@ -313,34 +319,6 @@ fn shard_probe(preferred: usize, probe: usize) -> usize {
     (preferred + probe) % ARENA_SHARDS
 }
 
-fn reserve_arena_bytes(index: usize, size: usize) -> bool {
-    let arena = &ARENAS[index];
-    let previous = arena.live_bytes.fetch_add(size, Ordering::AcqRel);
-    let Some(required) = previous.checked_add(size) else {
-        arena.live_bytes.fetch_sub(size, Ordering::AcqRel);
-        return false;
-    };
-    if required <= arena.reserved_bytes.load(Ordering::Acquire) {
-        return true;
-    }
-
-    let _guard = lock_registry();
-    let required = arena.live_bytes.load(Ordering::Acquire);
-    let reserved = arena.reserved_bytes.load(Ordering::Acquire);
-    if required <= reserved {
-        return true;
-    }
-    let target = align_up(required, ARENA_BYTES).unwrap_or(required);
-    let additional = target.saturating_sub(reserved);
-    if additional == 0 || reserve_live_bytes(additional) {
-        arena.reserved_bytes.store(target, Ordering::Release);
-        true
-    } else {
-        arena.live_bytes.fetch_sub(size, Ordering::AcqRel);
-        false
-    }
-}
-
 fn initialize_arena(index: usize) -> Option<usize> {
     let arena = &ARENAS[index];
     let existing = arena.payload.load(Ordering::Acquire);
@@ -352,8 +330,21 @@ fn initialize_arena(index: usize) -> Option<usize> {
     if existing != 0 {
         return Some(existing);
     }
+    // A slab arena has exactly one fixed-size payload mapping. Charge that
+    // capacity once, while initialization is serialized, rather than deriving
+    // reservations from speculative live-slot counts. Failed initialization
+    // rolls the complete charge back before another caller may retry.
+    if !reserve_capacity(ARENA_BYTES) {
+        return None;
+    }
     let page = page_size();
-    let mapping_len = ARENA_BYTES.checked_add(page.checked_mul(2)?)?;
+    let Some(mapping_len) = page
+        .checked_mul(2)
+        .and_then(|guards| ARENA_BYTES.checked_add(guards))
+    else {
+        RESERVED_BYTES.fetch_sub(ARENA_BYTES, Ordering::AcqRel);
+        return None;
+    };
     // SAFETY: mmap is called with no input pointer and a checked length.
     let mapping = unsafe {
         libc::mmap(
@@ -366,6 +357,7 @@ fn initialize_arena(index: usize) -> Option<usize> {
         )
     };
     if mapping == libc::MAP_FAILED {
+        RESERVED_BYTES.fetch_sub(ARENA_BYTES, Ordering::AcqRel);
         return None;
     }
     let payload = mapping as usize + page;
@@ -380,6 +372,7 @@ fn initialize_arena(index: usize) -> Option<usize> {
     {
         // SAFETY: mapping and length came from the successful mmap above.
         unsafe { libc::munmap(mapping, mapping_len) };
+        RESERVED_BYTES.fetch_sub(ARENA_BYTES, Ordering::AcqRel);
         return None;
     }
     let first_key = payload >> DIRECTORY_SHIFT;
@@ -396,6 +389,7 @@ fn initialize_arena(index: usize) -> Option<usize> {
         }
     }
     arena.payload.store(payload, Ordering::Release);
+    arena.reserved_bytes.store(ARENA_BYTES, Ordering::Release);
     arena
         .cursor
         .store(random_word() as usize, Ordering::Release);
@@ -411,11 +405,7 @@ fn allocate_slab(requested: usize, zero: bool) -> *mut c_void {
     for probe in 0..ARENA_SHARDS {
         let shard = shard_probe(preferred, probe);
         let index = class_index * ARENA_SHARDS + shard;
-        if !reserve_arena_bytes(index, class) {
-            continue;
-        }
         let Some(payload) = initialize_arena(index) else {
-            ARENAS[index].live_bytes.fetch_sub(class, Ordering::AcqRel);
             continue;
         };
         let slots = ARENA_BYTES / class;
@@ -426,6 +416,8 @@ fn allocate_slab(requested: usize, zero: bool) -> *mut c_void {
             let mask = 1u64 << (slot % 64);
             if ARENAS[index].live[word].fetch_or(mask, Ordering::AcqRel) & mask == 0 {
                 let user = payload + slot * class;
+                ARENAS[index].live_bytes.fetch_add(class, Ordering::AcqRel);
+                LIVE_BYTES.fetch_add(class, Ordering::AcqRel);
                 if zero {
                     // SAFETY: this thread owns the selected live slot.
                     unsafe { ptr::write_bytes(user as *mut u8, 0, requested) };
@@ -436,7 +428,6 @@ fn allocate_slab(requested: usize, zero: bool) -> *mut c_void {
                 return user as *mut c_void;
             }
         }
-        ARENAS[index].live_bytes.fetch_sub(class, Ordering::AcqRel);
     }
     set_errno(libc::ENOMEM);
     ptr::null_mut()
@@ -463,7 +454,7 @@ fn allocate_guarded(size: usize, alignment: usize, zero: bool) -> *mut c_void {
         set_errno(libc::ENOMEM);
         return ptr::null_mut();
     };
-    if !reserve_live_bytes(requested) {
+    if !reserve_capacity(requested) {
         set_errno(libc::ENOMEM);
         return ptr::null_mut();
     }
@@ -480,7 +471,7 @@ fn allocate_guarded(size: usize, alignment: usize, zero: bool) -> *mut c_void {
         )
     };
     if mapping == libc::MAP_FAILED {
-        LIVE_BYTES.fetch_sub(requested, Ordering::Relaxed);
+        RESERVED_BYTES.fetch_sub(requested, Ordering::Relaxed);
         set_errno(libc::ENOMEM);
         return ptr::null_mut();
     }
@@ -489,7 +480,7 @@ fn allocate_guarded(size: usize, alignment: usize, zero: bool) -> *mut c_void {
     let Some(user) = align_up(data + offset, alignment) else {
         // SAFETY: mapping and length came from the successful mmap above.
         unsafe { libc::munmap(mapping, mapping_len) };
-        LIVE_BYTES.fetch_sub(requested, Ordering::Relaxed);
+        RESERVED_BYTES.fetch_sub(requested, Ordering::Relaxed);
         set_errno(libc::ENOMEM);
         return ptr::null_mut();
     };
@@ -499,7 +490,7 @@ fn allocate_guarded(size: usize, alignment: usize, zero: bool) -> *mut c_void {
     {
         // SAFETY: mapping and length came from the successful mmap above.
         unsafe { libc::munmap(mapping, mapping_len) };
-        LIVE_BYTES.fetch_sub(requested, Ordering::Relaxed);
+        RESERVED_BYTES.fetch_sub(requested, Ordering::Relaxed);
         set_errno(libc::ENOMEM);
         return ptr::null_mut();
     }
@@ -514,7 +505,7 @@ fn allocate_guarded(size: usize, alignment: usize, zero: bool) -> *mut c_void {
     {
         // SAFETY: mapping and length came from the successful mmap above.
         unsafe { libc::munmap(mapping, mapping_len) };
-        LIVE_BYTES.fetch_sub(requested, Ordering::Relaxed);
+        RESERVED_BYTES.fetch_sub(requested, Ordering::Relaxed);
         set_errno(libc::ENOMEM);
         return ptr::null_mut();
     }
@@ -531,6 +522,7 @@ fn allocate_guarded(size: usize, alignment: usize, zero: bool) -> *mut c_void {
         generation: GENERATION.fetch_add(1, Ordering::Relaxed),
         live: true,
     };
+    LIVE_BYTES.fetch_add(requested, Ordering::Relaxed);
     LIVE_ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
     user as *mut c_void
 }
@@ -616,6 +608,7 @@ fn deallocate(pointer: *mut c_void) {
             abort_invalid_free();
         }
         ARENAS[index].live_bytes.fetch_sub(class, Ordering::AcqRel);
+        LIVE_BYTES.fetch_sub(class, Ordering::AcqRel);
         ARENAS[index]
             .live_allocations
             .fetch_sub(1, Ordering::Relaxed);
@@ -633,6 +626,7 @@ fn deallocate(pointer: *mut c_void) {
         }
         slot.live = false;
         LIVE_BYTES.fetch_sub(slot.requested, Ordering::Relaxed);
+        RESERVED_BYTES.fetch_sub(slot.requested, Ordering::Relaxed);
         LIVE_ALLOCATIONS.fetch_sub(1, Ordering::Relaxed);
         (slot.mapping, slot.mapping_len, slot.requested)
     };
@@ -680,6 +674,59 @@ fn reallocate(pointer: *mut c_void, size: usize) -> *mut c_void {
     }
     // SAFETY: both allocations are live, non-overlapping, and valid for the
     // minimum of their requested sizes.
+    unsafe {
+        ptr::copy_nonoverlapping(
+            pointer.cast::<u8>(),
+            replacement.cast::<u8>(),
+            cmp::min(old_size, size),
+        )
+    };
+    deallocate(pointer);
+    replacement
+}
+
+fn allocation_usable_size_for(size: usize, alignment: usize) -> Option<usize> {
+    if !valid_alignment(alignment) {
+        return None;
+    }
+    let requested = cmp::max(size, 1);
+    if alignment <= DEFAULT_ALIGNMENT {
+        if let Some(index) = class_index(requested) {
+            return Some(SIZE_CLASSES[index]);
+        }
+    }
+    guarded_mapping_geometry(size, alignment, page_size()).map(|_| requested)
+}
+
+fn reallocate_with_options(
+    pointer: *mut c_void,
+    size: usize,
+    alignment: usize,
+    zero: bool,
+) -> *mut c_void {
+    if pointer.is_null() {
+        return allocate(size, alignment, zero);
+    }
+    if size == 0 {
+        deallocate(pointer);
+        return ptr::null_mut();
+    }
+    if !valid_alignment(alignment) {
+        set_errno(libc::EINVAL);
+        return ptr::null_mut();
+    }
+    let Some(old_size) = allocation_size(pointer) else {
+        abort_invalid_free();
+    };
+    if size <= old_size && (pointer as usize).is_multiple_of(alignment) {
+        return pointer;
+    }
+    let replacement = allocate(size, alignment, zero);
+    if replacement.is_null() {
+        return ptr::null_mut();
+    }
+    // SAFETY: both allocations are live and non-overlapping. The replacement
+    // is zero-filled before the preserved prefix is copied when requested.
     unsafe {
         ptr::copy_nonoverlapping(
             pointer.cast::<u8>(),
@@ -807,16 +854,33 @@ fn mallocx_alignment(flags: c_int) -> usize {
     }
 }
 
-#[cfg(not(test))]
-#[no_mangle]
-pub extern "C" fn mallocx(size: usize, flags: c_int) -> *mut c_void {
-    allocate(size, mallocx_alignment(flags), flags & 0x40 != 0)
+fn mallocx_options(flags: c_int) -> Option<(usize, bool)> {
+    const SUPPORTED_FLAGS: c_int = 0x7f;
+    if flags < 0 || flags & !SUPPORTED_FLAGS != 0 {
+        return None;
+    }
+    let alignment = mallocx_alignment(flags);
+    valid_alignment(alignment).then_some((alignment, flags & 0x40 != 0))
 }
 
 #[cfg(not(test))]
 #[no_mangle]
-pub extern "C" fn rallocx(pointer: *mut c_void, size: usize, _flags: c_int) -> *mut c_void {
-    reallocate(pointer, size)
+pub extern "C" fn mallocx(size: usize, flags: c_int) -> *mut c_void {
+    let Some((alignment, zero)) = mallocx_options(flags) else {
+        set_errno(libc::EINVAL);
+        return ptr::null_mut();
+    };
+    allocate(size, alignment, zero)
+}
+
+#[cfg(not(test))]
+#[no_mangle]
+pub extern "C" fn rallocx(pointer: *mut c_void, size: usize, flags: c_int) -> *mut c_void {
+    let Some((alignment, zero)) = mallocx_options(flags) else {
+        set_errno(libc::EINVAL);
+        return ptr::null_mut();
+    };
+    reallocate_with_options(pointer, size, alignment, zero)
 }
 
 #[cfg(not(test))]
@@ -855,12 +919,9 @@ pub extern "C" fn sdallocx(pointer: *mut c_void, _size: usize, _flags: c_int) {
 #[cfg(not(test))]
 #[no_mangle]
 pub extern "C" fn nallocx(size: usize, flags: c_int) -> usize {
-    let alignment = mallocx_alignment(flags);
-    if valid_alignment(alignment) {
-        align_up(cmp::max(size, 1), alignment).unwrap_or(0)
-    } else {
-        0
-    }
+    mallocx_options(flags)
+        .and_then(|(alignment, _)| allocation_usable_size_for(size, alignment))
+        .unwrap_or(0)
 }
 
 #[cfg(not(test))]
@@ -1025,8 +1086,86 @@ mod tests {
         }
     }
 
+    #[test]
+    fn full_arena_fallback_never_invents_capacity_and_freed_slots_recover() {
+        let class_index = SIZE_CLASSES.len() - 1;
+        let class = SIZE_CLASSES[class_index];
+        let slots_per_arena = ARENA_BYTES / class;
+        let live_before = LIVE_BYTES.load(Ordering::Acquire);
+        let mut pointers = Vec::new();
+        for _ in 0..ARENA_SHARDS * slots_per_arena {
+            let pointer = allocate(class, DEFAULT_ALIGNMENT, false);
+            assert!(!pointer.is_null());
+            pointers.push(pointer);
+        }
+        let reserved_before_failure: usize = (0..ARENA_SHARDS)
+            .map(|shard| {
+                ARENAS[class_index * ARENA_SHARDS + shard]
+                    .reserved_bytes
+                    .load(Ordering::Acquire)
+            })
+            .sum();
+        assert_eq!(reserved_before_failure, ARENA_SHARDS * ARENA_BYTES);
+        assert!(allocate(class, DEFAULT_ALIGNMENT, false).is_null());
+        let reserved_after_failure: usize = (0..ARENA_SHARDS)
+            .map(|shard| {
+                ARENAS[class_index * ARENA_SHARDS + shard]
+                    .reserved_bytes
+                    .load(Ordering::Acquire)
+            })
+            .sum();
+        assert_eq!(reserved_after_failure, reserved_before_failure);
+
+        for pointer in pointers {
+            deallocate(pointer);
+        }
+        for shard in 0..ARENA_SHARDS {
+            assert_eq!(
+                ARENAS[class_index * ARENA_SHARDS + shard]
+                    .live_bytes
+                    .load(Ordering::Acquire),
+                0
+            );
+        }
+        assert_eq!(LIVE_BYTES.load(Ordering::Acquire), live_before);
+        let reused = allocate(class, DEFAULT_ALIGNMENT, false);
+        assert!(!reused.is_null());
+        let reserved_after_reuse: usize = (0..ARENA_SHARDS)
+            .map(|shard| {
+                ARENAS[class_index * ARENA_SHARDS + shard]
+                    .reserved_bytes
+                    .load(Ordering::Acquire)
+            })
+            .sum();
+        assert_eq!(reserved_after_reuse, reserved_before_failure);
+        deallocate(reused);
+        assert_eq!(LIVE_BYTES.load(Ordering::Acquire), live_before);
+    }
+
+    #[test]
+    fn extended_reallocation_honors_alignment_zeroing_and_size_prediction() {
+        let initial = allocate(33, 64, false);
+        assert!(!initial.is_null());
+        // SAFETY: initial is live for 33 bytes.
+        unsafe { ptr::write_bytes(initial.cast::<u8>(), 0x5a, 33) };
+        let (alignment, zero) = mallocx_options(12 | 0x40).expect("supported flags");
+        let grown = reallocate_with_options(initial, 4097, alignment, zero);
+        assert!(!grown.is_null());
+        assert_eq!(grown as usize % 4096, 0);
+        assert_eq!(
+            allocation_size(grown),
+            allocation_usable_size_for(4097, 4096)
+        );
+        // SAFETY: grown is live for 4097 bytes.
+        let bytes = unsafe { core::slice::from_raw_parts(grown.cast::<u8>(), 4097) };
+        assert!(bytes[..33].iter().all(|byte| *byte == 0x5a));
+        assert!(bytes[33..].iter().all(|byte| *byte == 0));
+        deallocate(grown);
+        assert!(mallocx_options(0x80).is_none());
+    }
+
     fn nallocx_for_test(size: usize, lg_alignment: usize) -> usize {
         let alignment = 1usize << lg_alignment;
-        align_up(cmp::max(size, 1), alignment).unwrap_or(0)
+        allocation_usable_size_for(size, alignment).unwrap_or(0)
     }
 }

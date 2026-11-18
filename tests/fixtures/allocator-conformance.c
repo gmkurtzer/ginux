@@ -12,6 +12,14 @@
 
 enum { THREADS = 8, ITERATIONS = 2000 };
 
+enum { MALLOCX_ZERO_FLAG = 0x40 };
+
+static int mallocx_align_flag(unsigned alignment) {
+    int lg = 0;
+    while ((1U << lg) < alignment) ++lg;
+    return lg;
+}
+
 struct release_batch {
     void *pointers[256];
 };
@@ -45,23 +53,59 @@ static int exercise_extended_abi(void) {
         nallocx_fn == NULL || mallctl_fn == NULL || mallctlnametomib_fn == NULL ||
         mallctlbymib_fn == NULL || stats_fn == NULL)
         return 1;
-    void *first = mallocx_fn(33, 0);
-    if (first == NULL || sallocx_fn(first, 0) < 33 || nallocx_fn(33, 0) < 33)
-        return 2;
+    static const size_t sizes[] = {
+        1, 15, 16, 17, 31, 32, 33, 63, 64, 65, 4096, 65536, 65537,
+    };
+    static const unsigned alignments[] = { 0, 8, 64, 4096 };
+    for (size_t i = 0; i < sizeof(sizes) / sizeof(sizes[0]); ++i) {
+        for (size_t j = 0; j < sizeof(alignments) / sizeof(alignments[0]); ++j) {
+            int flags = alignments[j] == 0 ? 0 : mallocx_align_flag(alignments[j]);
+            if ((i + j) % 2 != 0) flags |= MALLOCX_ZERO_FLAG;
+            size_t predicted = nallocx_fn(sizes[i], flags);
+            void *allocation = mallocx_fn(sizes[i], flags);
+            if (allocation == NULL || predicted == 0 ||
+                predicted != sallocx_fn(allocation, flags))
+                return 2;
+            if (alignments[j] != 0 &&
+                (uintptr_t)allocation % alignments[j] != 0)
+                return 3;
+            if ((flags & MALLOCX_ZERO_FLAG) != 0) {
+                const unsigned char *bytes = allocation;
+                for (size_t k = 0; k < sizes[i]; ++k)
+                    if (bytes[k] != 0) return 4;
+            }
+            dallocx_fn(allocation, flags);
+        }
+    }
+
+    int initial_flags = mallocx_align_flag(64);
+    void *first = mallocx_fn(33, initial_flags);
+    if (first == NULL) return 5;
+    memset(first, 0x5a, 33);
+    int grown_flags = mallocx_align_flag(4096) | MALLOCX_ZERO_FLAG;
+    first = rallocx_fn(first, 4097, grown_flags);
+    if (first == NULL || (uintptr_t)first % 4096 != 0 ||
+        sallocx_fn(first, grown_flags) != nallocx_fn(4097, grown_flags))
+        return 6;
+    const unsigned char *grown = first;
+    for (size_t i = 0; i < 33; ++i) if (grown[i] != 0x5a) return 7;
+    for (size_t i = 33; i < 4097; ++i) if (grown[i] != 0) return 8;
     if (xallocx_fn(first, 32, 0, 0) < 32) return 3;
-    first = rallocx_fn(first, 4097, 0);
-    if (first == NULL) return 4;
     dallocx_fn(first, 0);
+    errno = 0;
+    if (mallocx_fn(32, 0x80) != NULL || errno != EINVAL ||
+        nallocx_fn(32, 0x80) != 0)
+        return 9;
     void *second = mallocx_fn(64, 0);
-    if (second == NULL) return 5;
+    if (second == NULL) return 10;
     sdallocx_fn(second, 64, 0);
     size_t mib = 0, mib_length = 1;
     if (mallctl_fn("unsupported", NULL, NULL, NULL, 0) != ENOENT ||
         mallctlnametomib_fn("unsupported", &mib, &mib_length) != ENOENT ||
         mallctlbymib_fn(&mib, mib_length, NULL, NULL, NULL, 0) != ENOENT)
-        return 6;
+        return 11;
     stats_fn(stats_callback, NULL, NULL);
-    return stats_callback_seen ? 0 : 7;
+    return stats_callback_seen ? 0 : 12;
 }
 
 static void *worker(void *argument) {
