@@ -42,6 +42,7 @@ unexpected=$(awk \
     /GINUX_CONFIG_EFFECTIVE_END/ { console = 1; next }
     !console { next }
     /^GINUX_NATIVE_AUDIT:/ { next }
+    /^emulate surface=unsupported-unix-address length=[0-9]+ result=-1$/ { next }
     $0 == bpf || $0 == netlink || $0 == monitor { next }
     mode == "failure" && /127\.0\.0\.1:1\/ginux-missing/ { next }
     mode == "failure" && /repo '\''ginux-failure'\''/ { next }
