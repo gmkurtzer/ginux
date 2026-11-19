@@ -66,6 +66,9 @@ standard C allocation ABI and can run transparently inside a Ginux instance.
 - `make test-allocator` -> seven allocator unit/model tests passed.
 - `make test-allocator-rocky` -> standard ABI conformance and all 45 matched
   native/jemalloc/Ginux benchmark samples passed at exact source commit.
+- Exact-head review repair added class-consistent `nallocx`, aligned and
+  zero-filling `rallocx`, unsupported-flag rejection, and deterministic
+  conformance coverage across size-class and alignment boundaries.
 - `make test-rpm` -> the installed library loaded and ran inside supported
   Rocky and Ubuntu glibc instances; package verification and reinstall passed.
 
@@ -83,7 +86,8 @@ standard C allocation ABI and can run transparently inside a Ginux instance.
 - Pull request: https://github.com/gmkurtzer/ginux/pull/292
 - Planned commits: ABI specification; core allocator; conformance; Ginux loading
   and packaging; final evidence
-- Actual commits: `2359a89d`, `3046ff27`, `2b151a26`, `19377734`, `da24dff7`
+- Actual commits: `2359a89d`, `3046ff27`, `2b151a26`, `19377734`, `da24dff7`,
+  `de194940`
 
 ## Review policy and outcome
 

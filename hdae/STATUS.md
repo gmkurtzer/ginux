@@ -53,6 +53,12 @@
 - Final evidence passes `make check`, aggregate `make test`,
   `make test-security test-recovery`, `make test-multi-instance`,
   `make test-allocator-rocky`, and `make test-rpm-metadata test-rpm`.
+- Exact-head review blockers are repaired: allocator capacity is charged once
+  and rolled back on failed initialization, full-arena fallback recovers after
+  free, and the exported jemalloc subset now has class-consistent size,
+  alignment, zero-growth, and unsupported-flag behavior. Current `main` is
+  merged and its expected abstract-Unix boundary audit is covered by a narrow
+  positive/negative console regression.
 - Combined delivery pull request:
   https://github.com/gmkurtzer/ginux/pull/292
 - Active skill: `hdae-development`
@@ -359,8 +365,9 @@ scope, threat model, and invariants.
   https://github.com/gmkurtzer/ginux/pull/292, awaiting final human testing.
 - Working branch: `hdae/security-allocator-initiative`; intended base:
   `main`.
-- Latest implementation commits: `da24dff7` fixes allocator shard fallback;
-  `9f7a9ae7` retains exact-commit matched performance evidence.
+- Latest implementation commits: `de194940` repairs allocator capacity and
+  jemalloc semantics; `b6ba0d81` adds the narrow merged-main recovery audit
+  regression. Merge commit `6a660c0a` integrates current `main`.
 - Open limitations: upstream challoc has no valid Rocky 10 binary control;
   Alpine/musl is outside the allocator preload claim; formal assurance is
   bounded to named model/property/fuzz evidence; the host kernel and loader
@@ -493,6 +500,12 @@ scope, threat model, and invariants.
 - `make test-rpm-metadata test-rpm` -> offline build, zero rpmlint errors,
   clean install, verify, Rocky/Ubuntu allocator loading, Alpine runtime, offline
   cache reuse, reinstall, erase, retained state, and recovery passed.
+- Post-review rerun on the merged exact head: `make test-allocator-rocky`,
+  `make test-rpm-metadata test-rpm`, aggregate `make test`, `make
+  test-recovery`, and `make test-multi-instance` all passed. The focused
+  `make test-systemd-console-audit` regression accepted only the exact
+  intentional abstract-Unix denial record and rejected malformed or ordinary
+  unsupported diagnostics.
 
 ### Historical evidence
 

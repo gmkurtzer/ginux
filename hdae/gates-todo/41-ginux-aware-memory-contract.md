@@ -66,6 +66,9 @@ pressure state without exposing host-global memory information.
 
 - Allocator unit/model tests -> bounded accounting never wraps or exceeds the
   instance-visible limit.
+- Exact-head review regression -> actual mapped capacity is reserved once,
+  failed arena initialization rolls the reservation back, and caller-live
+  pressure returns to its baseline after full-arena free and reuse.
 - `make test-kernel-views`, aggregate `make test`, and `make test-multi-instance`
   -> virtual memory views and distinct instance limits remain private.
 - `make test-security test-recovery` -> virtual-kernel, pressure, and failure
@@ -83,7 +86,7 @@ pressure state without exposing host-global memory information.
 - Pull request: https://github.com/gmkurtzer/ginux/pull/292
 - Planned commits: interface decision; virtual telemetry; allocator integration;
   isolation tests and documentation
-- Actual commits: `e5f7da76`, `36c742e5`, `94c4f4f4`
+- Actual commits: `e5f7da76`, `36c742e5`, `94c4f4f4`, `de194940`
 
 ## Review policy and outcome
 

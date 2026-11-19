@@ -62,6 +62,10 @@ errors cannot silently steer allocator state.
 
 - `make test-allocator` -> checked geometry, accounting, guards, and shard
   coverage passed.
+- Exact-head review repair separates reserved capacity from live requested
+  bytes, rolls reservations back on every initialization failure, and proves
+  full-arena fallback, free, pressure recovery, and slot reuse without
+  invented capacity.
 - `make fuzz-security` -> bounded allocator fuzz target passed 158,877 cases in
   the final five-second campaign.
 - `make test-allocator-rocky` -> single- and multithreaded conformance plus
@@ -80,7 +84,7 @@ errors cannot silently steer allocator state.
 - Pull request: https://github.com/gmkurtzer/ginux/pull/292
 - Planned commits: metadata model; hardening; concurrency; unsafe review and
   final evidence
-- Actual commits: `02ee1e57`, `36c742e5`, `48577ef8`, `da24dff7`
+- Actual commits: `02ee1e57`, `36c742e5`, `48577ef8`, `da24dff7`, `de194940`
 
 ## Review policy and outcome
 

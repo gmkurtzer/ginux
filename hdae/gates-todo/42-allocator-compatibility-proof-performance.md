@@ -81,6 +81,11 @@ performance evidence for the allocator without overstating its maturity.
 - `make fuzz-security`, `make test-security test-recovery`, aggregate
   `make test`, and `make test-multi-instance` -> assurance and project
   regressions passed.
+- Post-review exact-head evidence passed `make test-allocator-rocky`,
+  `make test-rpm-metadata test-rpm`, aggregate `make test`, `make
+  test-recovery`, and `make test-multi-instance` after integrating current
+  `main`. The recovery checker now distinguishes the exact intentional
+  abstract-Unix boundary denial from real systemd diagnostics.
 
 ## Decisions and limitations
 
@@ -102,7 +107,7 @@ performance evidence for the allocator without overstating its maturity.
 - Planned commits: compatibility matrix; distribution workloads; assurance;
   benchmark reports; packaging and final evidence
 - Actual commits: `19377734`, `48577ef8`, `76209bc8`, `6a66fc73`, `da24dff7`,
-  `9f7a9ae7`
+  `9f7a9ae7`, `de194940`, `b6ba0d81`
 
 ## Review policy and outcome
 
