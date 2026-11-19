@@ -982,8 +982,11 @@ pub unsafe extern "C" fn malloc_stats_print(
 mod tests {
     use super::*;
 
+    static TEST_ALLOCATOR_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn allocation_is_aligned_guarded_and_tracked() {
+        let _guard = TEST_ALLOCATOR_LOCK.lock().expect("allocator test lock");
         let pointer = allocate(123, 64, false);
         assert!(!pointer.is_null());
         assert_eq!(pointer as usize % 64, 0);
@@ -995,6 +998,7 @@ mod tests {
 
     #[test]
     fn calloc_and_reallocate_preserve_data() {
+        let _guard = TEST_ALLOCATOR_LOCK.lock().expect("allocator test lock");
         let pointer = allocate(32, DEFAULT_ALIGNMENT, true);
         assert!(!pointer.is_null());
         // SAFETY: pointer refers to a live 32-byte allocation.
@@ -1088,6 +1092,7 @@ mod tests {
 
     #[test]
     fn full_arena_fallback_never_invents_capacity_and_freed_slots_recover() {
+        let _guard = TEST_ALLOCATOR_LOCK.lock().expect("allocator test lock");
         let class_index = SIZE_CLASSES.len() - 1;
         let class = SIZE_CLASSES[class_index];
         let slots_per_arena = ARENA_BYTES / class;
@@ -1144,6 +1149,7 @@ mod tests {
 
     #[test]
     fn extended_reallocation_honors_alignment_zeroing_and_size_prediction() {
+        let _guard = TEST_ALLOCATOR_LOCK.lock().expect("allocator test lock");
         let initial = allocate(33, 64, false);
         assert!(!initial.is_null());
         // SAFETY: initial is live for 33 bytes.
