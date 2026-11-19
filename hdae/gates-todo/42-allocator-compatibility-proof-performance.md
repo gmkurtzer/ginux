@@ -86,6 +86,9 @@ performance evidence for the allocator without overstating its maturity.
   test-recovery`, and `make test-multi-instance` after integrating current
   `main`. The recovery checker now distinguishes the exact intentional
   abstract-Unix boundary denial from real systemd diagnostics.
+- GitHub Actions passed `changes`, `launch-integration`, and `static-and-unit`
+  on code head `a0c5b3bf`; the integration fixture now expects current-main's
+  earlier `EAFNOSUPPORT` denial for unsupported netlink socket creation.
 
 ## Decisions and limitations
 
@@ -107,7 +110,7 @@ performance evidence for the allocator without overstating its maturity.
 - Planned commits: compatibility matrix; distribution workloads; assurance;
   benchmark reports; packaging and final evidence
 - Actual commits: `19377734`, `48577ef8`, `76209bc8`, `6a66fc73`, `da24dff7`,
-  `9f7a9ae7`, `de194940`, `b6ba0d81`
+  `9f7a9ae7`, `de194940`, `b6ba0d81`, `a0c5b3bf`
 
 ## Review policy and outcome
 

@@ -66,6 +66,9 @@ errors cannot silently steer allocator state.
   bytes, rolls reservations back on every initialization failure, and proves
   full-arena fallback, free, pressure recovery, and slot reuse without
   invented capacity.
+- GitHub's parallel macOS unit runner exposed shared allocator-test accounting;
+  the stateful allocator tests now serialize their global-counter assertions,
+  and the replacement CI run passed.
 - `make fuzz-security` -> bounded allocator fuzz target passed 158,877 cases in
   the final five-second campaign.
 - `make test-allocator-rocky` -> single- and multithreaded conformance plus
@@ -84,7 +87,8 @@ errors cannot silently steer allocator state.
 - Pull request: https://github.com/gmkurtzer/ginux/pull/292
 - Planned commits: metadata model; hardening; concurrency; unsafe review and
   final evidence
-- Actual commits: `02ee1e57`, `36c742e5`, `48577ef8`, `da24dff7`, `de194940`
+- Actual commits: `02ee1e57`, `36c742e5`, `48577ef8`, `da24dff7`, `de194940`,
+  `a0c5b3bf`
 
 ## Review policy and outcome
 

@@ -59,6 +59,9 @@
   alignment, zero-growth, and unsupported-flag behavior. Current `main` is
   merged and its expected abstract-Unix boundary audit is covered by a narrow
   positive/negative console regression.
+- GitHub Actions `changes`, `launch-integration`, and `static-and-unit` passed
+  on repaired code head `a0c5b3bf` after platform-specific allocator-test
+  serialization and unsupported-socket fixture alignment.
 - Combined delivery pull request:
   https://github.com/gmkurtzer/ginux/pull/292
 - Active skill: `hdae-development`
@@ -367,7 +370,9 @@ scope, threat model, and invariants.
   `main`.
 - Latest implementation commits: `de194940` repairs allocator capacity and
   jemalloc semantics; `b6ba0d81` adds the narrow merged-main recovery audit
-  regression. Merge commit `6a660c0a` integrates current `main`.
+  regression; `a0c5b3bf` stabilizes parallel allocator assertions and aligns
+  the native fixture with current-main socket denial. Merge commit `6a660c0a`
+  integrates current `main`.
 - Open limitations: upstream challoc has no valid Rocky 10 binary control;
   Alpine/musl is outside the allocator preload claim; formal assurance is
   bounded to named model/property/fuzz evidence; the host kernel and loader
@@ -506,6 +511,8 @@ scope, threat model, and invariants.
   `make test-systemd-console-audit` regression accepted only the exact
   intentional abstract-Unix denial record and rejected malformed or ordinary
   unsupported diagnostics.
+- GitHub Actions run `44432531264` -> `changes`, `launch-integration`, and
+  `static-and-unit` all passed on code head `a0c5b3bf`.
 
 ### Historical evidence
 
