@@ -48,12 +48,22 @@ EOF
 %build
 export CARGO_TARGET_DIR=%{cargo_target}
 RUSTFLAGS='' cargo build --offline --locked --release -p ginux-cli -p ginux-oci
+RUSTFLAGS='-C link-arg=-Wl,-z,relro -C link-arg=-Wl,-z,now' \
+    cargo build --offline --locked --release -p ginux-allocator
 CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS='-C linker=clang -C link-arg=-nostdlib -C link-arg=-static -C link-arg=-no-pie -C relocation-model=static' \
     cargo build --offline --locked --release -p ginux-init --target x86_64-unknown-linux-gnu
+
+%check
+cc -O2 -Wall -Wextra -Werror -pthread \
+    tests/fixtures/allocator-conformance.c -ldl -o allocator-conformance
+LD_PRELOAD=%{cargo_target}/release/libginux_allocator.so \
+    ./allocator-conformance
 
 %install
 install -D -m 0755 %{cargo_target}/release/ginux-cli %{buildroot}%{_bindir}/ginux
 install -D -m 0755 %{cargo_target}/release/ginux-oci %{buildroot}%{_libexecdir}/ginux/ginux-image
+install -D -m 0755 %{cargo_target}/release/libginux_allocator.so \
+    %{buildroot}%{_libdir}/ginux/libginux_allocator.so
 install -D -m 0755 %{cargo_target}/x86_64-unknown-linux-gnu/release/ginux \
     %{buildroot}%{_libexecdir}/ginux/ginux-runtime
 install -D -m 0755 scripts/ginux-host-instance-helper.sh \
@@ -64,6 +74,9 @@ install -D -m 0644 %{SOURCE2} %{buildroot}%{_tmpfilesdir}/ginux.conf
 install -d -m 0755 %{buildroot}%{_docdir}/ginux
 install -m 0644 README.md NOTICE docs/cli-command-model.md \
     docs/configurable-contract.md docs/security-boundary.md \
+    docs/security-assurance.md docs/security-review.md \
+    docs/allocator.md docs/allocator-evaluation.md \
+    docs/allocator-performance.md \
     %{buildroot}%{_docdir}/ginux/
 install -D -m 0644 LICENSE %{buildroot}%{_licensedir}/ginux/LICENSE
 
@@ -78,6 +91,8 @@ install -D -m 0644 LICENSE %{buildroot}%{_licensedir}/ginux/LICENSE
 %{_libexecdir}/ginux/ginux-helper
 %{_libexecdir}/ginux/ginux-image
 %{_libexecdir}/ginux/ginux-runtime
+%dir %{_libdir}/ginux
+%{_libdir}/ginux/libginux_allocator.so
 %dir %{_sysconfdir}/ginux
 %dir %{_sysconfdir}/ginux/examples
 %config(noreplace) %{_sysconfdir}/ginux/examples/*.toml

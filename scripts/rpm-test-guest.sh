@@ -3,6 +3,7 @@ set -eu
 
 sudo dnf -y install /var/tmp/ginux.rpm
 sudo rpm -V ginux
+sudo test -x /usr/lib64/ginux/libginux_allocator.so
 ginux --version
 ginux --help >/dev/null
 ginux create --help >/dev/null
@@ -10,6 +11,7 @@ ginux validate /etc/ginux/examples/alpine3.22-native.toml
 ginux import rpm-alpine /etc/ginux/examples/alpine3.22-native.toml
 ginux status rpm-alpine | grep -Fq 'state: stopped'
 sudo test -x /var/lib/ginux/instances/rpm-alpine/root/bin/busybox
+sudo test -x /var/lib/ginux/instances/rpm-alpine/root/usr/lib64/ginux/libginux_allocator.so
 test -n "$(sudo find /var/lib/ginux/cache/oci/blobs/sha256 -type f -print -quit)"
 test -z "$(sudo find /var/lib/ginux -name rootfs.tar -print -quit)"
 ginux start rpm-alpine
@@ -21,6 +23,40 @@ ginux status rpm-alpine | grep -Fq 'state: running'
 ginux stop rpm-alpine
 ginux status rpm-alpine | grep -Fq 'state: stopped'
 sudo touch /var/lib/ginux/instances/rpm-alpine/rpm-state-marker
+
+# Run an unmodified dynamically linked Rocky workload through the packaged
+# allocator inside Ginux. Successful loader startup and directory output prove
+# that the documented LD_PRELOAD path is usable by an instance workload.
+ginux import rpm-allocator /etc/ginux/examples/rocky10-systemd.toml \
+    --set 'instance.init="/usr/bin/ls"' \
+    --set 'instance.args=["/"]' \
+    --set 'instance.environment=["container=ginux","LD_PRELOAD=/usr/lib64/ginux/libginux_allocator.so"]'
+ginux start rpm-allocator
+for _ in $(seq 1 30); do
+    ginux status rpm-allocator | grep -Fq 'state: stopped' && break
+    sleep 1
+done
+ginux status rpm-allocator | grep -Fq 'state: stopped'
+sudo grep -Fq bin /var/lib/ginux/instances/rpm-allocator/console.log
+
+# Repeat the supported glibc loading check with Ubuntu, both directly on the
+# host kernel through chroot and through the Ginux supervisor. Alpine remains a
+# supported Ginux instance but uses musl, so the glibc-built allocator is not a
+# claimed drop-in component there.
+ginux import rpm-allocator-ubuntu /etc/ginux/examples/ubuntu24-network-service.toml \
+    --set 'instance.init="/usr/bin/ls"' \
+    --set 'instance.args=["/"]' \
+    --set 'instance.environment=["container=ginux","LD_PRELOAD=/usr/lib64/ginux/libginux_allocator.so"]'
+sudo chroot /var/lib/ginux/instances/rpm-allocator-ubuntu/root \
+    /usr/bin/env LD_PRELOAD=/usr/lib64/ginux/libginux_allocator.so \
+    /usr/bin/ls / | grep -Fq bin
+ginux start rpm-allocator-ubuntu
+for _ in $(seq 1 30); do
+    ginux status rpm-allocator-ubuntu | grep -Fq 'state: stopped' && break
+    sleep 1
+done
+ginux status rpm-allocator-ubuntu | grep -Fq 'state: stopped'
+sudo grep -Fq bin /var/lib/ginux/instances/rpm-allocator-ubuntu/console.log
 
 # Exercise the packaged managed-systemd path, not only the small Alpine
 # lifecycle. This catches packaging/runtime integration failures in netlink,
@@ -57,6 +93,7 @@ ginux stop rpm-cache
 
 sudo dnf -y reinstall /var/tmp/ginux.rpm
 sudo rpm -V ginux
+sudo test -x /usr/lib64/ginux/libginux_allocator.so
 sudo test -f /var/lib/ginux/instances/rpm-alpine/rpm-state-marker
 ginux list | grep -Fq rpm-alpine
 ginux list | grep -Fq rpm-rocky

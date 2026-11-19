@@ -125,6 +125,35 @@ replace it.
     context, explicit operation ownership, typed root/cwd/descriptor authority,
     and independent host-effect oracles before the filesystem lane claims any
     syscall.
+32. **Security architecture and trust inventory**: inventory every trusted seam,
+    host effect, authority owner, invariant, test, and limitation.
+33. **Contract enforcement and syscall mediation review**: defensively verify
+    contract-before-effect ordering, immutable inputs, dispatch rules, and
+    fail-closed behavior.
+34. **Instance authority and isolation review**: verify process, descriptor,
+    network, device, virtual-kernel, storage, and lifecycle separation.
+35. **Host privilege, packaging, and supply-chain review**: verify least
+    privilege, verified acquisition, package lifecycle, persistence, and
+    recovery.
+36. **Defensive robustness and assurance**: add bounded fuzz, property,
+    concurrency, resource, and formal-assurance evidence without exploit work.
+37. **Security remediation closure**: reconcile findings, regressions,
+    limitations, documentation, and the complete clean test matrix.
+38. **Allocator feasibility and controls**: compare native and Ginux use of
+    glibc malloc, jemalloc, and challoc and select the allocator architecture.
+39. **Standard allocator ABI foundation**: conditionally implement the approved
+    Rust C allocation ABI as an independently testable shared library.
+40. **Allocator hardening and concurrency**: isolate metadata, detect invalid
+    operations, and verify the allocator's concurrent state model.
+41. **Ginux-aware allocator memory contract**: conditionally connect the
+    allocator to instance-private limits, pressure, and reclamation semantics.
+42. **Allocator compatibility, assurance, and performance**: close the
+    initiative with differential compatibility, proof/model evidence, matched
+    benchmarks, packaging, and documented limitations.
+43. **Guarded allocator performance parity**: keep the guarded allocator
+    opt-in while profiling and optimizing it against a stable, matched workload
+    matrix that requires every 1/2/4-thread row to remain within 5% of native
+    without weakening accepted security properties.
 
 Gates are stored in `hdae/gates-todo/` and remain there until they pass and are
 accepted at their checkpoint. Closed gate records move unchanged to
@@ -198,6 +227,12 @@ define their expected result.
   boundary are established by Gates 12.25 and 25.
 - Reproducibility and offline testing are established by Gates 1 and 2 and
   remain regression criteria for every later gate.
+- Defensive security coverage is expanded without exploit development by Gates
+  32 through 37.
+- The conditional allocator initiative is decided and, if approved, implemented
+  and verified by Gates 38 through 42.
+- Guarded allocator performance readiness is independently judged by Gate 43;
+  passing it does not by itself authorize changing the default allocator.
 
 ## Deferred roadmap
 
