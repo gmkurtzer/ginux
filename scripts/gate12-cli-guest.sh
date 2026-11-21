@@ -12,7 +12,7 @@ mkdir -p "$state_root/instances" "$state_root/work" "$cache" "$image_root"
 fixture=$(mktemp -d /var/tmp/ginux-gate12-root.XXXXXX)
 cleanup() {
     rm -rf "$fixture" "$state_root/instances/gate12" \
-        "$state_root/instances/defaulted" "$state_root/instances/created"
+        "$state_root/instances/defaulted" "$state_root/instances/created" "$state_root/instances/racing"
 }
 trap cleanup 0 HUP INT TERM
 mkdir -p "$fixture/sbin" "$fixture/etc" "$fixture/usr/lib/systemd/system"
@@ -23,6 +23,11 @@ tar -cf "$rootfs" -C "$fixture" .
 
 cat >"$image_root/ensure-oci-image.sh" <<EOF
 #!/bin/sh
+set -eu
+if test -f '$fixture/start-second-create'; then
+    rm '$fixture/start-second-create'
+    /usr/local/bin/ginux create racing --set resources.vcpus=2
+fi
 printf '%s\n' '$rootfs' >"\$GINUX_OCI_RESULT_FILE"
 exit 0
 EOF
@@ -81,6 +86,26 @@ cmp "$state_root/instances/created/config.toml" /var/tmp/ginux-exported.toml
 
 /usr/local/bin/ginux set created --set 'resources.vcpus=1'
 grep -Fqx 'vcpus = 1' "$state_root/instances/created/config.toml"
+
+created=$state_root/instances/created
+printf 'keep\n' >"$created/root/marker"
+sha256sum "$created/config.toml" "$created/deployment.state" "$created/runtime.toml" \
+    "$created/root/marker" >"$fixture/before-create"
+status=0
+/usr/local/bin/ginux create created 2>"$fixture/duplicate.err" || status=$?
+test "$status" -eq 73
+grep -Fxq 'created: already exists' "$fixture/duplicate.err"
+sha256sum --check "$fixture/before-create"
+
+touch "$fixture/start-second-create"
+status=0
+/usr/local/bin/ginux create racing --set resources.vcpus=1 2>"$fixture/racing.err" || status=$?
+test "$status" -eq 73
+grep -Fxq 'racing: already exists' "$fixture/racing.err"
+racing=$state_root/instances/racing
+grep -Fxq 'vcpus = 2' "$racing/config.toml"
+test "$(find "$racing" -mindepth 1 -maxdepth 1 -type d -printf '%f\n')" = root
+test -z "$(find "$state_root/instances" -maxdepth 1 -name '.create:*' -print -quit)"
 
 cat >/var/tmp/ginux-test-editor <<'EOF'
 #!/bin/sh
