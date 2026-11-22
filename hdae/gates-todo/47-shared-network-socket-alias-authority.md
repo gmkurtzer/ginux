@@ -68,7 +68,8 @@ sharing a Linux descriptor table.
 
 - [x] Pushed the signed implementation and opened reciprocal issue-linked pull
       request #308.
-- [ ] Obtain exact-head CI and human security-checkpoint review.
+- [x] Obtained passing PR CI on the implementation and delivery head.
+- [ ] Obtain human security-checkpoint review.
 
 ## Acceptance criteria
 
@@ -140,6 +141,8 @@ sharing a Linux descriptor table.
 - A self-contained `make test` passed static, CLI, host-lifecycle, unit,
   intercept, runtime, configuration, instance, image, device, process, and
   virtual-kernel regressions.
+- Pull request #308 CI passed `changes`, `launch-integration`, and
+  `static-and-unit` on implementation and delivery head `e569089e`.
 
 ## Decisions and limitations
 
@@ -177,4 +180,4 @@ Automatic implementation and pull-request delivery are authorized by the
 repository's scheduled proactive-remediation policy. Keep Gate 47 in
 `gates-todo/` as a security checkpoint pending human review; never merge it
 automatically through the HDAE implementation loop. Local technical evidence
-passes; exact-head CI and human acceptance remain pending.
+passes and pull-request CI is green; human acceptance remains pending.

@@ -23,11 +23,12 @@
 - Last evidence: `make check`, `make test-unit`, the complete Linux-native
   `test-native-supervision` command set in Rocky QEMU, `make test-contract`,
   `make test-security`, and a self-contained aggregate `make test` all pass.
+  Pull request #308 CI passed `changes`, `launch-integration`, and
+  `static-and-unit` on implementation and delivery head `e569089e`.
 - Open decisions or limitations: general `SCM_RIGHTS` support is intentionally
   deferred; issue #300 remains separate.
-- Exact next action: verify exact-head pull-request CI, then stop for human
-  security-checkpoint review; do not merge pull request #308 or close issue
-  #297.
+- Exact next action: stop for human security-checkpoint review; do not merge
+  pull request #308 or close issue #297.
 
 ## Approved future gate records
 
