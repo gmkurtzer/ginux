@@ -115,6 +115,7 @@ pub const fn decide_systemd(syscall: u64, shared_network: bool) -> Decision {
         };
     }
     let action = match syscall {
+        162 | 306 => Action::Deny(1),
         63 | 92 | 93 | 94 | 109 | 112 | 121 | 124 | 153 | 165 | 166 | 260 | SYS_GETPRIORITY
         | SYS_SETPRIORITY | SYS_GETTID | SYS_SETUID | SYS_SETGID | SYS_SETREUID | SYS_SETREGID
         | SYS_SETGROUPS | SYS_SETRESUID | SYS_SETRESGID | SYS_REBOOT => Action::Emulate,
@@ -190,7 +191,6 @@ pub const fn decide_systemd(syscall: u64, shared_network: bool) -> Decision {
         | 292
         | 293
         | 294
-        | 306
         | 317
         | SYS_MEMFD_CREATE
         | SYS_PIDFD_SEND_SIGNAL
@@ -822,6 +822,8 @@ mod tests {
         assert_eq!(systemd_surface(260, true), BalancedSurface::InstanceWrite);
         assert_eq!(systemd_surface(280, true), BalancedSurface::InstanceWrite);
         assert_eq!(systemd_surface(306, true), BalancedSurface::InstanceWrite);
+        assert_eq!(decide_systemd(162, true).action, Action::Deny(1));
+        assert_eq!(decide_systemd(306, true).action, Action::Deny(1));
         assert_eq!(systemd_surface(79, true), BalancedSurface::Task);
         assert_eq!(systemd_surface(81, true), BalancedSurface::Task);
         assert_eq!(systemd_surface(190, true), BalancedSurface::InstanceWrite);
