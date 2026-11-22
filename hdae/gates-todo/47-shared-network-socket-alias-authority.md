@@ -171,8 +171,8 @@ sharing a Linux descriptor table.
   deterministic regressions; evidence and reciprocal links.
 - Actual commits: `c973279f` (socket-object authority and lifecycle),
   `7563ebcc` (deterministic alias and ancillary regressions), `4cda05da`
-  (Linux close-result bookkeeping and regression), and `77b0372d` (local
-  evidence checkpoint), plus the pending delivery-metadata commit.
+  (Linux close-result bookkeeping and regression); subsequent signed
+  documentation commits record local evidence, pull-request delivery, and CI.
 
 ## Review policy and outcome
 
