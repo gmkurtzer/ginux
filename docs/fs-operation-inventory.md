@@ -124,7 +124,7 @@ This inventory assigns every filesystem-capable x86-64 operation admitted by the
 | 301 | `fanotify_mark` | explicit-deny | `fd,flags,mask,dirfd,path` | mark flags | descriptor+root+cwd | explicit denial | `errno 38` |
 | 303 | `name_to_handle_at` | explicit-deny | `dirfd,path,handle,mount,flags` | at flags | opaque handle authority | explicit denial | `errno 38` |
 | 304 | `open_by_handle_at` | explicit-deny | `mountfd,handle,flags` | open flags | opaque handle authority | explicit denial | `errno 38` |
-| 306 | `syncfs` | descriptor-core | `fd` | none | descriptor:write | descriptor mediation | `errno 38` |
+| 306 | `syncfs` | explicit-deny | `fd` | none | host-global filesystem authority | explicit denial | `errno 38` |
 | 313 | `finit_module` | explicit-deny | `fd,params,flags` | module flags | host kernel authority | explicit denial | `errno 38` |
 | 316 | `renameat2` | filesystem-lane | `olddirfd,oldpath,newdirfd,newpath,flags` | rename flags | two roots+parents+write contract | legacy native path route | `errno 38` |
 | 319 | `memfd_create` | descriptor-core | `name,flags` | create flags | instance memory file | descriptor mediation | `errno 38` |
