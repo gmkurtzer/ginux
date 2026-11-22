@@ -1,5 +1,32 @@
 # Ginux HDAE Status
 
+## Current checkpoint
+
+### Gate 47 shared-network socket alias authority
+
+- Gate 47 is technically passed locally and is being delivered from
+  `hdae/network-socket-alias-policy` against `main` for human review.
+- The source is issue #297. The defect allows `dup`, `dup2`, and `F_DUPFD`
+  aliases of a managed socket to bypass shared-network destination policy.
+- The revised gate requires one supervisor-owned socket object shared across
+  descriptor aliases and ordinary fork copies, descriptor-local close-on-exec
+  state, Gate 30 mutation-barrier atomicity, and success-only bookkeeping.
+- `SCM_RIGHTS` is explicitly denied before host effect until Ginux has a
+  separately reviewed descriptor-import authority model.
+- This is a security checkpoint. Technical passage authorizes delivery but not
+  merge, acceptance, issue closure, or gate closure.
+- Active skill: `hdae-development`
+- Skill path: `.agents/skills/hdae-development/SKILL.md`
+- Reload after context shift: required
+- Last evidence: `make check`, `make test-unit`, the complete Linux-native
+  `test-native-supervision` command set in Rocky QEMU, `make test-contract`,
+  `make test-security`, and a self-contained aggregate `make test` all pass.
+- Open decisions or limitations: general `SCM_RIGHTS` support is intentionally
+  deferred; issue #300 remains separate.
+- Exact next action: commit the evidence, push the dedicated branch, open the
+  reciprocal issue-linked pull request, and verify exact-head CI. Stop for
+  human security-checkpoint review; do not merge or close issue #297.
+
 ## Approved future gate records
 
 - On 2026-11-14 the human requested Gate 43 to require no more than 5%
