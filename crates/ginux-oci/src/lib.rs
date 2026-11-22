@@ -1,6 +1,6 @@
 use flate2::read::GzDecoder;
 use reqwest::blocking::{Client, Response};
-use reqwest::header::{ACCEPT, AUTHORIZATION, WWW_AUTHENTICATE};
+use reqwest::header::{ACCEPT, WWW_AUTHENTICATE};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::fs::{self, File};
@@ -71,22 +71,23 @@ pub fn materialize(
         ));
     }
     fs::create_dir_all(destination).map_err(io_error)?;
-    let client = Client::builder()
-        .user_agent(concat!("ginux/", env!("CARGO_PKG_VERSION")))
-        .build()
-        .map_err(|error| format!("unable to initialize OCI client: {error}"))?;
-    let token = if image_is_fully_cached(cache_root, &reference.digest)? {
-        None
-    } else {
-        registry_token(&client, &reference)?
+    let mut session = None;
+    let mut fetch = |digest: &str, accept: &str, label: &str, size, progress: &mut _| {
+        fetch_blob(cache_root, digest, label, size, progress, || {
+            let registry = match &session {
+                Some(registry) => registry,
+                None => session.insert(RegistrySession::connect(&reference)?),
+            };
+            registry.download(
+                &blob_url(&reference, digest, label.contains("manifest")),
+                accept,
+                label,
+            )
+        })
     };
-    let root = fetch_blob(
-        &client,
-        &reference,
+    let root = fetch(
         &reference.digest,
         ACCEPT_MANIFESTS,
-        token.as_deref(),
-        cache_root,
         "manifest",
         None,
         &mut progress,
@@ -94,13 +95,9 @@ pub fn materialize(
     let root_document = read_json(&root)?;
     let manifest_descriptor = select_manifest(&root_document)?;
     let manifest_path = if let Some(descriptor) = manifest_descriptor {
-        fetch_blob(
-            &client,
-            &reference,
+        fetch(
             &descriptor.digest,
             ACCEPT_MANIFESTS,
-            token.as_deref(),
-            cache_root,
             "platform manifest",
             descriptor.size,
             &mut progress,
@@ -110,13 +107,9 @@ pub fn materialize(
     };
     let manifest = read_json(&manifest_path)?;
     let config = descriptor(manifest.get("config"), "config")?;
-    fetch_blob(
-        &client,
-        &reference,
+    fetch(
         &config.digest,
         "application/vnd.oci.image.config.v1+json, application/vnd.docker.container.image.v1+json",
-        token.as_deref(),
-        cache_root,
         "config",
         config.size,
         &mut progress,
@@ -134,13 +127,9 @@ pub fn materialize(
     .map_err(io_error)?;
     for (index, layer) in layers.iter().enumerate() {
         let layer = descriptor(Some(layer), "layer")?;
-        let path = fetch_blob(
-            &client,
-            &reference,
+        let path = fetch(
             &layer.digest,
             &layer.media_type,
-            token.as_deref(),
-            cache_root,
             &format!("layer {}/{}", index + 1, layers.len()),
             layer.size,
             &mut progress,
@@ -148,6 +137,40 @@ pub fn materialize(
         apply_layer(&path, &layer.media_type, destination)?;
     }
     Ok(())
+}
+
+struct RegistrySession {
+    client: Client,
+    token: Option<String>,
+}
+
+impl RegistrySession {
+    fn connect(image: &ImageReference) -> Result<Self, String> {
+        let client = Client::builder()
+            .user_agent(concat!("ginux/", env!("CARGO_PKG_VERSION")))
+            .build()
+            .map_err(|error| format!("unable to initialize OCI client: {error}"))?;
+        let token = registry_token(&client, image)?;
+        Ok(Self { client, token })
+    }
+
+    fn download(
+        &self,
+        url: &str,
+        accept: &str,
+        label: &str,
+    ) -> Result<(Response, Option<u64>), String> {
+        let mut request = self.client.get(url).header(ACCEPT, accept);
+        if let Some(token) = &self.token {
+            request = request.bearer_auth(token);
+        }
+        let response = request
+            .send()
+            .and_then(Response::error_for_status)
+            .map_err(|error| format!("unable to download OCI {label}: {error}"))?;
+        let length = response.content_length();
+        Ok((response, length))
+    }
 }
 
 fn registry_token(client: &Client, image: &ImageReference) -> Result<Option<String>, String> {
@@ -226,82 +249,25 @@ fn bearer_fields(challenge: &str) -> Result<Vec<(String, String)>, String> {
     Ok(fields)
 }
 
-fn image_is_fully_cached(cache_root: &Path, root_digest: &str) -> Result<bool, String> {
-    let Some(root) = cached_blob(cache_root, root_digest)? else {
-        return Ok(false);
-    };
-    let root_document = read_json(&root)?;
-    let manifest = if let Some(descriptor) = select_manifest(&root_document)? {
-        let Some(path) = cached_blob(cache_root, &descriptor.digest)? else {
-            return Ok(false);
-        };
-        read_json(&path)?
-    } else {
-        root_document
-    };
-    let config = descriptor(manifest.get("config"), "config")?;
-    if cached_blob(cache_root, &config.digest)?.is_none() {
-        return Ok(false);
-    }
-    let layers = manifest
-        .get("layers")
-        .and_then(Value::as_array)
-        .ok_or_else(|| "OCI manifest has no layer array".to_owned())?;
-    for layer in layers {
-        let layer = descriptor(Some(layer), "layer")?;
-        if cached_blob(cache_root, &layer.digest)?.is_none() {
-            return Ok(false);
-        }
-    }
-    Ok(true)
-}
-
-fn cached_blob(cache_root: &Path, digest: &str) -> Result<Option<PathBuf>, String> {
-    validate_digest(digest)?;
-    let target = cache_root
-        .join("blobs/sha256")
-        .join(digest.trim_start_matches("sha256:"));
-    if target.is_file() && digest_file(&target)? == digest {
-        Ok(Some(target))
-    } else {
-        Ok(None)
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn fetch_blob(
-    client: &Client,
-    image: &ImageReference,
-    digest: &str,
-    accept: &str,
-    token: Option<&str>,
+fn fetch_blob<R: Read>(
     cache_root: &Path,
+    digest: &str,
     label: &str,
     expected_size: Option<u64>,
     progress: &mut impl Write,
+    download: impl FnOnce() -> Result<(R, Option<u64>), String>,
 ) -> Result<PathBuf, String> {
     validate_digest(digest)?;
     let hex = digest.trim_start_matches("sha256:");
     let directory = cache_root.join("blobs/sha256");
     fs::create_dir_all(&directory).map_err(io_error)?;
     let target = directory.join(hex);
-    if cached_blob(cache_root, digest)?.is_some() {
+    if target.is_file() && digest_file(&target)? == digest {
         writeln!(progress, "  {label}: cached").map_err(io_error)?;
         return Ok(target);
     }
-    if target.exists() {
-        fs::remove_file(&target).map_err(io_error)?;
-    }
-    let url = blob_url(image, digest, label.contains("manifest"));
-    let mut request = client.get(&url).header(ACCEPT, accept);
-    if let Some(token) = token {
-        request = request.header(AUTHORIZATION, format!("Bearer {token}"));
-    }
-    let mut response = request
-        .send()
-        .and_then(Response::error_for_status)
-        .map_err(|error| format!("unable to download OCI {label}: {error}"))?;
-    let total = expected_size.or_else(|| response.content_length());
+    let (mut response, content_length) = download()?;
+    let total = expected_size.or(content_length);
     let temporary = directory.join(format!(".{hex}.{}.partial", std::process::id()));
     let result = (|| {
         let mut file = File::create(&temporary).map_err(io_error)?;
@@ -343,7 +309,7 @@ fn fetch_blob(
             ));
         }
         fs::rename(&temporary, &target).map_err(io_error)?;
-        Ok(target.clone())
+        Ok(target)
     })();
     if result.is_err() {
         let _ = fs::remove_file(&temporary);
@@ -671,7 +637,66 @@ mod tests {
         assert!(safe_tar_path(Path::new("/absolute")).is_err());
     }
 
-    fn append(builder: &mut tar::Builder<&mut Vec<u8>>, path: &str, body: &[u8]) {
+    fn cache_bytes(cache: &Path, bytes: &[u8]) -> String {
+        let hex = format!("{:x}", Sha256::digest(bytes));
+        let directory = cache.join("blobs/sha256");
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join(&hex), bytes).unwrap();
+        format!("sha256:{hex}")
+    }
+
+    #[test]
+    fn cached_index_materializes_without_a_registry() {
+        let cache = temp_dir("offline");
+        let mut tar = tar::Builder::new(Vec::new());
+        append(&mut tar, "message", b"from the layer");
+        let layer = cache_bytes(&cache, &tar.into_inner().unwrap());
+        let config = cache_bytes(&cache, b"{}");
+        let manifest = serde_json::json!({
+            "config": {"digest": config},
+            "layers": [{"digest": layer, "mediaType": "application/vnd.oci.image.layer.v1.tar"}]
+        });
+        let manifest = cache_bytes(&cache, &serde_json::to_vec(&manifest).unwrap());
+        let index = serde_json::json!({"manifests": [{
+            "digest": manifest, "platform": {"os": "linux", "architecture": "amd64"}
+        }]});
+        let index = cache_bytes(&cache, &serde_json::to_vec(&index).unwrap());
+        let destination = cache.join("root");
+        let reference = format!("127.0.0.1:0/example@{index}");
+        materialize(&reference, &cache, &destination, io::sink()).unwrap();
+        assert_eq!(
+            fs::read(destination.join("message")).unwrap(),
+            b"from the layer"
+        );
+        fs::remove_dir_all(cache).unwrap();
+    }
+
+    #[test]
+    fn blob_downloads_only_on_a_miss_and_repairs_verified_content() {
+        let cache = temp_dir("repair");
+        let bytes = b"image content".as_slice();
+        let digest = format!("sha256:{:x}", Sha256::digest(bytes));
+        let fetch = |body| {
+            fetch_blob(&cache, &digest, "layer", None, &mut io::sink(), || {
+                Ok((body, None))
+            })
+        };
+        let path = fetch(bytes).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), bytes);
+        fetch_blob::<&[u8]>(&cache, &digest, "layer", None, &mut io::sink(), || {
+            panic!("valid cached content triggered a download")
+        })
+        .unwrap();
+        fs::write(&path, b"damaged").unwrap();
+        assert!(fetch(b"wrong").unwrap_err().contains("digest mismatch"));
+        assert_eq!(fs::read(&path).unwrap(), b"damaged");
+        assert_eq!(fs::read_dir(path.parent().unwrap()).unwrap().count(), 1);
+        fetch(bytes).unwrap();
+        assert_eq!(fs::read(path).unwrap(), bytes);
+        fs::remove_dir_all(cache).unwrap();
+    }
+
+    fn append(builder: &mut tar::Builder<impl Write>, path: &str, body: &[u8]) {
         let mut header = tar::Header::new_gnu();
         header.set_size(body.len() as u64);
         header.set_mode(0o644);
