@@ -2,25 +2,7 @@
 
 ## Current checkpoint
 
-### Active checkpoint: Gate 32 shared-network socket alias authority
-
-- Gate 32 is active on `hdae/network-socket-alias-policy` from merged `main`
-  at `8c7e6ba5` and originates from issue #297.
-- The issue dynamically proves that `dup`, `dup2`, and `F_DUPFD` aliases of a
-  tracked socket bypass outbound policy because socket classification is
-  task-local and keyed only by the original descriptor number.
-- The corrective direction is to place socket state in Gate 30's authoritative
-  descriptor table, propagate it across every duplicate API, and preserve it
-  across `CLONE_FILES`, fork, exec, close, close-range, and descriptor reuse.
-- This gate intentionally excludes issues #298 through #302; each independently
-  reviewable defect receives its own gate and branch.
-- Active skill: `hdae-development`
-- Skill path: `.agents/skills/hdae-development/SKILL.md`
-- Reload after context shift: required
-- Exact next action: implement authoritative socket-table storage and alias
-  propagation, then add the deterministic denied-packet regression matrix.
-
-### Prior checkpoint: Gate 31 filesystem mediation foundation
+### Active checkpoint: Gate 31 filesystem mediation foundation
 
 - Gate 31 is approved for implementation and dedicated pull-request delivery
   from `hdae/filesystem-mediation-foundation` against `main`.

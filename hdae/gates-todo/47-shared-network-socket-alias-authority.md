@@ -3,7 +3,7 @@
 ## Source
 
 [Issue #297](https://github.com/gmkurtzer/ginux/issues/297), dynamically
-reproduced against `main` at `8c7e6ba5`.
+reproduced against `main` at `8c7e6ba5` and rechecked against current `main`.
 
 ## Goal
 
@@ -27,8 +27,9 @@ sharing a Linux descriptor table.
 ## Non-goals
 
 - Do not change which network destinations or socket families are permitted.
-- Do not address the separate default-policy, sockaddr TOCTOU, snapshot-range,
-  `syncfs`, or netlink-ACK reports from issues #298 through #302.
+- Do not address the separate sockaddr TOCTOU report in issue #300.
+- Do not revisit issues #298, #299, #301, or #302, which have independent
+  current-main dispositions.
 - Do not replace the host socket implementation or add a new network backend.
 
 ## Completed work
@@ -105,6 +106,6 @@ sharing a Linux descriptor table.
 ## Review policy and outcome
 
 Automatic implementation and pull-request delivery are authorized by the
-repository's scheduled proactive-remediation policy. Keep Gate 32 in
+repository's scheduled proactive-remediation policy. Keep Gate 47 in
 `gates-todo/` as a security checkpoint pending human review; never merge it
 automatically through the HDAE implementation loop.
