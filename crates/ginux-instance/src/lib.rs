@@ -1228,11 +1228,10 @@ impl InstanceConfig {
         {
             return false;
         }
-        allow.as_slice().is_empty()
-            || allow
-                .as_slice()
-                .iter()
-                .any(|rule| network_rule_matches(rule.as_bytes(), protocol, port))
+        allow
+            .as_slice()
+            .iter()
+            .any(|rule| network_rule_matches(rule.as_bytes(), protocol, port))
     }
 
     /// Returns true when `path` is the configured denied object or one of its
@@ -2827,6 +2826,30 @@ failure = "stop"
             reparsed.normalized().unwrap().as_bytes(),
             normalized.as_bytes()
         );
+    }
+
+    #[test]
+    fn network_default_deny_rejects_empty_allow_lists() {
+        let locked_down = VALID
+            .replace("backend = \"none\"", "backend = \"shared\"")
+            .replace(
+                "[storage]",
+                "[contract.network]\ndefault = \"deny\"\ninbound = []\noutbound = []\n\n[storage]",
+            );
+        let config = InstanceConfig::parse(locked_down.as_bytes()).unwrap();
+        assert!(!config.network_allows(true, NetworkProtocol::Tcp, 8080));
+        assert!(!config.network_allows(false, NetworkProtocol::Tcp, 443));
+        assert!(!config.network_allows(false, NetworkProtocol::Udp, 53));
+
+        let explicit_allow = locked_down.replace(
+            "inbound = []\noutbound = []",
+            "inbound = [\"tcp:*\"]\noutbound = [\"tcp:443\", \"udp:53\"]",
+        );
+        let config = InstanceConfig::parse(explicit_allow.as_bytes()).unwrap();
+        assert!(config.network_allows(true, NetworkProtocol::Tcp, 8080));
+        assert!(config.network_allows(false, NetworkProtocol::Tcp, 443));
+        assert!(config.network_allows(false, NetworkProtocol::Udp, 53));
+        assert!(!config.network_allows(false, NetworkProtocol::Tcp, 80));
     }
 
     #[test]
