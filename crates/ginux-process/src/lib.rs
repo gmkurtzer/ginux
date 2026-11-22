@@ -1634,6 +1634,61 @@ mod tests {
     use super::*;
 
     #[test]
+    fn signal_boundary_accepts_max_signal_and_rejects_65_and_zero() {
+        let mut table: ProcessTable<4> = ProcessTable::new();
+        let init = table.create_init(Credentials::root()).unwrap();
+        let child = table.fork(init).unwrap();
+        assert_eq!(table.signaled(child, MAX_SIGNAL), Ok(()));
+        assert_eq!(
+            table
+                .wait(init, WaitTarget::Specific(child.pid), 0)
+                .unwrap()
+                .status,
+            ChildStatus::Signaled(MAX_SIGNAL)
+        );
+        let other = table.fork(init).unwrap();
+        assert_eq!(table.signal(other, MAX_SIGNAL), Ok(()));
+        assert!(table.signal(other, MAX_SIGNAL + 1).is_err());
+        assert!(table.signaled(other, MAX_SIGNAL + 1).is_err());
+        assert_eq!(table.signaled(other, 0), Err(ProcessError::InvalidSignal));
+    }
+
+    #[test]
+    fn wait_by_group_reaps_only_children_in_that_group() {
+        let mut table: ProcessTable<8> = ProcessTable::new();
+        let init = table.create_init(Credentials::root()).unwrap();
+        let in_group = table.fork(init).unwrap();
+        let out_of_group = table.fork(init).unwrap();
+        table.set_process_group(in_group, 77).unwrap();
+        table.exit(out_of_group, 5).unwrap();
+        assert_eq!(
+            table.wait(init, WaitTarget::Group(77), 0),
+            Err(ProcessError::NoExitedChild)
+        );
+        table.exit(in_group, 9).unwrap();
+        assert_eq!(
+            table.wait(init, WaitTarget::Group(77), 0).unwrap().status,
+            ChildStatus::Exited(9)
+        );
+    }
+
+    #[test]
+    fn a_zombie_keeps_its_reported_outcome_against_late_signals() {
+        let mut table: ProcessTable<4> = ProcessTable::new();
+        let init = table.create_init(Credentials::root()).unwrap();
+        let child = table.fork(init).unwrap();
+        table.exit(child, 7).unwrap();
+        assert_eq!(table.signaled(child, 15), Err(ProcessError::InvalidState));
+        assert_eq!(
+            table
+                .wait(init, WaitTarget::Specific(child.pid), 0)
+                .unwrap()
+                .status,
+            ChildStatus::Exited(7)
+        );
+    }
+
+    #[test]
     fn process_lifecycle_uses_virtual_generation_safe_identity() {
         let mut table: ProcessTable<4> = ProcessTable::new();
         let init = table.create_init(Credentials::root()).unwrap();
