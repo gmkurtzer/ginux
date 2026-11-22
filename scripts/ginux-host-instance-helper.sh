@@ -467,6 +467,10 @@ $2"
         printf '%s\n' 'Ginux image acquisition support is not installed' >&2
         exit 69
     }
+    mkdir -p "$state_root/work"
+    instance_lock=$state_root/work/instance.$name.lock
+    exec 6>"$instance_lock"
+    flock -x 6
     directory=$(instance_dir "$name")
     replacing=false
     if test -e "$directory" || test -L "$directory"; then
@@ -528,6 +532,8 @@ $2"
         mv "$candidate_runtime" "$directory/runtime.toml"
         trap - 0 HUP INT TERM
         cleanup_effective
+        flock -u 6
+        exec 6>&-
         printf 'Instance "%s" imported.\n' "$name"
         return
     fi
@@ -564,6 +570,8 @@ $2"
     printf '  Instance filesystem ready\n'
     cleanup_staging
     trap - 0 HUP INT TERM
+    flock -u 6
+    exec 6>&-
     if test "$command" = create; then
         printf 'Instance "%s" created.\n' "$name"
     else
