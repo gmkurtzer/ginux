@@ -36,16 +36,30 @@ runcmd:
 EOF
 
 rm -f build/rocky-seed.iso build/rocky-seed.iso.cdr
-hdiutil makehybrid \
-    -quiet \
-    -iso \
-    -joliet \
-    -default-volume-name cidata \
-    -o build/rocky-seed.iso \
-    build/rocky-seed
+case "$(uname -s)" in
+    Darwin)
+        hdiutil makehybrid \
+            -quiet \
+            -iso \
+            -joliet \
+            -default-volume-name cidata \
+            -o build/rocky-seed.iso \
+            build/rocky-seed
 
-if [ -f build/rocky-seed.iso.cdr ] && [ ! -f build/rocky-seed.iso ]; then
-    mv build/rocky-seed.iso.cdr build/rocky-seed.iso
-fi
+        if [ -f build/rocky-seed.iso.cdr ] && [ ! -f build/rocky-seed.iso ]; then
+            mv build/rocky-seed.iso.cdr build/rocky-seed.iso
+        fi
+        ;;
+    *)
+        if command -v xorriso >/dev/null 2>&1; then
+            xorriso -as mkisofs -quiet -V cidata -J -r -o build/rocky-seed.iso build/rocky-seed
+        elif command -v genisoimage >/dev/null 2>&1; then
+            genisoimage -quiet -V cidata -J -r -o build/rocky-seed.iso build/rocky-seed
+        else
+            printf '%s\n' 'no ISO 9660 tool found; install xorriso or genisoimage' >&2
+            exit 1
+        fi
+        ;;
+esac
 test -f build/rocky-seed.iso
 printf '%s\n' 'Rocky host: cloud-init seed ready'

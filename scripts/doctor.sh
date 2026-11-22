@@ -2,7 +2,11 @@
 set -eu
 
 missing=0
-for command in cargo rustc rustup rg qemu-system-x86_64 qemu-img ssh scp ssh-keygen hdiutil shasum docker curl jq gzip; do
+case "$(uname -s)" in
+    Darwin) host_tools='hdiutil shasum' ;;
+    *) host_tools='sha256sum' ;;
+esac
+for command in cargo rustc rustup rg qemu-system-x86_64 qemu-img ssh scp ssh-keygen $host_tools docker curl jq gzip; do
     if command -v "$command" >/dev/null 2>&1; then
         printf 'doctor: %-24s ok\n' "$command"
     else
@@ -10,6 +14,18 @@ for command in cargo rustc rustup rg qemu-system-x86_64 qemu-img ssh scp ssh-key
         missing=1
     fi
 done
+
+case "$(uname -s)" in
+    Darwin) ;;
+    *)
+        if command -v xorriso >/dev/null 2>&1 || command -v genisoimage >/dev/null 2>&1; then
+            printf 'doctor: %-24s ok\n' 'xorriso|genisoimage'
+        else
+            printf 'doctor: %-24s MISSING\n' 'xorriso|genisoimage' >&2
+            missing=1
+        fi
+        ;;
+esac
 
 if rustup target list --installed | grep -qx 'x86_64-unknown-linux-gnu'; then
     printf '%s\n' 'doctor: Rust x86_64 target       ok'
@@ -33,6 +49,7 @@ fi
 
 case "$(uname -s)-$(uname -m)" in
     Darwin-arm64) printf '%s\n' 'doctor: reference host          macOS arm64' ;;
+    Linux-x86_64) printf '%s\n' 'doctor: reference host          Linux x86_64' ;;
     *) printf 'doctor: reference host          unsupported (%s-%s)\n' "$(uname -s)" "$(uname -m)" >&2; missing=1 ;;
 esac
 
