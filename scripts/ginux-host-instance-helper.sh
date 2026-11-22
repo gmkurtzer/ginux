@@ -401,13 +401,23 @@ prepare_root() {
     chown -R 65534:65534 "$root"
     find "$root" -type d -exec chmod u+w {} +
     test ! -e "$root/etc/shadow" || chmod 600 "$root/etc/shadow"
+    allocator_library=${GINUX_ALLOCATOR_LIBRARY:-/usr/lib64/ginux/libginux_allocator.so}
+    if test -r "$allocator_library"; then
+        install -D -m 0755 "$allocator_library" \
+            "$root/usr/lib64/ginux/libginux_allocator.so"
+        chown 65534:65534 "$root/usr/lib64/ginux/libginux_allocator.so"
+    fi
+}
+
+reject_duplicate_instance() {
+    printf '%s: already exists\n' "$1" >&2
+    exit 73
 }
 
 import_instance() {
     test "$#" -ge 2 || usage
     name=$1
     config=$2
-    import_action=${GINUX_CREATE_MODE:-false}
     shift 2
     overrides=
     create_network=
@@ -457,9 +467,16 @@ $2"
         printf '%s\n' 'Ginux image acquisition support is not installed' >&2
         exit 69
     }
+    mkdir -p "$state_root/work"
+    instance_lock=$state_root/work/instance.$name.lock
+    exec 6>"$instance_lock"
+    flock -x 6
     directory=$(instance_dir "$name")
     replacing=false
-    if test -e "$directory"; then
+    if test -e "$directory" || test -L "$directory"; then
+        if test "$command" = create; then
+            reject_duplicate_instance "$name"
+        fi
         test -d "$directory" || { printf '%s: invalid instance state\n' "$name" >&2; exit 65; }
         if supervisor_identity "$name" >/dev/null; then
             printf '%s: stop the instance before importing configuration\n' "$name" >&2
@@ -515,19 +532,22 @@ $2"
         mv "$candidate_runtime" "$directory/runtime.toml"
         trap - 0 HUP INT TERM
         cleanup_effective
+        flock -u 6
+        exec 6>&-
         printf 'Instance "%s" imported.\n' "$name"
         return
     fi
 
-    if test "$import_action" = true; then
+    if test "$command" = create; then
         printf 'Creating instance "%s" from defaults\n' "$name"
     else
         printf 'Importing instance "%s"\n' "$name"
     fi
     printf '  Preparing instance filesystem\n'
-    staging=$state_root/work/instance.$name.$$
+    staging_parent=$(mktemp -d "$state_root/instances/.create:XXXXXX")
+    staging=$staging_parent/instance
     cleanup_staging() {
-        rm -rf "$staging"
+        rm -rf "$staging_parent"
         rm -f "$effective"
     }
     trap cleanup_staging 0 HUP INT TERM
@@ -542,11 +562,17 @@ $2"
         exit 65
     }
     prepare_root "$staging/root"
-    mv "$staging" "$directory"
+    mv -T --no-copy --update=none "$staging" "$directory"
+    # A skipped rename succeeds and leaves the source in place.
+    if test -d "$staging"; then
+        reject_duplicate_instance "$name"
+    fi
     printf '  Instance filesystem ready\n'
+    cleanup_staging
     trap - 0 HUP INT TERM
-    cleanup_effective
-    if test "$import_action" = true; then
+    flock -u 6
+    exec 6>&-
+    if test "$command" = create; then
         printf 'Instance "%s" created.\n' "$name"
     else
         printf 'Instance "%s" imported.\n' "$name"
@@ -561,7 +587,7 @@ create_instance() {
         printf 'default instance recipe is not readable: %s\n' "$default_recipe" >&2
         exit 69
     }
-    GINUX_CREATE_MODE=true import_instance "$name" "$default_recipe" "$@"
+    import_instance "$name" "$default_recipe" "$@"
 }
 
 set_instance() {

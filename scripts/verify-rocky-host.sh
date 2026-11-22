@@ -15,7 +15,10 @@ if [ ! -f "$image" ]; then
 fi
 
 size=$(wc -c < "$image" | tr -d ' ')
-actual=$(shasum -a 256 "$image" | awk '{print $1}')
+case "$(uname -s)" in
+    Darwin) actual=$(shasum -a 256 "$image" | awk '{print $1}') ;;
+    *) actual=$(sha256sum "$image" | awk '{print $1}') ;;
+esac
 if [ "$size" != "$ROCKY_IMAGE_SIZE" ]; then
     printf 'Rocky host image size mismatch: expected %s, got %s\n' "$ROCKY_IMAGE_SIZE" "$size" >&2
     exit 1

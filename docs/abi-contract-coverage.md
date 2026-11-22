@@ -8,12 +8,12 @@ The catalog is the reviewable inventory used to normalize instance contracts. An
 
 | Status | Operations |
 |---|---:|
-| complete | 26 |
+| complete | 27 |
 | partial | 156 |
 | denied | 1 |
 | planned | 1 |
 | out-of-scope | 1 |
-| **Total** | **185** |
+| **Total** | **186** |
 
 ## Versioned contract inputs
 
@@ -130,6 +130,7 @@ The catalog is the reviewable inventory used to normalize instance contracts. An
 | `syscall.vhangup` | syscall | 153 | partial | emulate | no | virtual console | `test-systemd` | x86-64 Linux ABI only |
 | `syscall.prctl` | syscall | 157 | partial | mediate | no | cataloged commands | `test-systemd` | x86-64 Linux ABI only |
 | `syscall.arch_prctl` | syscall | 158 | partial | mediate | no | TLS operations | `test-systemd` | x86-64 Linux ABI only |
+| `syscall.sync` | syscall | 162 | complete | deny | no | host-global filesystem writeback is prohibited | `contract-deny-negative` | x86-64 Linux ABI only |
 | `syscall.mount` | syscall | 165 | partial | emulate | no | systemd virtual mount subset | `test-systemd` | x86-64 Linux ABI only |
 | `syscall.umount2` | syscall | 166 | partial | emulate | no | systemd virtual unmount subset | `test-systemd` | x86-64 Linux ABI only |
 | `syscall.reboot` | syscall | 169 | partial | emulate | no | instance shutdown only | `test-systemd` | x86-64 Linux ABI only |
@@ -179,7 +180,7 @@ The catalog is the reviewable inventory used to normalize instance contracts. An
 | `syscall.inotify_init1` | syscall | 294 | partial | mediate | no | instance filesystem | `test-systemd` | x86-64 Linux ABI only |
 | `syscall.recvmmsg` | syscall | 299 | partial | mediate | no | bounded messages | `test-gate975-network` | x86-64 Linux ABI only |
 | `syscall.prlimit64` | syscall | 302 | partial | mediate | no | virtual resource limits | `test-systemd` | x86-64 Linux ABI only |
-| `syscall.syncfs` | syscall | 306 | complete | mediate | no | instance descriptor | `test-systemd` | x86-64 Linux ABI only |
+| `syscall.syncfs` | syscall | 306 | complete | deny | no | host-global superblock writeback is prohibited | `contract-deny-negative` | x86-64 Linux ABI only |
 | `syscall.sendmmsg` | syscall | 307 | partial | mediate | no | bounded messages | `test-gate975-network` | x86-64 Linux ABI only |
 | `syscall.seccomp` | syscall | 317 | partial | mediate | no | authority reduction only | `test-systemd` | x86-64 Linux ABI only |
 | `syscall.getrandom` | syscall | 318 | partial | mediate | no | bounded bytes | `test-systemd` | x86-64 Linux ABI only |

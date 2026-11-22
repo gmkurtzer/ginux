@@ -299,7 +299,7 @@ backend = "shared"'''))
         fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
         check("unsupported socket families fail before host effect", code == 0 and fixture == [
             "GINUX_FIXTURE: abstract-unix-send=-1",
-            "GINUX_FIXTURE: netlink-send=-7"], code, out)
+            "GINUX_FIXTURE: netlink-socket=-97"], code, out)
         code, out = run("expired-credentials", credential_config, configured_launch=True)
         fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
         check("queued credentials survive sender reap", code == 0 and fixture == [

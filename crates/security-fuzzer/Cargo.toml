@@ -5,6 +5,7 @@ edition = "2021"
 license = "Apache-2.0"
 
 [dependencies]
+ginux-allocator = { path = "../ginux-allocator" }
 ginux-contract = { path = "../ginux-contract" }
 ginux-core = { path = "../ginux-core" }
 ginux-devices = { path = "../ginux-devices" }

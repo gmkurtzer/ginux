@@ -1341,11 +1341,11 @@ pub static OPERATIONS: &[Operation] = &[
     op!(
         306,
         "syncfs",
-        DescriptorCore,
+        ExplicitDeny,
         "fd",
         "none",
-        "descriptor:write",
-        "descriptor mediation"
+        "host-global filesystem authority",
+        "explicit denial"
     ),
     op!(
         313,

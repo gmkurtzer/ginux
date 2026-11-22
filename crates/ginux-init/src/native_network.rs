@@ -613,51 +613,10 @@ pub fn accept_loopback_ack(
     }
     let copied_length = core::cmp::min(payload_length as usize, MAX_CONTROL);
     let payload = buffer.copy_from_tracee(pid, payload_pointer, copied_length, 4)?;
-    let mut offset = 0usize;
-    while offset + 16 <= copied_length {
-        let message_length = u32::from_ne_bytes(
-            buffer.bytes[payload + offset..payload + offset + 4]
-                .try_into()
-                .unwrap(),
-        ) as usize;
-        if message_length < 16 || offset + message_length > copied_length {
-            return Err(-EINVAL);
-        }
-        let kind = u16::from_ne_bytes(
-            buffer.bytes[payload + offset + 4..payload + offset + 6]
-                .try_into()
-                .unwrap(),
-        );
-        if kind == 2 && message_length >= 20 {
-            let acknowledgement = i32::from_ne_bytes(
-                buffer.bytes[payload + offset + 16..payload + offset + 20]
-                    .try_into()
-                    .unwrap(),
-            );
-            let sequence = u32::from_ne_bytes(
-                buffer.bytes[payload + offset + 8..payload + offset + 12]
-                    .try_into()
-                    .unwrap(),
-            );
-            if acknowledgement <= 0 {
-                if let Some(index) = sequences
-                    .iter()
-                    .position(|candidate| *candidate == sequence)
-                {
-                    poke_tracee_bytes(
-                        pid,
-                        payload_pointer as usize + offset + 16,
-                        &0i32.to_ne_bytes(),
-                    )?;
-                    return Ok(Some(index));
-                }
-            }
-        }
-        offset = offset
-            .checked_add((message_length + 3) & !3)
-            .ok_or(-EINVAL)?;
-    }
-    Ok(None)
+    ginux_core::loopback_netlink_ack_index(
+        &buffer.bytes[payload..payload + copied_length],
+        sequences,
+    )
 }
 
 fn snapshot_destination(

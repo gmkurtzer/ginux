@@ -12,7 +12,7 @@ mkdir -p "$state_root/instances" "$state_root/work" "$cache" "$image_root"
 fixture=$(mktemp -d /var/tmp/ginux-gate12-root.XXXXXX)
 cleanup() {
     rm -rf "$fixture" "$state_root/instances/gate12" \
-        "$state_root/instances/defaulted" "$state_root/instances/created"
+        "$state_root/instances/defaulted" "$state_root/instances/created" "$state_root/instances/racing"
 }
 trap cleanup 0 HUP INT TERM
 mkdir -p "$fixture/sbin" "$fixture/etc" "$fixture/usr/lib/systemd/system"
@@ -23,6 +23,14 @@ tar -cf "$rootfs" -C "$fixture" .
 
 cat >"$image_root/ensure-oci-image.sh" <<EOF
 #!/bin/sh
+set -eu
+if test -f '$fixture/start-second-create'; then
+    printf 'entered\n' >>'$fixture/create-race-entries'
+    touch '$fixture/first-create-entered'
+    while test -f '$fixture/start-second-create'; do
+        sleep 0.05
+    done
+fi
 printf '%s\n' '$rootfs' >"\$GINUX_OCI_RESULT_FILE"
 exit 0
 EOF
@@ -81,6 +89,49 @@ cmp "$state_root/instances/created/config.toml" /var/tmp/ginux-exported.toml
 
 /usr/local/bin/ginux set created --set 'resources.vcpus=1'
 grep -Fqx 'vcpus = 1' "$state_root/instances/created/config.toml"
+
+created=$state_root/instances/created
+printf 'keep\n' >"$created/root/marker"
+sha256sum "$created/config.toml" "$created/deployment.state" "$created/runtime.toml" \
+    "$created/root/marker" >"$fixture/before-create"
+status=0
+/usr/local/bin/ginux create created 2>"$fixture/duplicate.err" || status=$?
+test "$status" -eq 73
+grep -Fxq 'created: already exists' "$fixture/duplicate.err"
+sha256sum --check "$fixture/before-create"
+
+touch "$fixture/start-second-create"
+(
+    status=0
+    /usr/local/bin/ginux create racing --set resources.vcpus=1 \
+        >"$fixture/racing-first.out" 2>"$fixture/racing-first.err" || status=$?
+    printf '%s\n' "$status" >"$fixture/racing-first.status"
+) &
+first_create=$!
+while ! test -f "$fixture/first-create-entered"; do
+    kill -0 "$first_create"
+    sleep 0.05
+done
+(
+    status=0
+    /usr/local/bin/ginux create racing --set resources.vcpus=2 \
+        >"$fixture/racing-second.out" 2>"$fixture/racing-second.err" || status=$?
+    printf '%s\n' "$status" >"$fixture/racing-second.status"
+) &
+second_create=$!
+kill -0 "$second_create"
+sleep 0.1
+rm "$fixture/start-second-create"
+wait "$first_create"
+wait "$second_create"
+test "$(cat "$fixture/racing-first.status")" -eq 0
+test "$(cat "$fixture/racing-second.status")" -eq 73
+grep -Fxq 'racing: already exists' "$fixture/racing-second.err"
+test "$(wc -l <"$fixture/create-race-entries")" -eq 1
+racing=$state_root/instances/racing
+grep -Fxq 'vcpus = 1' "$racing/config.toml"
+test "$(find "$racing" -mindepth 1 -maxdepth 1 -type d -printf '%f\n')" = root
+test -z "$(find "$state_root/instances" -maxdepth 1 -name '.create:*' -print -quit)"
 
 cat >/var/tmp/ginux-test-editor <<'EOF'
 #!/bin/sh
