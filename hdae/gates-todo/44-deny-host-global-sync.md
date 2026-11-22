@@ -38,3 +38,4 @@ human acceptance.
 - `cargo test -p ginux-contract host_global_sync_is_deliberately_denied`
 - `cargo test -p ginux-fs-policy`
 - `make check`
+- `make test-unit`
