@@ -416,6 +416,15 @@ Build preparation, offline RPM construction, file layout, upgrade/removal
 behavior, retained state, and the clean-host lifecycle test are documented in
 [`docs/packaging.md`](docs/packaging.md).
 
+The package also contains an opt-in standard C ABI
+[guarded allocator](docs/allocator.md). Its metadata isolation, guard mappings,
+instance-memory integration, verification boundary, and performance tradeoffs
+are documented separately, along with the
+[architecture evaluation](docs/allocator-evaluation.md). The broader
+constructive review is recorded in
+[Defensive security assurance](docs/security-assurance.md) and its bounded
+[finding ledger](docs/security-review.md).
+
 ## Historical standalone kernel
 
 The independent bootable kernel remains available for research and historical

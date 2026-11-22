@@ -401,6 +401,12 @@ prepare_root() {
     chown -R 65534:65534 "$root"
     find "$root" -type d -exec chmod u+w {} +
     test ! -e "$root/etc/shadow" || chmod 600 "$root/etc/shadow"
+    allocator_library=${GINUX_ALLOCATOR_LIBRARY:-/usr/lib64/ginux/libginux_allocator.so}
+    if test -r "$allocator_library"; then
+        install -D -m 0755 "$allocator_library" \
+            "$root/usr/lib64/ginux/libginux_allocator.so"
+        chown 65534:65534 "$root/usr/lib64/ginux/libginux_allocator.so"
+    fi
 }
 
 import_instance() {

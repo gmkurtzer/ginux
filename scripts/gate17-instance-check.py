@@ -17,6 +17,8 @@ with open("/proc/sys/kernel/hostname", encoding="ascii") as source:
     hostname = source.read().strip()
 with open("/proc/sys/kernel/random/boot_id", encoding="ascii") as source:
     boot_id = source.read().strip()
+with open("/sys/fs/cgroup/memory.max", encoding="ascii") as source:
+    memory_limit = source.read().strip()
 
 virtual_pids = sorted(
     entry for entry in os.listdir("/proc") if entry.isdigit()
@@ -46,6 +48,7 @@ with open(f"/ginux-gate17/{name}-runtime", "w", encoding="ascii") as marker:
 print(
     "GINUX_GATE17_INSTANCE: "
     f"name={name} hostname={hostname} boot-id={boot_id} "
+    f"memory-limit={memory_limit} "
     f"pids={','.join(virtual_pids)} overlay=isolated translated-port=bound "
     f"shared-port={shared_result}",
     flush=True,

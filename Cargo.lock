@@ -377,6 +377,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ginux-allocator"
+version = "0.1.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "ginux-cli"
 version = "0.1.0"
 dependencies = [
@@ -1040,6 +1047,7 @@ checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 name = "security-fuzzer"
 version = "0.1.0"
 dependencies = [
+ "ginux-allocator",
  "ginux-contract",
  "ginux-core",
  "ginux-devices",

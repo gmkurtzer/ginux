@@ -1,10 +1,10 @@
 # Rocky Linux RPM packaging
 
 Ginux ships as one x86-64 RPM for Rocky Linux 10. The package contains the
-public CLI, the private runtime, image preparation tool and privileged helper, and
-complete example recipes. It does not pull an image, create an instance, start
-a service, add sudo policy, or change SELinux or firewall policy at install
-time.
+public CLI, the private runtime, image preparation tool, privileged helper,
+optional guarded allocator, and complete example recipes. It does not pull an
+image, create an instance, start a service, add sudo policy, or change SELinux
+or firewall policy at install time.
 
 ## Build
 
@@ -49,6 +49,15 @@ The public command is `/usr/bin/ginux`. Private implementation programs are
 under `/usr/libexec/ginux/` and are not public CLI aliases. Example recipes are
 installed as `%config(noreplace)` under `/etc/ginux/examples/`.
 
+The optional allocator is installed at
+`/usr/lib64/ginux/libginux_allocator.so`. Instance preparation copies it into
+the same path below the instance root. A recipe opts in explicitly by adding
+`LD_PRELOAD=/usr/lib64/ginux/libginux_allocator.so` to
+`instance.environment`; it is never enabled silently.
+Its ABI, architecture decision, defensive boundary, and retained performance
+evidence are installed with the package documentation under
+`/usr/share/doc/ginux/`.
+
 ## State and lifecycle
 
 Ginux stores verified OCI manifests, configuration objects and compressed
@@ -82,8 +91,9 @@ through DNF, verifies the installed files, and then opens the host shell.
 `ginux-runtime`: that freestanding `no_std` program enters the instance root
 and cannot depend on host shared libraries. Its remaining warnings document
 intentional tmpfiles-managed persistent state, local source archives, and the
-current absence of a generated manual page and RPM `%check` phase; the package
-has separate metadata, lifecycle, and repository regression tests.
+current absence of a generated manual page. RPM `%check` runs the allocator C
+ABI conformance fixture, and the package has separate metadata, lifecycle, and
+repository regression tests.
 
 ## Initial limitations
 
