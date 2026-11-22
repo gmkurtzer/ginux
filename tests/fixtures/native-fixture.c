@@ -81,16 +81,20 @@ static long tracked_as_console(long fd)
 
 /* Run one call in a child, which owns a copy of the descriptor table, and
  * report whether 240 is still the instance /dev/null and 241 the console,
- * neither one close-on-exec. With a probe label the child also reports
- * F_GETFD of the workload's descriptor 300 after the call. */
-static void protected_step(const char *label, const char *intact, const char *probe,
+ * neither one close-on-exec. With probe labels the child also reports
+ * F_GETFD of the workload's descriptors 239, 242, 250, 300 and 301 after
+ * the call, and whether 250, a console copy, is still tracked as one. */
+static void protected_step(const char *label, const char *intact, const char *const *probes,
                            long number, word a, word b, word c)
 {
+    static const long probed[5] = {239, 242, 250, 300, 301};
     int status = 0;
     long pid = call3(57, 0, 0, 0);
     if (pid == 0) {
         print_result(label, call3(number, a, b, c));
-        if (probe) print_result(probe, call3(72, 300, 1 /* F_GETFD */, 0));
+        for (int at = 0; probes && at < 5; ++at)
+            print_result(probes[at], call3(72, probed[at], 1 /* F_GETFD */, 0));
+        if (probes) print_result(probes[5], tracked_as_console(250));
         call3(231, call3(72, 240, 1, 0) == 0 && call3(72, 241, 1, 0) == 0
                    && call3(1, 240, (word)"P\n", 2) == 2 && call3(1, 241, (word)"P\n", 2) == 2
                    && tracked_as_console(241), 0, 0);
@@ -123,6 +127,20 @@ static void restart_handler(int signal)
 {
     (void)signal;
     ++restart_signals;
+}
+
+static volatile int close_range_signals;
+static volatile long close_range_handler_250 = 1, close_range_handler_fd = -1;
+
+/* A handler for a signal sent during a close_range runs after the whole
+ * call: the workload's 250 is already closed, and a descriptor it opens
+ * stays open. */
+static void close_range_handler(int signal)
+{
+    (void)signal;
+    ++close_range_signals;
+    close_range_handler_250 = call3(72, 250, 1 /* F_GETFD */, 0);
+    close_range_handler_fd = call3(2, (word)"/scenario", 0, 0);
 }
 
 void sigchld_restorer(void);
@@ -688,6 +706,39 @@ long native_fixture_main(const word *stack)
         print_result("GINUX_FIXTURE: race-caller-mutation=", args.flags == 0x8000000200000000UL);
         return 0;
     }
+    case 'Q': {
+        /* scripts/test-native-close-range-signal.py queues SIGUSR1 while
+         * Ginux sets up the upper part of a close_range that spans the
+         * protected descriptors. As on Linux the call is not interrupted:
+         * it closes both sides, the caller keeps its arguments, and the
+         * handler runs once, after the call. */
+        struct { word handler, flags, restorer, mask; } action = {
+            (word)close_range_handler, 0x04000000 /* SA_RESTORER */, (word)sigchld_restorer, 0};
+        const word high = 1UL << 32;
+        if (call4(13, 10, (word)&action, 0, 8) != 0) return 82;
+        if (call3(72, fd, 0 /* F_DUPFD */, 239) != 239 || call3(72, fd, 0, 242) != 242
+            || call3(72, fd, 0, 250) != 250 || call3(72, fd, 0, 300) != 300
+            || call3(72, fd, 0, 301) != 301) return 83;
+        word first = 3, last = 300, flags = high | 2 /* CLOSE_RANGE_UNSHARE */;
+        long result;
+        __asm__ volatile("syscall" : "=a"(result), "+D"(first), "+S"(last), "+d"(flags)
+                         : "a"(436L)
+                         : "rcx", "r11", "memory");
+        print_result("GINUX_FIXTURE: signal-close-range=", result);
+        print_result("GINUX_FIXTURE: signal-close-range-arguments-kept=",
+                     first == 3 && last == 300 && flags == (high | 2));
+        print_result("GINUX_FIXTURE: signal-close-range-closed=",
+                     call3(72, 239, 1 /* F_GETFD */, 0) == -9 && call3(72, 242, 1, 0) == -9
+                     && call3(72, 250, 1, 0) == -9 && call3(72, 300, 1, 0) == -9
+                     && call3(72, 301, 1, 0) == 0 && call3(72, 240, 1, 0) == 0
+                     && call3(72, 241, 1, 0) == 0);
+        print_result("GINUX_FIXTURE: signal-close-range-signals=", close_range_signals);
+        print_result("GINUX_FIXTURE: signal-close-range-handler-250=", close_range_handler_250);
+        print_result("GINUX_FIXTURE: signal-close-range-handler-fd-open=",
+                     close_range_handler_fd >= 0
+                     && call3(72, close_range_handler_fd, 1, 0) == 0);
+        return 0;
+    }
     case 'x': {
         /* scripts/test-native-clone-restart.py queues an ignored SIGUSR1
          * while the replayed clone3 runs; the kernel abandons that call with
@@ -1075,7 +1126,13 @@ long native_fixture_main(const word *stack)
                        number, a, b, c)
 #define PROTECTED_RANGE_STEP(name, a, b, c) \
         protected_step("GINUX_FIXTURE: " name "=", "GINUX_FIXTURE: " name "-intact=", \
-                       "GINUX_FIXTURE: " name "-fd-300=", 436, a, b, c)
+                       (const char *const[]){"GINUX_FIXTURE: " name "-fd-239=", \
+                                             "GINUX_FIXTURE: " name "-fd-242=", \
+                                             "GINUX_FIXTURE: " name "-fd-250=", \
+                                             "GINUX_FIXTURE: " name "-fd-300=", \
+                                             "GINUX_FIXTURE: " name "-fd-301=", \
+                                             "GINUX_FIXTURE: " name "-console-250="}, \
+                       436, a, b, c)
         PROTECTED_STEP("close-high-console", 3, high | 241, 0, 0);
         PROTECTED_STEP("close-high-null", 3, high | 240, 0, 0);
         PROTECTED_STEP("dup2-console", 33, fd, 241, 0);
@@ -1083,24 +1140,58 @@ long native_fixture_main(const word *stack)
         PROTECTED_STEP("dup2-console-self", 33, 241, 241, 0);
         PROTECTED_STEP("dup3-null", 292, fd, 240, 0x80000 /* O_CLOEXEC */);
         PROTECTED_STEP("dup3-high-console", 292, fd, high | 241, 0);
+        /* As on Linux, a closed source fails first. */
+        PROTECTED_STEP("dup2-closed-console", 33, 200, 241, 0);
+        PROTECTED_STEP("dup3-closed-null", 292, 200, 240, 0);
         PROTECTED_STEP("setfd-console", 72, 241, 2 /* F_SETFD */, 1 /* FD_CLOEXEC */);
         PROTECTED_STEP("setfd-high-null", 72, high | 240, high | 2, 1);
         PROTECTED_STEP("fioclex-console", 16, 241, 0x5451 /* FIOCLEX */, 0);
         PROTECTED_STEP("fioclex-high-null", 16, high | 240, 0x5451, 0);
         PROTECTED_STEP("fionclex-console", 16, 241, 0x5450 /* FIONCLEX */, 0);
-        PROTECTED_STEP("cloexec-range", 436, 3, ~0U, 4 /* CLOSE_RANGE_CLOEXEC */);
         PROTECTED_STEP("console-range", 436, 241, 241, 0);
-        PROTECTED_STEP("high-range", 436, high | 3, ~0U, 0);
         /* A range the kernel rejects closes nothing either. */
         PROTECTED_STEP("inverted-high-range", 436, 3, high | 2, 0);
         /* A range from a protected descriptor still closes, or marks, the
-         * workload's descriptors above them; one from below stops at 239. */
-        print_result("GINUX_FIXTURE: fd-300=", call3(72, fd, 0 /* F_DUPFD */, 300));
+         * workload's descriptors above them. One from below that goes past
+         * them closes, or marks, the workload's descriptors on both sides,
+         * with any flags, from 239 to 242 and up to its last descriptor but
+         * not past it; the console copy at 250 leaves Ginux's console view
+         * when it is closed. */
+        long console = call3(2, (word)"/dev/console", 1 /* O_WRONLY */, 0);
+        print_result("GINUX_FIXTURE: fd-239=", call3(72, fd, 0 /* F_DUPFD */, 239));
+        print_result("GINUX_FIXTURE: fd-242=", call3(72, fd, 0, 242));
+        print_result("GINUX_FIXTURE: fd-250=", call3(33, console, 250, 0));
+        print_result("GINUX_FIXTURE: console-250=", tracked_as_console(250));
+        print_result("GINUX_FIXTURE: fd-300=", call3(72, fd, 0, 300));
+        print_result("GINUX_FIXTURE: fd-301=", call3(72, fd, 0, 301));
+        call3(3, console, 0, 0);
+        PROTECTED_RANGE_STEP("cloexec-range", 3, ~0U, 4 /* CLOSE_RANGE_CLOEXEC */);
+        PROTECTED_RANGE_STEP("high-range", high | 3, ~0U, 0);
         PROTECTED_RANGE_STEP("null-range", 240, 300, 0);
         PROTECTED_RANGE_STEP("null-cloexec-range", 240, 300, 4 /* CLOSE_RANGE_CLOEXEC */);
         PROTECTED_RANGE_STEP("unshare-range", 239, 300, 2 /* CLOSE_RANGE_UNSHARE */);
+        PROTECTED_RANGE_STEP("span-range", 3, 300, 0);
+        PROTECTED_RANGE_STEP("span-cloexec-range", 3, 300, 4);
+        PROTECTED_RANGE_STEP("span-unshare-range", 3, 300, 2);
 #undef PROTECTED_RANGE_STEP
 #undef PROTECTED_STEP
+        /* In a CLONE_FILES child a spanning range with CLOSE_RANGE_UNSHARE
+         * closes the child's private copy on both sides of 240-241, and
+         * this table's descriptors and console view stay as they were. */
+        long sharer = call5(56, 0x400 /* CLONE_FILES */ | 17, 0, 0, 0, 0);
+        if (sharer == 0) {
+            long result = call3(436, 3, 300, 2 /* CLOSE_RANGE_UNSHARE */);
+            call3(231, result == 0 && call3(72, 239, 1, 0) == -9 && call3(72, 242, 1, 0) == -9
+                       && call3(72, 250, 1, 0) == -9 && call3(72, 300, 1, 0) == -9
+                       && call3(72, 301, 1, 0) == 0 && !tracked_as_console(250)
+                       && call3(72, 240, 1, 0) == 0 && call3(72, 241, 1, 0) == 0, 0, 0);
+        }
+        print_result("GINUX_FIXTURE: span-unshare-files=",
+                     sharer > 0 && call4(61, sharer, (word)&status, 0, 0) == sharer
+                     && status == 256 && call3(72, 239, 1, 0) == 0
+                     && call3(72, 242, 1, 0) == 0 && call3(72, 250, 1, 0) == 0
+                     && call3(72, 300, 1, 0) == 0 && call3(72, 301, 1, 0) == 0
+                     && tracked_as_console(250));
         /* A range within them still gives a CLONE_FILES child a private
          * table: its open does not appear in this one. */
         long pid = call5(56, 0x400 /* CLONE_FILES */ | 17, 0, 0, 0, 0);
@@ -1128,6 +1219,21 @@ long native_fixture_main(const word *stack)
                          : "rcx", "r11", "memory");
         print_result("GINUX_FIXTURE: protected-range-arguments-kept=",
                      result == 0 && first == 240 && last == 241 && flags == 0);
+        /* 239-300 with CLOSE_RANGE_UNSHARE runs as 239-239 with it and
+         * 242-300 without it; the caller sees its own arguments, high bits
+         * included, the workload's 242 to 300 closed and 301 open. */
+        first = 239;
+        last = 300;
+        flags = high | 2 /* CLOSE_RANGE_UNSHARE */;
+        __asm__ volatile("syscall" : "=a"(result), "+D"(first), "+S"(last), "+d"(flags)
+                         : "a"(436L)
+                         : "rcx", "r11", "memory");
+        print_result("GINUX_FIXTURE: span-range-arguments-kept=",
+                     result == 0 && first == 239 && last == 300 && flags == (high | 2)
+                     && call3(72, 242, 1, 0) == -9 && call3(72, 250, 1, 0) == -9
+                     && call3(72, 300, 1, 0) == -9 && call3(72, 301, 1, 0) == 0
+                     && !tracked_as_console(250) && call3(72, 240, 1, 0) == 0
+                     && call3(72, 241, 1, 0) == 0);
         return 0;
     }
     case 'K': {
