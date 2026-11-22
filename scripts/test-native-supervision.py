@@ -3,6 +3,7 @@
 import os
 import fcntl
 import resource
+import socket
 from pathlib import Path
 import shutil
 import subprocess
@@ -25,6 +26,8 @@ def main():
         (root / "usr/bin").mkdir(parents=True)
         shutil.copyfile(fixture, root / "usr/bin/bash")
         (root / "usr/bin/bash").chmod(0o755)
+        (root / "tmp").mkdir()
+        (root / "tmp").chmod(0o1777)
         (root / "large").write_bytes(b"r" * (1024 * 1024 + 1))
         work.chmod(0o755)
 
@@ -295,6 +298,56 @@ backend = "shared"'''))
             "GINUX_FIXTURE: sendmmsg-many=-22", "GINUX_FIXTURE: connect=0",
             "GINUX_FIXTURE: connected-sendto=1", "GINUX_FIXTURE: connected-sendmsg=1"],
             code, out)
+        alias_config = work / "network-alias.toml"
+        alias_config.write_text(network_config.read_text().replace(
+            'backend = "shared"', '''backend = "shared"
+interface = "lo"
+source = "127.0.0.1"
+port_forwards = ["udp/lo/18083/18081"]'''))
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as denied_receiver:
+            denied_receiver.bind(("127.0.0.1", 18082))
+            denied_receiver.settimeout(0.1)
+            code, out = run("Alias-sockets", alias_config, configured_launch=True)
+            fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
+            try:
+                denied_packet = denied_receiver.recv(1)
+            except TimeoutError:
+                denied_packet = b""
+        check("socket aliases retain network authority", code == 0 and fixture == [
+            "GINUX_FIXTURE: socket-alias-created=1",
+            "GINUX_FIXTURE: socket-dup-denied=-1",
+            "GINUX_FIXTURE: socket-dup2-denied=-1",
+            "GINUX_FIXTURE: socket-dup3-denied=-1",
+            "GINUX_FIXTURE: socket-fcntl-denied=-1",
+            "GINUX_FIXTURE: socket-fcntl-cloexec-denied=-1",
+            "GINUX_FIXTURE: socket-alias-allowed=1",
+            "GINUX_FIXTURE: socket-connect=0",
+            "GINUX_FIXTURE: socket-connect-alias=0",
+            "GINUX_FIXTURE: socket-connected-alias=1",
+            "GINUX_FIXTURE: socket-translated-bind=1",
+            "GINUX_FIXTURE: socket-translated-alias=1",
+            "GINUX_FIXTURE: netlink-alias-fail-closed=1",
+            "GINUX_FIXTURE: socket-dup3-invalid=-22",
+            "GINUX_FIXTURE: socket-after-failed-dup=-1",
+            "GINUX_FIXTURE: socket-dup2-invalid=-9",
+            "GINUX_FIXTURE: socket-after-failed-replace=-1",
+            "GINUX_FIXTURE: socket-close-range-invalid=-22",
+            "GINUX_FIXTURE: socket-after-failed-close-range=-1",
+            "GINUX_FIXTURE: socket-private-fork=1",
+            "GINUX_FIXTURE: socket-shared-close=1",
+            "GINUX_FIXTURE: socket-replaced=1",
+            "GINUX_FIXTURE: socket-closed=1",
+            "GINUX_FIXTURE: socket-close-range=1",
+            "GINUX_FIXTURE: socket-survivor-denied=-1",
+            "GINUX_FIXTURE: scm-rights-denied=-1",
+            "GINUX_FIXTURE: scm-rights-multiple-denied=-1",
+            "GINUX_FIXTURE: scm-rights-not-received=1",
+            "GINUX_FIXTURE: socket-alias-capacity=1",
+            "GINUX_FIXTURE: socket-after-capacity=-1",
+            "GINUX_FIXTURE: socket-exec-dropped=1",
+            "GINUX_FIXTURE: socket-exec-kept=1",
+            "GINUX_FIXTURE: socket-exec-policy=-1"] and denied_packet == b"",
+            code, out)
         code, out = run("W-socket-families", credential_config, configured_launch=True)
         fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
         check("unsupported socket families fail before host effect", code == 0 and fixture == [
@@ -359,7 +412,15 @@ backend = "shared"'''))
                 [str(work / "ginux"), "native", str(denied_console), str(root), "configured"],
                 stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.PIPE)
             try:
-                time.sleep(1)
+                deadline = time.monotonic() + 30
+                while time.monotonic() < deadline:
+                    output.flush()
+                    if b"GINUX_FIXTURE: barrier-start=1\n" in os.pread(output.fileno(), 4096, 0):
+                        break
+                    time.sleep(0.05)
+                else:
+                    raise RuntimeError("descriptor barrier fixture did not start")
+                time.sleep(2)
                 fcntl.lockf(output, fcntl.LOCK_UN, 1)
                 _, error = proc.communicate(timeout=30)
             finally:
@@ -373,6 +434,7 @@ backend = "shared"'''))
         fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
         check("shared descriptor mutations are serialized", proc.returncode == 0 and fixture == [
             "GINUX_FIXTURE: barrier-threads=1",
+            "GINUX_FIXTURE: barrier-start=1",
             "GINUX_FIXTURE: sibling-deferred=1",
             "GINUX_FIXTURE: mutation-result=0",
             "GINUX_FIXTURE: sibling-console=1"], proc.returncode, out)
