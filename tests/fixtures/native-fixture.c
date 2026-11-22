@@ -529,6 +529,10 @@ long native_fixture_main(const word *stack)
         print_result("GINUX_FIXTURE: socket-after-failed-close-range=",
                      call6(44, duplicate, (word)&payload, 1, 0,
                            (word)&denied, sizeof denied));
+        print_result("GINUX_FIXTURE: socket-close-invalid=", call3(3, -1, 0, 0));
+        print_result("GINUX_FIXTURE: socket-after-failed-close=",
+                     call6(44, duplicate, (word)&payload, 1, 0,
+                           (word)&denied, sizeof denied));
 
         /* A non-sharing fork receives a descriptor-table copy. */
         int status = 0;

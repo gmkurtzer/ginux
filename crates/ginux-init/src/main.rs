@@ -7090,13 +7090,17 @@ fn supervise_native(
                     });
                 }
             }
-            if task.syscall == 3 && registers.rax as i64 == 0 {
-                // A close emulated for a protected descriptor never ran, and
-                // the kernel's descriptor is still open.
-                if registers.orig_rax != u64::MAX {
+            if task.syscall == 3 {
+                // Linux releases a valid descriptor early in close(2), even
+                // when later writeback reports an error. EBADF is the only
+                // result that proves the host table was unchanged. A close
+                // emulated for a protected descriptor never ran.
+                let host_consumed =
+                    registers.orig_rax != u64::MAX && registers.rax as i64 != -EBADF;
+                if host_consumed {
                     native_fd_clear(&mut table.console_fds, registers.rdi as u32 as usize);
+                    native_socket_remove_alias(table, &mut socket_objects, registers.rdi);
                 }
-                native_socket_remove_alias(table, &mut socket_objects, registers.rdi);
             }
             if task.syscall == 49 && registers.rax as i64 == 0 {
                 if let Some(socket) = native_socket_object_index(table, registers.rdi)
