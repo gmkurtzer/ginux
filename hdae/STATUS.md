@@ -6,6 +6,8 @@
 
 - Gate 47 is technically passed locally and is being delivered from
   `hdae/network-socket-alias-policy` against `main` for human review.
+- Pull request https://github.com/gmkurtzer/ginux/pull/308 contains the signed
+  implementation and references source issue #297 without closing it.
 - The source is issue #297. The defect allows `dup`, `dup2`, and `F_DUPFD`
   aliases of a managed socket to bypass shared-network destination policy.
 - The revised gate requires one supervisor-owned socket object shared across
@@ -23,9 +25,9 @@
   `make test-security`, and a self-contained aggregate `make test` all pass.
 - Open decisions or limitations: general `SCM_RIGHTS` support is intentionally
   deferred; issue #300 remains separate.
-- Exact next action: commit the evidence, push the dedicated branch, open the
-  reciprocal issue-linked pull request, and verify exact-head CI. Stop for
-  human security-checkpoint review; do not merge or close issue #297.
+- Exact next action: verify exact-head pull-request CI, then stop for human
+  security-checkpoint review; do not merge pull request #308 or close issue
+  #297.
 
 ## Approved future gate records
 

@@ -66,7 +66,8 @@ sharing a Linux descriptor table.
 
 ## Remaining work
 
-- [ ] Push the signed implementation and open a reciprocal issue-linked PR.
+- [x] Pushed the signed implementation and opened reciprocal issue-linked pull
+      request #308.
 - [ ] Obtain exact-head CI and human security-checkpoint review.
 
 ## Acceptance criteria
@@ -161,14 +162,14 @@ sharing a Linux descriptor table.
 
 - Working branch: `hdae/network-socket-alias-policy`
 - Intended base: `main`
-- Pull request: intended; it will reference issue #297 and contain the actual
-  fix and regressions before delivery.
+- Pull request: https://github.com/gmkurtzer/ginux/pull/308 references issue
+  #297 without closing it and contains the actual fix and regressions.
 - Planned commits: authoritative socket-table state; alias/lifecycle handling;
   deterministic regressions; evidence and reciprocal links.
 - Actual commits: `c973279f` (socket-object authority and lifecycle),
   `7563ebcc` (deterministic alias and ancillary regressions), `4cda05da`
-  (Linux close-result bookkeeping and regression), plus the pending
-  evidence/delivery commit.
+  (Linux close-result bookkeeping and regression), and `77b0372d` (local
+  evidence checkpoint), plus the pending delivery-metadata commit.
 
 ## Review policy and outcome
 
