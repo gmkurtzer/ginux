@@ -1,5 +1,41 @@
 # Ginux HDAE Status
 
+## Current checkpoint
+
+### Gate 47 shared-network socket alias authority
+
+- Gate 47 is technically passed locally on
+  `hdae/network-socket-alias-policy` after adding the human-required inbound
+  `SCM_RIGHTS` closure to pull request #308.
+- Pull request https://github.com/gmkurtzer/ginux/pull/308 contains the signed
+  implementation and references source issue #297 without closing it.
+- The source is issue #297. The defect allows `dup`, `dup2`, and `F_DUPFD`
+  aliases of a managed socket to bypass shared-network destination policy.
+- The revised gate requires one supervisor-owned socket object shared across
+  descriptor aliases and ordinary fork copies, descriptor-local close-on-exec
+  state, Gate 30 mutation-barrier atomicity, and success-only bookkeeping.
+- Outbound `SCM_RIGHTS` is denied before host effect. Inbound `recvmsg` and
+  `recvmmsg` now hold the shared descriptor-table barrier, close every returned
+  descriptor while the receiver remains stopped, and return `EPERM`; malformed
+  or unbounded cleanup fails the instance closed.
+- This is a security checkpoint. Technical passage authorizes delivery but not
+  merge, acceptance, issue closure, or gate closure.
+- Active skill: `hdae-development`
+- Skill path: `.agents/skills/hdae-development/SKILL.md`
+- Reload after context shift: required
+- Last evidence: the complete Linux-native `test-native-supervision` command
+  set passed in Rocky QEMU, including host-to-instance `SCM_RIGHTS` transfers
+  through `recvmsg` and `recvmmsg` with every received fd proven closed. Fresh
+  `make check`, `make test-unit`, `make test-contract`, `make test-security`,
+  and aggregate `make test` all pass after the inbound fix. Pull request #308
+  exact-head CI passed `changes`, `launch-integration`, and `static-and-unit`
+  on inbound-fix evidence head `d1abc738`, including native supervision.
+- Open decisions or limitations: general `SCM_RIGHTS` support is intentionally
+  deferred; issue #300 remains separate.
+- Exact next action: stop for human security review of pull request #308; do
+  not merge the pull request, close issue #297, or close Gate 47 without
+  explicit human acceptance.
+
 ## Approved future gate records
 
 - On 2026-11-14 the human requested Gate 43 to require no more than 5%

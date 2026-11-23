@@ -129,6 +129,7 @@ const INSTANCE_NULL_FD: usize = 240;
 const INSTANCE_CONSOLE_FD: usize = 241;
 const NATIVE_PROC_FD_LIMIT: usize = 512;
 const NATIVE_SOCKET_FD_LIMIT: usize = 64;
+const NATIVE_SOCKET_OBJECT_LIMIT: usize = 128;
 const NATIVE_VIRTUAL_KERNEL_FD_LIMIT: usize = 256;
 const NATIVE_VIRTUAL_DIRECTORY_LIMIT: usize = 128;
 const VIRTUAL_KERNEL_FD_BASE: i64 = 10_000;
@@ -3407,7 +3408,8 @@ struct NativeSupervisorTask {
     descriptor_barrier: usize,
     pipe2_address: usize,
     pipe_fds: [i64; 8],
-    socket_fds: [NativeSocketFd; NATIVE_SOCKET_FD_LIMIT],
+    pending_socket_duplicate: i16,
+    pending_socket_cloexec: bool,
     pending_socket_family: u16,
     pending_socket_type: u8,
     pending_sockaddr: usize,
@@ -3421,6 +3423,8 @@ struct NativeSupervisorTask {
     pending_mountinfo_open: bool,
     mountinfo_fd: i64,
     pending_recvmsg: usize,
+    pending_recvmsg_count: u32,
+    scm_rights_cleanup: NativeScmRightsCleanup,
     pending_peercred: usize,
     pending_stat: usize,
     close_range_first: i64,
@@ -3439,6 +3443,23 @@ struct NativeSupervisorTask {
 }
 
 #[derive(Clone, Copy)]
+struct NativeScmRightsCleanup {
+    active: bool,
+    fds: [i32; native_network::MAX_RECEIVED_RIGHTS],
+    count: usize,
+    current: usize,
+    rip: u64,
+}
+
+const EMPTY_SCM_RIGHTS_CLEANUP: NativeScmRightsCleanup = NativeScmRightsCleanup {
+    active: false,
+    fds: [-1; native_network::MAX_RECEIVED_RIGHTS],
+    count: 0,
+    current: 0,
+    rip: 0,
+};
+
+#[derive(Clone, Copy)]
 struct NativeDescriptorTable {
     in_use: bool,
     generation: u64,
@@ -3446,6 +3467,7 @@ struct NativeDescriptorTable {
     console_fds: [u64; NATIVE_PROC_FD_LIMIT / 64],
     // Close-on-exec flags are meaningful only for console_fds entries.
     console_cloexec: [u64; NATIVE_PROC_FD_LIMIT / 64],
+    socket_aliases: [NativeSocketAlias; NATIVE_SOCKET_FD_LIMIT],
     // Host PID of the tracee executing a descriptor-table mutation.
     mutation_owner: usize,
 }
@@ -3456,13 +3478,14 @@ const EMPTY_NATIVE_DESCRIPTOR_TABLE: NativeDescriptorTable = NativeDescriptorTab
     console_fd: -1,
     console_fds: [0; NATIVE_PROC_FD_LIMIT / 64],
     console_cloexec: [0; NATIVE_PROC_FD_LIMIT / 64],
+    socket_aliases: [EMPTY_SOCKET_ALIAS; NATIVE_SOCKET_FD_LIMIT],
     mutation_owner: 0,
 };
 
 fn native_descriptor_barrier_syscall(syscall: u64) -> bool {
     matches!(
         syscall,
-        2 | 3 | 16 | 32 | 33 | 56 | 57 | 58 | 59 | 72 | 257 | 292 | 435 | 436
+        2 | 3 | 16 | 32 | 33 | 47 | 56 | 57 | 58 | 59 | 72 | 257 | 292 | 299 | 435 | 436
     )
 }
 
@@ -3484,8 +3507,9 @@ const EMPTY_RETIRED_CREDENTIAL: NativeRetiredCredential = NativeRetiredCredentia
 };
 
 #[derive(Clone, Copy)]
-struct NativeSocketFd {
-    fd: i64,
+struct NativeSocketObject {
+    in_use: bool,
+    references: u16,
     address_family: u16,
     protocol: u8,
     source_bound: bool,
@@ -3493,6 +3517,13 @@ struct NativeSocketFd {
     external_port: u16,
     netlink_sequences: [u32; 4],
     netlink_count: usize,
+}
+
+#[derive(Clone, Copy)]
+struct NativeSocketAlias {
+    fd: i64,
+    object: u16,
+    close_on_exec: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -3591,8 +3622,9 @@ const EMPTY_VIRTUAL_KERNEL_FD: NativeVirtualKernelFd = NativeVirtualKernelFd {
     close_on_exec: false,
 };
 
-const EMPTY_SOCKET_FD: NativeSocketFd = NativeSocketFd {
-    fd: -1,
+const EMPTY_SOCKET_OBJECT: NativeSocketObject = NativeSocketObject {
+    in_use: false,
+    references: 0,
     address_family: 0,
     protocol: 0,
     source_bound: false,
@@ -3600,6 +3632,12 @@ const EMPTY_SOCKET_FD: NativeSocketFd = NativeSocketFd {
     external_port: 0,
     netlink_sequences: [0; 4],
     netlink_count: 0,
+};
+
+const EMPTY_SOCKET_ALIAS: NativeSocketAlias = NativeSocketAlias {
+    fd: -1,
+    object: 0,
+    close_on_exec: false,
 };
 
 struct NativeProcSample {
@@ -5814,6 +5852,7 @@ fn supervise_native(
     let mut next_retired_credential = 0usize;
     let mut virtual_kernel_fds = [EMPTY_VIRTUAL_KERNEL_FD; NATIVE_VIRTUAL_KERNEL_FD_LIMIT];
     let mut virtual_kernel_state = NativeVirtualKernelState::new();
+    let mut socket_objects = [EMPTY_SOCKET_OBJECT; NATIVE_SOCKET_OBJECT_LIMIT];
     let mut pending_child_stops = [0usize; 16];
     let mut peak_managed_tasks = 1usize;
     let mut yield_broker_pid = 0usize;
@@ -5833,6 +5872,7 @@ fn supervise_native(
         console_fd: INSTANCE_CONSOLE_FD as i64,
         console_fds: root_console_fds,
         console_cloexec: [0; NATIVE_PROC_FD_LIMIT / 64],
+        socket_aliases: [EMPTY_SOCKET_ALIAS; NATIVE_SOCKET_FD_LIMIT],
         mutation_owner: 0,
     };
     let mut next_descriptor_generation = 2u64;
@@ -5855,7 +5895,8 @@ fn supervise_native(
         descriptor_barrier: usize::MAX,
         pipe2_address: 0,
         pipe_fds: [-1; 8],
-        socket_fds: [EMPTY_SOCKET_FD; NATIVE_SOCKET_FD_LIMIT],
+        pending_socket_duplicate: 0,
+        pending_socket_cloexec: false,
         pending_socket_family: 0,
         pending_socket_type: 0,
         pending_sockaddr: 0,
@@ -5869,6 +5910,8 @@ fn supervise_native(
         pending_mountinfo_open: false,
         mountinfo_fd: -1,
         pending_recvmsg: 0,
+        pending_recvmsg_count: 0,
+        scm_rights_cleanup: EMPTY_SCM_RIGHTS_CLEANUP,
         pending_peercred: 0,
         pending_stat: 0,
         close_range_first: -1,
@@ -5995,6 +6038,10 @@ fn supervise_native(
             if !tasks.iter().flatten().any(|candidate| {
                 candidate.tracing && candidate.descriptor_table == task.descriptor_table
             }) {
+                native_socket_release_table(
+                    &descriptor_tables[task.descriptor_table],
+                    &mut socket_objects,
+                );
                 descriptor_tables[task.descriptor_table] = EMPTY_NATIVE_DESCRIPTOR_TABLE;
             }
             // Linux may report the parent's SIGCHLD delivery stop before the
@@ -6049,6 +6096,10 @@ fn supervise_native(
         let signal = ((status >> 8) & 0xff) as u8;
         let event = ((status as usize) >> 16) & 0xffff;
         let seccomp_entry = event == PTRACE_EVENT_SECCOMP;
+        if task.scm_rights_cleanup.active && !seccomp_entry && !(event == 0 && signal == (5 | 0x80))
+        {
+            native_fail(instance, pid, b"native SCM_RIGHTS cleanup interrupted");
+        }
         if matches!(
             event,
             PTRACE_EVENT_FORK | PTRACE_EVENT_VFORK | PTRACE_EVENT_CLONE
@@ -6121,6 +6172,10 @@ fn supervise_native(
                     native_fail(instance, pid, b"native descriptor table pool full");
                 };
                 descriptor_tables[table] = descriptor_tables[task.descriptor_table];
+                native_socket_retain_table(&descriptor_tables[table], &mut socket_objects)
+                    .unwrap_or_else(|| {
+                        native_fail(instance, pid, b"native socket reference overflow")
+                    });
                 descriptor_tables[table].in_use = true;
                 descriptor_tables[table].generation = next_descriptor_generation;
                 next_descriptor_generation = next_descriptor_generation
@@ -6153,7 +6208,8 @@ fn supervise_native(
                 descriptor_barrier: usize::MAX,
                 pipe2_address: 0,
                 pipe_fds: task.pipe_fds,
-                socket_fds: task.socket_fds,
+                pending_socket_duplicate: 0,
+                pending_socket_cloexec: false,
                 pending_socket_family: 0,
                 pending_socket_type: 0,
                 pending_sockaddr: 0,
@@ -6167,6 +6223,8 @@ fn supervise_native(
                 pending_mountinfo_open: false,
                 mountinfo_fd: task.mountinfo_fd,
                 pending_recvmsg: 0,
+                pending_recvmsg_count: 0,
+                scm_rights_cleanup: EMPTY_SCM_RIGHTS_CLEANUP,
                 pending_peercred: 0,
                 pending_stat: 0,
                 close_range_first: -1,
@@ -6229,6 +6287,10 @@ fn supervise_native(
                     native_fail(instance, pid, b"native descriptor table pool full");
                 };
                 descriptor_tables[table] = descriptor_tables[old_table];
+                native_socket_retain_table(&descriptor_tables[table], &mut socket_objects)
+                    .unwrap_or_else(|| {
+                        native_fail(instance, pid, b"native socket reference overflow")
+                    });
                 descriptor_tables[table].in_use = true;
                 descriptor_tables[table].generation = next_descriptor_generation;
                 next_descriptor_generation = next_descriptor_generation
@@ -6240,6 +6302,7 @@ fn supervise_native(
                 task.descriptor_table = table;
             }
             let table = &mut descriptor_tables[task.descriptor_table];
+            native_socket_exec(table, &mut socket_objects);
             let latest_open = native_fd_contains(&table.console_fds, table.console_fd as usize);
             for (console, cloexec) in table.console_fds.iter_mut().zip(table.console_cloexec) {
                 *console &= !cloexec;
@@ -6395,6 +6458,29 @@ fn supervise_native(
         } else {
             None
         };
+
+        if task.scm_rights_cleanup.active && seccomp_entry {
+            let cleanup = task.scm_rights_cleanup;
+            let registers = entry_registers.unwrap_or_else(|| {
+                native_fail(
+                    instance,
+                    pid,
+                    b"native SCM_RIGHTS cleanup registers missing",
+                )
+            });
+            if entry_syscall != Some(SYS_CLOSE)
+                || registers.rdi as u32 as i32 != cleanup.fds[cleanup.current]
+                || registers.rip != cleanup.rip
+            {
+                native_fail(instance, pid, b"native SCM_RIGHTS cleanup entry mismatch");
+            }
+            task.awaiting_exit = true;
+            tasks[task_index] = Some(task);
+            if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
+                native_fail(instance, pid, b"native SCM_RIGHTS cleanup resume failed");
+            }
+            continue;
+        }
 
         if entry_syscall.is_some_and(native_descriptor_barrier_syscall)
             && task.descriptor_barrier == usize::MAX
@@ -6566,6 +6652,50 @@ fn supervise_native(
             tasks[task_index] = Some(task);
             if ptrace(PTRACE_CONT, host_pid, 0, 0) < 0 {
                 native_fail(instance, pid, b"native child phase synchronization failed");
+            }
+            continue;
+        }
+
+        if !seccomp_entry && task.awaiting_exit && task.scm_rights_cleanup.active {
+            let cleanup = &mut task.scm_rights_cleanup;
+            cleanup.current += 1;
+            if cleanup.current < cleanup.count {
+                native_scm_rights_cleanup_replay(cleanup, &mut registers);
+                task.awaiting_exit = false;
+                tasks[task_index] = Some(task);
+                if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_CONT, host_pid, 0, 0) < 0
+                {
+                    native_fail(
+                        instance,
+                        pid,
+                        b"native SCM_RIGHTS cleanup continuation failed",
+                    );
+                }
+                continue;
+            }
+            registers.rip = cleanup.rip;
+            registers.rax = (-EPERM) as u64;
+            registers.orig_rax = task.syscall;
+            task.scm_rights_cleanup = EMPTY_SCM_RIGHTS_CLEANUP;
+            task.awaiting_exit = false;
+            task.override_exit = false;
+            if task.descriptor_barrier == usize::MAX
+                || descriptor_tables[task.descriptor_barrier].mutation_owner != task.host_pid
+            {
+                native_fail(instance, pid, b"native SCM_RIGHTS cleanup barrier lost");
+            }
+            descriptor_tables[task.descriptor_barrier].mutation_owner = 0;
+            task.descriptor_barrier = usize::MAX;
+            tasks[task_index] = Some(task);
+            if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                || ptrace(PTRACE_CONT, host_pid, 0, 0) < 0
+            {
+                native_fail(
+                    instance,
+                    pid,
+                    b"native SCM_RIGHTS cleanup completion failed",
+                );
             }
             continue;
         }
@@ -6894,6 +7024,27 @@ fn supervise_native(
                 }
                 task.pending_console_duplicate = 0;
             }
+            if task.pending_socket_duplicate != 0 {
+                if registers.rax as i64 >= 0 {
+                    let object = (task.pending_socket_duplicate > 0)
+                        .then_some((task.pending_socket_duplicate - 1) as usize);
+                    native_socket_remove_alias(table, &mut socket_objects, registers.rax);
+                    if let Some(object) = object {
+                        native_socket_insert_alias(
+                            table,
+                            &mut socket_objects,
+                            registers.rax,
+                            object,
+                            task.pending_socket_cloexec,
+                        )
+                        .unwrap_or_else(|| {
+                            native_fail(instance, pid, b"native socket alias table full")
+                        });
+                    }
+                }
+                task.pending_socket_duplicate = 0;
+                task.pending_socket_cloexec = false;
+            }
             // fcntl F_SETFD and ioctl FIOCLEX/FIONCLEX set the flag too. The
             // kernel reads descriptors and commands as 32-bit values.
             const FIONCLEX: u32 = 0x5450;
@@ -6915,6 +7066,7 @@ fn supervise_native(
                     registers.rdi as u32 as usize,
                     cloexec,
                 );
+                native_socket_set_cloexec(table, registers.rdi, cloexec);
             }
             if task.pending_mountinfo_open {
                 if registers.rax as i64 >= 0 {
@@ -6932,11 +7084,51 @@ fn supervise_native(
             }
             if task.pending_recvmsg != 0 {
                 if registers.rax as i64 >= 0 {
-                    if let Some(socket) = task.socket_fds.iter_mut().find(|entry| {
-                        entry.fd == registers.rdi as i64
-                            && entry.address_family == 16
-                            && entry.netlink_count != 0
-                    }) {
+                    let received = if task.syscall == 47 {
+                        native_network::recvmsg_scm_rights(host_pid, task.pending_recvmsg as u64)
+                    } else if task.syscall == 299
+                        && registers.rax <= u64::from(task.pending_recvmsg_count)
+                    {
+                        native_network::recvmmsg_scm_rights(
+                            host_pid,
+                            task.pending_recvmsg as u64,
+                            registers.rax,
+                        )
+                    } else {
+                        Err(-EINVAL)
+                    }
+                    .unwrap_or_else(|_| {
+                        native_fail(instance, pid, b"native SCM_RIGHTS result invalid")
+                    });
+                    if received.count != 0 {
+                        task.pending_recvmsg = 0;
+                        task.pending_recvmsg_count = 0;
+                        task.scm_rights_cleanup = NativeScmRightsCleanup {
+                            active: true,
+                            fds: received.fds,
+                            count: received.count,
+                            current: 0,
+                            rip: registers.rip,
+                        };
+                        write_all(b"GINUX_NETWORK_AUDIT: action=deny-scm-rights direction=receive descriptors=");
+                        write_u64(received.count as u64);
+                        write_all(b" result=-1\n");
+                        native_scm_rights_cleanup_replay(&task.scm_rights_cleanup, &mut registers);
+                        task.awaiting_exit = false;
+                        tasks[task_index] = Some(task);
+                        if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                            || ptrace(PTRACE_CONT, host_pid, 0, 0) < 0
+                        {
+                            native_fail(instance, pid, b"native SCM_RIGHTS cleanup start failed");
+                        }
+                        continue;
+                    }
+                }
+                if registers.rax as i64 >= 0 {
+                    let socket = native_socket_object_index(table, registers.rdi)
+                        .and_then(|object| socket_objects.get_mut(object))
+                        .filter(|socket| socket.address_family == 16 && socket.netlink_count != 0);
+                    if let Some(socket) = socket {
                         let accepted = native_network::accept_loopback_ack(
                             host_pid,
                             task.pending_recvmsg,
@@ -6969,6 +7161,7 @@ fn supervise_native(
                     );
                 }
                 task.pending_recvmsg = 0;
+                task.pending_recvmsg_count = 0;
             }
             if task.pending_peercred != 0 {
                 if registers.rax as i64 == 0
@@ -7002,61 +7195,52 @@ fn supervise_native(
                 task.pending_stat = 0;
             }
             if task.syscall == 41 && registers.rax as i64 >= 0 && task.pending_socket_type != 0 {
-                let Some(slot) = task.socket_fds.iter_mut().find(|entry| entry.fd < 0) else {
-                    native_fail(instance, pid, b"native socket descriptor table full");
-                };
-                *slot = NativeSocketFd {
-                    fd: registers.rax as i64,
-                    address_family: task.pending_socket_family,
-                    protocol: task.pending_socket_type,
-                    source_bound: false,
-                    internal_port: 0,
-                    external_port: 0,
-                    netlink_sequences: [0; 4],
-                    netlink_count: 0,
-                };
+                native_socket_allocate(
+                    table,
+                    &mut socket_objects,
+                    registers.rax,
+                    task.pending_socket_family,
+                    task.pending_socket_type,
+                    registers.rsi & O_CLOEXEC != 0,
+                )
+                .unwrap_or_else(|| {
+                    native_fail(instance, pid, b"native socket descriptor table full")
+                });
             }
             if matches!(task.syscall, 43 | 288) && registers.rax as i64 >= 0 {
-                let listener = task
-                    .socket_fds
-                    .iter()
-                    .find(|entry| entry.fd == registers.rdi as i64)
-                    .copied();
-                if let Some(listener) = listener.filter(|entry| entry.protocol != 0) {
-                    let Some(slot) = task.socket_fds.iter_mut().find(|entry| entry.fd < 0) else {
-                        native_fail(instance, pid, b"native accepted socket table full");
-                    };
-                    *slot = NativeSocketFd {
-                        fd: registers.rax as i64,
-                        address_family: listener.address_family,
-                        protocol: listener.protocol,
-                        source_bound: false,
-                        internal_port: 0,
-                        external_port: 0,
-                        netlink_sequences: [0; 4],
-                        netlink_count: 0,
-                    };
+                let listener = native_socket_object_index(table, registers.rdi)
+                    .and_then(|object| socket_objects.get(object))
+                    .copied()
+                    .filter(|object| object.in_use && object.protocol != 0);
+                if let Some(listener) = listener {
+                    native_socket_allocate(
+                        table,
+                        &mut socket_objects,
+                        registers.rax,
+                        listener.address_family,
+                        listener.protocol,
+                        task.syscall == 288 && registers.r10 & O_CLOEXEC != 0,
+                    )
+                    .unwrap_or_else(|| {
+                        native_fail(instance, pid, b"native accepted socket table full")
+                    });
                 }
             }
-            if task.syscall == 3 && registers.rax as i64 == 0 {
-                // A close emulated for a protected descriptor never ran, and
-                // the kernel's descriptor is still open.
-                if registers.orig_rax != u64::MAX {
+            if task.syscall == 3 {
+                // Linux releases a valid descriptor early in close(2), even
+                // when later writeback reports an error. EBADF is the only
+                // result that proves the host table was unchanged. A close
+                // emulated for a protected descriptor never ran.
+                let host_consumed =
+                    registers.orig_rax != u64::MAX && registers.rax as i64 != -EBADF;
+                if host_consumed {
                     native_fd_clear(&mut table.console_fds, registers.rdi as u32 as usize);
-                }
-                if let Some(slot) = task
-                    .socket_fds
-                    .iter_mut()
-                    .find(|entry| entry.fd == registers.rdi as i64)
-                {
-                    *slot = EMPTY_SOCKET_FD;
+                    native_socket_remove_alias(table, &mut socket_objects, registers.rdi);
                 }
             }
             if task.syscall == 49 && registers.rax as i64 == 0 {
-                if let Some(socket) = task
-                    .socket_fds
-                    .iter_mut()
-                    .find(|entry| entry.fd == registers.rdi as i64)
+                if let Some(socket) = native_socket_object_index(table, registers.rdi)
+                    .and_then(|object| socket_objects.get_mut(object))
                 {
                     socket.source_bound = true;
                 }
@@ -7075,11 +7259,11 @@ fn supervise_native(
                 task.pending_sockaddr_word = 0;
             }
             if task.pending_getsockname != 0 && registers.rax as i64 == 0 {
-                let internal_port = task
-                    .socket_fds
-                    .iter()
-                    .find(|entry| entry.fd == registers.rdi as i64)
-                    .map_or(0, |entry| entry.internal_port);
+                let internal_port = task.descriptor_table;
+                let internal_port =
+                    native_socket_object_index(&descriptor_tables[internal_port], registers.rdi)
+                        .and_then(|object| socket_objects.get(object))
+                        .map_or(0, |object| object.internal_port);
                 if internal_port != 0 {
                     let mut word = 0u64;
                     if ptrace(
@@ -7119,13 +7303,6 @@ fn supervise_native(
                         *pipe_fd = -1;
                     }
                 }
-                for socket_fd in &mut task.socket_fds {
-                    if socket_fd.fd >= task.close_range_first
-                        && socket_fd.fd <= task.close_range_last
-                    {
-                        *socket_fd = EMPTY_SOCKET_FD;
-                    }
-                }
                 if task.close_range_first >= 0 && task.close_range_last >= 0 {
                     native_fd_clear_range(
                         &mut task.cgroup_procs_fds,
@@ -7156,6 +7333,13 @@ fn supervise_native(
                             native_fail(instance, pid, b"native descriptor table pool full");
                         };
                         descriptor_tables[new_table] = descriptor_tables[old_table];
+                        native_socket_retain_table(
+                            &descriptor_tables[new_table],
+                            &mut socket_objects,
+                        )
+                        .unwrap_or_else(|| {
+                            native_fail(instance, pid, b"native socket reference overflow")
+                        });
                         descriptor_tables[new_table].in_use = true;
                         descriptor_tables[new_table].generation = next_descriptor_generation;
                         next_descriptor_generation = next_descriptor_generation
@@ -7172,6 +7356,13 @@ fn supervise_native(
                     }
                 }
                 let table = &mut descriptor_tables[task.descriptor_table];
+                native_socket_close_range(
+                    table,
+                    &mut socket_objects,
+                    first as u32,
+                    last as u32,
+                    registers.rdx & CLOSE_RANGE_CLOEXEC != 0,
+                );
                 if registers.rdx & CLOSE_RANGE_CLOEXEC != 0 {
                     for fd in first..=core::cmp::min(last, NATIVE_PROC_FD_LIMIT - 1) {
                         native_fd_set(&mut table.console_cloexec, fd);
@@ -7246,8 +7437,38 @@ fn supervise_native(
         }
         let shared_network =
             mode == 3 && instance.config().network_backend == NetworkBackend::Shared;
-        let socket_table_full =
-            shared_network && syscall == 41 && !task.socket_fds.iter().any(|entry| entry.fd < 0);
+        let socket_alias_available = descriptor_tables[task.descriptor_table]
+            .socket_aliases
+            .iter()
+            .any(|alias| alias.fd < 0);
+        let socket_object_available = socket_objects.iter().any(|object| !object.in_use);
+        let accepting_managed_socket = shared_network
+            && matches!(syscall, 43 | 288)
+            && native_socket_object_index(&descriptor_tables[task.descriptor_table], registers.rdi)
+                .is_some();
+        let socket_table_full = shared_network
+            && (syscall == 41 || accepting_managed_socket)
+            && (!socket_alias_available || !socket_object_available);
+        let socket_duplicate_source =
+            native_socket_object_index(&descriptor_tables[task.descriptor_table], registers.rdi);
+        let socket_duplicate_needs_slot = socket_duplicate_source.is_some()
+            && match syscall {
+                SYS_DUP => true,
+                SYS_DUP2 | SYS_DUP3 => {
+                    registers.rdi as u32 != registers.rsi as u32
+                        && native_socket_object_index(
+                            &descriptor_tables[task.descriptor_table],
+                            registers.rsi,
+                        )
+                        .is_none()
+                }
+                SYS_FCNTL if matches!(registers.rsi as u32 as u64, F_DUPFD | F_DUPFD_CLOEXEC) => {
+                    true
+                }
+                _ => false,
+            };
+        let socket_duplicate_table_full =
+            shared_network && socket_duplicate_needs_slot && !socket_alias_available;
         let unsupported_socket_family =
             shared_network && syscall == 41 && !matches!(registers.rdi, 1 | 2 | 10);
         if shared_network && syscall == 41 && registers.rdi == 16 && registers.rdx == 9 {
@@ -7270,15 +7491,18 @@ fn supervise_native(
         }
         if shared_network
             && syscall == 51
-            && task
-                .socket_fds
-                .iter()
-                .any(|entry| entry.fd == registers.rdi as i64 && entry.external_port != 0)
+            && native_socket_object_index(&descriptor_tables[task.descriptor_table], registers.rdi)
+                .and_then(|object| socket_objects.get(object))
+                .is_some_and(|object| object.external_port != 0)
         {
             task.pending_getsockname = registers.rsi as usize;
         }
         if shared_network && matches!(syscall, 42 | 49) {
-            if native_socket_family(&task, registers.rdi) == Some(1)
+            if native_socket_family(
+                &descriptor_tables[task.descriptor_table],
+                &socket_objects,
+                registers.rdi,
+            ) == Some(1)
                 && !native_unix_address_allowed(host_pid, registers.rsi as usize, registers.rdx)
             {
                 write_all(b"emulate surface=unsupported-unix-address length=");
@@ -7296,7 +7520,11 @@ fn supervise_native(
                 }
                 continue;
             }
-            let protocol = native_socket_protocol(&task, registers.rdi);
+            let protocol = native_socket_protocol(
+                &descriptor_tables[task.descriptor_table],
+                &socket_objects,
+                registers.rdi,
+            );
             if let Some((word, port)) =
                 native_sockaddr_port(host_pid, registers.rsi as usize, registers.rdx)
             {
@@ -7334,18 +7562,19 @@ fn supervise_native(
                 }
                 if !ingress {
                     if let Some(source) = instance.config().network_source_ipv4() {
-                        let socket_index = task
-                            .socket_fds
-                            .iter()
-                            .position(|entry| entry.fd == registers.rdi as i64);
-                        let source_bound =
-                            socket_index.is_some_and(|index| task.socket_fds[index].source_bound);
+                        let socket_index = native_socket_object_index(
+                            &descriptor_tables[task.descriptor_table],
+                            registers.rdi,
+                        );
+                        let source_bound = socket_index
+                            .and_then(|index| socket_objects.get(index))
+                            .is_some_and(|object| object.source_bound);
                         if !source_bound {
                             if !native_bind_socket_source(host_pid, registers.rdi as i64, source) {
                                 native_fail(instance, pid, b"native source-address bind failed");
                             }
                             if let Some(index) = socket_index {
-                                task.socket_fds[index].source_bound = true;
+                                socket_objects[index].source_bound = true;
                             }
                             write_all(b"GINUX_NETWORK_AUDIT: action=source-bind address=");
                             write_all(instance.config().network_source.as_bytes());
@@ -7365,10 +7594,11 @@ fn supervise_native(
                         .translated_port(network_protocol.unwrap_or(NetworkProtocol::Tcp), port)
                     {
                         translated = native_sockaddr_with_port(translated, external);
-                        if let Some(socket) = task
-                            .socket_fds
-                            .iter_mut()
-                            .find(|entry| entry.fd == registers.rdi as i64)
+                        if let Some(socket) = native_socket_object_index(
+                            &descriptor_tables[task.descriptor_table],
+                            registers.rdi,
+                        )
+                        .and_then(|object| socket_objects.get_mut(object))
                         {
                             socket.internal_port = port;
                             socket.external_port = external;
@@ -7397,9 +7627,39 @@ fn supervise_native(
                 }
             }
         }
+        let transfers_descriptor = shared_network
+            && match syscall {
+                46 => matches!(
+                    native_network::sendmsg_has_scm_rights(host_pid, registers.rsi),
+                    Ok(true)
+                ),
+                307 => matches!(
+                    native_network::sendmmsg_has_scm_rights(host_pid, registers.rsi, registers.rdx,),
+                    Ok(true)
+                ),
+                _ => false,
+            };
+        if transfers_descriptor {
+            line(b"emulate surface=scm-rights result=-1");
+            registers.orig_rax = u64::MAX;
+            task.awaiting_exit = true;
+            task.override_exit = true;
+            task.override_result = -EPERM;
+            tasks[task_index] = Some(task);
+            if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+            {
+                native_fail(instance, pid, b"native SCM_RIGHTS denial failed");
+            }
+            continue;
+        }
         if shared_network
             && matches!(syscall, 44 | 46)
-            && native_socket_family(&task, registers.rdi) == Some(16)
+            && native_socket_family(
+                &descriptor_tables[task.descriptor_table],
+                &socket_objects,
+                registers.rdi,
+            ) == Some(16)
         {
             let snapshot = native_network::Pending::snapshot_loopback_netlink(
                 host_pid,
@@ -7411,10 +7671,11 @@ fn supervise_native(
             match snapshot {
                 Ok(snapshot) => {
                     let sequence = snapshot.netlink_sequence;
-                    if let Some(socket) = task
-                        .socket_fds
-                        .iter_mut()
-                        .find(|entry| entry.fd == registers.rdi as i64)
+                    if let Some(socket) = native_socket_object_index(
+                        &descriptor_tables[task.descriptor_table],
+                        registers.rdi,
+                    )
+                    .and_then(|object| socket_objects.get_mut(object))
                     {
                         if socket.netlink_count == socket.netlink_sequences.len() {
                             native_fail(
@@ -7449,10 +7710,19 @@ fn supervise_native(
         }
         if shared_network
             && matches!(syscall, 44 | 46 | 307)
-            && native_socket_family(&task, registers.rdi)
-                .is_some_and(|family| family != 2 && family != 10)
+            && native_socket_family(
+                &descriptor_tables[task.descriptor_table],
+                &socket_objects,
+                registers.rdi,
+            )
+            .is_some_and(|family| family != 2 && family != 10)
         {
-            let family = native_socket_family(&task, registers.rdi).unwrap_or_default();
+            let family = native_socket_family(
+                &descriptor_tables[task.descriptor_table],
+                &socket_objects,
+                registers.rdi,
+            )
+            .unwrap_or_default();
             if family != 1 || !native_unix_send_allowed(host_pid, syscall, &registers) {
                 // Non-Internet socket families have no generic host-send
                 // route. Pathname Unix sockets are contained by the tracee's
@@ -7474,9 +7744,17 @@ fn supervise_native(
         }
         if shared_network
             && matches!(syscall, 44 | 46 | 307)
-            && native_socket_is_ip(&task, registers.rdi)
+            && native_socket_is_ip(
+                &descriptor_tables[task.descriptor_table],
+                &socket_objects,
+                registers.rdi,
+            )
         {
-            let protocol = native_socket_protocol(&task, registers.rdi);
+            let protocol = native_socket_protocol(
+                &descriptor_tables[task.descriptor_table],
+                &socket_objects,
+                registers.rdi,
+            );
             let network_protocol = match protocol {
                 1 => Some(NetworkProtocol::Tcp),
                 2 => Some(NetworkProtocol::Udp),
@@ -7516,18 +7794,19 @@ fn supervise_native(
             }
             if error.is_none() {
                 if let Some(source) = instance.config().network_source_ipv4() {
-                    let socket_index = task
-                        .socket_fds
-                        .iter()
-                        .position(|entry| entry.fd == registers.rdi as i64);
-                    let source_bound =
-                        socket_index.is_some_and(|index| task.socket_fds[index].source_bound);
+                    let socket_index = native_socket_object_index(
+                        &descriptor_tables[task.descriptor_table],
+                        registers.rdi,
+                    );
+                    let source_bound = socket_index
+                        .and_then(|index| socket_objects.get(index))
+                        .is_some_and(|object| object.source_bound);
                     if !source_bound {
                         if !native_bind_socket_source(host_pid, registers.rdi as i64, source) {
                             native_fail(instance, pid, b"native source-address bind failed");
                         }
                         if let Some(index) = socket_index {
-                            task.socket_fds[index].source_bound = true;
+                            socket_objects[index].source_bound = true;
                         }
                         write_all(b"GINUX_NETWORK_AUDIT: action=source-bind address=");
                         write_all(instance.config().network_source.as_bytes());
@@ -7768,7 +8047,10 @@ fn supervise_native(
         } else if matches!(syscall, 1 | 18 | 20 | 296 | 328) && on_console {
             Some("device.console.write")
         } else if mode == 3 && matches!(syscall, 42 | 49) {
-            match (native_socket_protocol(&task, registers.rdi), syscall) {
+            match (
+                native_socket_protocol(descriptor_table, &socket_objects, registers.rdi),
+                syscall,
+            ) {
                 (1, 42) => Some("network.inet.tcp.connect"),
                 (1, 49) => Some("network.inet.tcp.bind"),
                 (2, 42) => Some("network.inet.udp.connect"),
@@ -8159,6 +8441,20 @@ fn supervise_native(
                     || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
                 {
                     native_fail(instance, pid, b"native socket limit denial failed");
+                }
+            }
+            Action::Mediate if socket_duplicate_table_full => {
+                write_all(b"deny surface=managed-descriptor-dup result=-");
+                write_u64(EMFILE as u64);
+                write_all(b" reason=descriptor-limit\n");
+                registers.orig_rax = u64::MAX;
+                task.awaiting_exit = true;
+                task.override_exit = true;
+                task.override_result = -EMFILE;
+                if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+                {
+                    native_fail(instance, pid, b"native socket alias limit denial failed");
                 }
             }
             Action::Mediate if proc_fd_host_path_len.is_some() => {
@@ -9914,6 +10210,12 @@ fn supervise_native(
             }
             Action::Mediate if mode == 3 && syscall == 32 => {
                 line(b"mediate surface=managed-descriptor-dup result=pending");
+                task.pending_socket_duplicate = native_socket_object_index(
+                    &descriptor_tables[task.descriptor_table],
+                    registers.rdi,
+                )
+                .map_or(-1, |object| object as i16 + 1);
+                task.pending_socket_cloexec = false;
                 task.pending_console_duplicate = if native_fd_contains(
                     &descriptor_tables[task.descriptor_table].console_fds,
                     registers.rdi as u32 as usize,
@@ -9930,6 +10232,12 @@ fn supervise_native(
             }
             Action::Mediate if mode == 3 && syscall == 292 && registers.rdx & !0x8_0000 == 0 => {
                 line(b"mediate surface=managed-descriptor-dup result=pending");
+                task.pending_socket_duplicate = native_socket_object_index(
+                    &descriptor_tables[task.descriptor_table],
+                    registers.rdi,
+                )
+                .map_or(-1, |object| object as i16 + 1);
+                task.pending_socket_cloexec = registers.rdx & O_CLOEXEC != 0;
                 task.pending_console_duplicate = if native_fd_contains(
                     &descriptor_tables[task.descriptor_table].console_fds,
                     registers.rdi as u32 as usize,
@@ -9960,6 +10268,16 @@ fn supervise_native(
                 line(b"mediate surface=managed-descriptor-dup result=pending");
                 // dup2 onto the same descriptor changes nothing, not even
                 // its close-on-exec flag.
+                task.pending_socket_duplicate = if registers.rdi as u32 == registers.rsi as u32 {
+                    0
+                } else {
+                    native_socket_object_index(
+                        &descriptor_tables[task.descriptor_table],
+                        registers.rdi,
+                    )
+                    .map_or(-1, |object| object as i16 + 1)
+                };
+                task.pending_socket_cloexec = false;
                 task.pending_console_duplicate = if registers.rdi as u32 == registers.rsi as u32 {
                     0
                 } else if native_fd_contains(
@@ -9982,6 +10300,12 @@ fn supervise_native(
                     && matches!(registers.rsi as u32 as u64, F_DUPFD | F_DUPFD_CLOEXEC) =>
             {
                 line(b"mediate surface=managed-descriptor-fcntl-dup result=pending");
+                task.pending_socket_duplicate = native_socket_object_index(
+                    &descriptor_tables[task.descriptor_table],
+                    registers.rdi,
+                )
+                .map_or(-1, |object| object as i16 + 1);
+                task.pending_socket_cloexec = registers.rsi as u32 as u64 == F_DUPFD_CLOEXEC;
                 task.pending_console_duplicate = if native_fd_contains(
                     &descriptor_tables[task.descriptor_table].console_fds,
                     registers.rdi as u32 as usize,
@@ -10441,8 +10765,13 @@ fn supervise_native(
                 if cgroup_procs_path {
                     task.pending_cgroup_procs_open = true;
                 }
-                if mode == 3 && syscall == 47 {
+                if mode == 3 && matches!(syscall, 47 | 299) {
                     task.pending_recvmsg = registers.rsi as usize;
+                    task.pending_recvmsg_count = if syscall == 47 {
+                        1
+                    } else {
+                        registers.rdx as u32
+                    };
                 }
                 if mode == 3 && syscall == 55 && registers.rsi == 1 && registers.rdx == 17 {
                     task.pending_peercred = registers.r10 as usize;
@@ -10814,6 +11143,7 @@ fn native_arguments_allowed(syscall: u64, registers: &UserRegs, mode: usize) -> 
     if mode == 3 {
         match syscall {
             ginux_core::SYS_PIDFD_OPEN => registers.rdi > 0 && registers.rsi == 0,
+            299 => registers.rdx <= 16,
             293 => registers.rdi != 0 && registers.rsi & !(0x8_0000 | 0x800) == 0,
             ginux_core::SYS_CLOSE_RANGE => true,
             452 => {
@@ -10947,22 +11277,218 @@ fn native_arguments_allowed(syscall: u64, registers: &UserRegs, mode: usize) -> 
     }
 }
 
-fn native_socket_protocol(task: &NativeSupervisorTask, fd: u64) -> u8 {
-    task.socket_fds
+fn native_socket_object_index(table: &NativeDescriptorTable, fd: u64) -> Option<usize> {
+    table
+        .socket_aliases
         .iter()
-        .find(|entry| entry.fd == fd as i64)
-        .map_or(0, |entry| entry.protocol)
+        .find(|alias| alias.fd == fd as u32 as i64)
+        .map(|alias| alias.object as usize)
 }
 
-fn native_socket_family(task: &NativeSupervisorTask, fd: u64) -> Option<u16> {
-    task.socket_fds
-        .iter()
-        .find(|entry| entry.fd == fd as i64)
-        .map(|entry| entry.address_family)
+fn native_socket_protocol(
+    table: &NativeDescriptorTable,
+    objects: &[NativeSocketObject; NATIVE_SOCKET_OBJECT_LIMIT],
+    fd: u64,
+) -> u8 {
+    native_socket_object_index(table, fd)
+        .and_then(|object| objects.get(object))
+        .filter(|object| object.in_use)
+        .map_or(0, |object| object.protocol)
 }
 
-fn native_socket_is_ip(task: &NativeSupervisorTask, fd: u64) -> bool {
-    native_socket_family(task, fd).is_some_and(|family| matches!(family, 2 | 10))
+fn native_socket_family(
+    table: &NativeDescriptorTable,
+    objects: &[NativeSocketObject; NATIVE_SOCKET_OBJECT_LIMIT],
+    fd: u64,
+) -> Option<u16> {
+    native_socket_object_index(table, fd)
+        .and_then(|object| objects.get(object))
+        .filter(|object| object.in_use)
+        .map(|object| object.address_family)
+}
+
+fn native_socket_is_ip(
+    table: &NativeDescriptorTable,
+    objects: &[NativeSocketObject; NATIVE_SOCKET_OBJECT_LIMIT],
+    fd: u64,
+) -> bool {
+    native_socket_family(table, objects, fd).is_some_and(|family| matches!(family, 2 | 10))
+}
+
+fn native_socket_retain(
+    objects: &mut [NativeSocketObject; NATIVE_SOCKET_OBJECT_LIMIT],
+    object: usize,
+) -> Option<()> {
+    let socket = objects.get_mut(object)?;
+    if !socket.in_use {
+        return None;
+    }
+    socket.references = socket.references.checked_add(1)?;
+    Some(())
+}
+
+fn native_socket_release(
+    objects: &mut [NativeSocketObject; NATIVE_SOCKET_OBJECT_LIMIT],
+    object: usize,
+) {
+    let Some(socket) = objects.get_mut(object).filter(|socket| socket.in_use) else {
+        return;
+    };
+    if socket.references > 1 {
+        socket.references -= 1;
+    } else {
+        *socket = EMPTY_SOCKET_OBJECT;
+    }
+}
+
+fn native_socket_remove_alias(
+    table: &mut NativeDescriptorTable,
+    objects: &mut [NativeSocketObject; NATIVE_SOCKET_OBJECT_LIMIT],
+    fd: u64,
+) {
+    if let Some(slot) = table
+        .socket_aliases
+        .iter_mut()
+        .find(|alias| alias.fd == fd as u32 as i64)
+    {
+        let object = slot.object as usize;
+        *slot = EMPTY_SOCKET_ALIAS;
+        native_socket_release(objects, object);
+    }
+}
+
+fn native_socket_insert_alias(
+    table: &mut NativeDescriptorTable,
+    objects: &mut [NativeSocketObject; NATIVE_SOCKET_OBJECT_LIMIT],
+    fd: u64,
+    object: usize,
+    close_on_exec: bool,
+) -> Option<()> {
+    native_socket_remove_alias(table, objects, fd);
+    let slot = table.socket_aliases.iter_mut().find(|alias| alias.fd < 0)?;
+    native_socket_retain(objects, object)?;
+    *slot = NativeSocketAlias {
+        fd: fd as u32 as i64,
+        object: u16::try_from(object).ok()?,
+        close_on_exec,
+    };
+    Some(())
+}
+
+fn native_socket_allocate(
+    table: &mut NativeDescriptorTable,
+    objects: &mut [NativeSocketObject; NATIVE_SOCKET_OBJECT_LIMIT],
+    fd: u64,
+    address_family: u16,
+    protocol: u8,
+    close_on_exec: bool,
+) -> Option<usize> {
+    let object = objects.iter().position(|object| !object.in_use)?;
+    objects[object] = NativeSocketObject {
+        in_use: true,
+        references: 0,
+        address_family,
+        protocol,
+        source_bound: false,
+        internal_port: 0,
+        external_port: 0,
+        netlink_sequences: [0; 4],
+        netlink_count: 0,
+    };
+    if native_socket_insert_alias(table, objects, fd, object, close_on_exec).is_none() {
+        objects[object] = EMPTY_SOCKET_OBJECT;
+        return None;
+    }
+    Some(object)
+}
+
+fn native_socket_retain_table(
+    table: &NativeDescriptorTable,
+    objects: &mut [NativeSocketObject; NATIVE_SOCKET_OBJECT_LIMIT],
+) -> Option<()> {
+    for (retained, alias) in table
+        .socket_aliases
+        .iter()
+        .filter(|alias| alias.fd >= 0)
+        .enumerate()
+    {
+        if native_socket_retain(objects, alias.object as usize).is_none() {
+            for rollback in table
+                .socket_aliases
+                .iter()
+                .filter(|alias| alias.fd >= 0)
+                .take(retained)
+            {
+                native_socket_release(objects, rollback.object as usize);
+            }
+            return None;
+        }
+    }
+    Some(())
+}
+
+fn native_socket_release_table(
+    table: &NativeDescriptorTable,
+    objects: &mut [NativeSocketObject; NATIVE_SOCKET_OBJECT_LIMIT],
+) {
+    for alias in table.socket_aliases.iter().filter(|alias| alias.fd >= 0) {
+        native_socket_release(objects, alias.object as usize);
+    }
+}
+
+fn native_socket_set_cloexec(table: &mut NativeDescriptorTable, fd: u64, close_on_exec: bool) {
+    if let Some(alias) = table
+        .socket_aliases
+        .iter_mut()
+        .find(|alias| alias.fd == fd as u32 as i64)
+    {
+        alias.close_on_exec = close_on_exec;
+    }
+}
+
+fn native_socket_exec(
+    table: &mut NativeDescriptorTable,
+    objects: &mut [NativeSocketObject; NATIVE_SOCKET_OBJECT_LIMIT],
+) {
+    for index in 0..table.socket_aliases.len() {
+        if table.socket_aliases[index].fd >= 0 && table.socket_aliases[index].close_on_exec {
+            let object = table.socket_aliases[index].object as usize;
+            table.socket_aliases[index] = EMPTY_SOCKET_ALIAS;
+            native_socket_release(objects, object);
+        }
+    }
+}
+
+fn native_socket_close_range(
+    table: &mut NativeDescriptorTable,
+    objects: &mut [NativeSocketObject; NATIVE_SOCKET_OBJECT_LIMIT],
+    first: u32,
+    last: u32,
+    close_on_exec: bool,
+) {
+    for index in 0..table.socket_aliases.len() {
+        let alias = table.socket_aliases[index];
+        if alias.fd >= i64::from(first) && alias.fd <= i64::from(last) {
+            if close_on_exec {
+                table.socket_aliases[index].close_on_exec = true;
+            } else {
+                table.socket_aliases[index] = EMPTY_SOCKET_ALIAS;
+                native_socket_release(objects, alias.object as usize);
+            }
+        }
+    }
+}
+
+fn native_scm_rights_cleanup_replay(cleanup: &NativeScmRightsCleanup, regs: &mut UserRegs) {
+    regs.orig_rax = SYS_CLOSE;
+    regs.rax = SYS_CLOSE;
+    regs.rdi = cleanup.fds[cleanup.current] as u32 as u64;
+    regs.rsi = 0;
+    regs.rdx = 0;
+    regs.r10 = 0;
+    regs.r8 = 0;
+    regs.r9 = 0;
+    regs.rip = cleanup.rip - 2;
 }
 
 fn native_bind_socket_source(pid: usize, fd: i64, source: [u8; 4]) -> bool {
@@ -11033,6 +11559,12 @@ fn native_unix_send_allowed(pid: usize, syscall: u64, registers: &UserRegs) -> b
         46 => {
             let mut header = [0u8; 16];
             if registers.rsi == 0 || !read_tracee_bytes(pid, registers.rsi as usize, &mut header) {
+                return false;
+            }
+            if !matches!(
+                native_network::sendmsg_has_scm_rights(pid, registers.rsi),
+                Ok(false)
+            ) {
                 return false;
             }
             let address = u64::from_ne_bytes(header[..8].try_into().unwrap());

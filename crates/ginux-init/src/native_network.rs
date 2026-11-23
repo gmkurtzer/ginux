@@ -15,6 +15,7 @@ const MAX_MESSAGES: usize = 16;
 const MAX_IOV: usize = 16;
 const MAX_CONTROL: usize = 4096;
 const MAX_SOCKADDR: usize = 128;
+pub const MAX_RECEIVED_RIGHTS: usize = 253;
 
 const SYS_SENDTO: u64 = 44;
 const SYS_SENDMSG: u64 = 46;
@@ -52,6 +53,30 @@ pub struct Pending {
 pub struct Buffer {
     bytes: [u8; SNAPSHOT_SIZE],
     used: usize,
+}
+
+#[derive(Clone, Copy)]
+pub struct ReceivedRights {
+    pub fds: [i32; MAX_RECEIVED_RIGHTS],
+    pub count: usize,
+}
+
+impl ReceivedRights {
+    const fn empty() -> Self {
+        Self {
+            fds: [-1; MAX_RECEIVED_RIGHTS],
+            count: 0,
+        }
+    }
+
+    fn push(&mut self, fd: i32) -> Result<(), i64> {
+        if fd < 0 || self.count == self.fds.len() {
+            return Err(-7);
+        }
+        self.fds[self.count] = fd;
+        self.count += 1;
+        Ok(())
+    }
 }
 
 impl Buffer {
@@ -419,6 +444,11 @@ fn snapshot_msghdr(
     } else {
         buffer.copy_from_tracee(pid, control_pointer, control_length, 8)?
     };
+    if control_length != 0
+        && ancillary_contains_scm_rights(&buffer.bytes[control..control + control_length])?
+    {
+        return Err(-1);
+    }
     let header = buffer.reserve(56, 8)?;
     let mut source_header = [0u8; 56];
     source_header.copy_from_slice(&buffer.bytes[source..source + 56]);
@@ -427,6 +457,143 @@ fn snapshot_msghdr(
     buffer.write_u64(header + 16, offset_address(base, iov_copy, iov_count * 16));
     buffer.write_u64(header + 32, offset_address(base, control, control_length));
     Ok((header, destination))
+}
+
+pub fn sendmsg_has_scm_rights(pid: usize, address: u64) -> Result<bool, i64> {
+    let mut buffer = Buffer::empty();
+    let header = buffer.copy_from_tracee(pid, address, 56, 8)?;
+    let control_pointer = buffer.read_u64(header + 32);
+    let control_length = buffer.read_u64(header + 40) as usize;
+    if control_length == 0 {
+        return Ok(false);
+    }
+    if control_length > MAX_CONTROL {
+        return Err(-7);
+    }
+    let control = buffer.copy_from_tracee(pid, control_pointer, control_length, 8)?;
+    ancillary_contains_scm_rights(&buffer.bytes[control..control + control_length])
+}
+
+pub fn sendmmsg_has_scm_rights(pid: usize, address: u64, count: u64) -> Result<bool, i64> {
+    if count > MAX_MESSAGES as u64 {
+        return Err(-EINVAL);
+    }
+    for index in 0..count {
+        let offset = index.checked_mul(64).ok_or(-EINVAL)?;
+        let message = address.checked_add(offset).ok_or(-EINVAL)?;
+        if sendmsg_has_scm_rights(pid, message)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+pub fn recvmsg_scm_rights(pid: usize, address: u64) -> Result<ReceivedRights, i64> {
+    let mut rights = ReceivedRights::empty();
+    append_received_rights(pid, address, &mut rights)?;
+    Ok(rights)
+}
+
+pub fn recvmmsg_scm_rights(pid: usize, address: u64, count: u64) -> Result<ReceivedRights, i64> {
+    if count > MAX_MESSAGES as u64 {
+        return Err(-EINVAL);
+    }
+    let mut rights = ReceivedRights::empty();
+    for index in 0..count {
+        let offset = index.checked_mul(64).ok_or(-EINVAL)?;
+        let message = address.checked_add(offset).ok_or(-EINVAL)?;
+        append_received_rights(pid, message, &mut rights)?;
+    }
+    Ok(rights)
+}
+
+fn append_received_rights(
+    pid: usize,
+    address: u64,
+    rights: &mut ReceivedRights,
+) -> Result<(), i64> {
+    let mut buffer = Buffer::empty();
+    let header = buffer.copy_from_tracee(pid, address, 56, 8)?;
+    let control_pointer = buffer.read_u64(header + 32);
+    let control_length = buffer.read_u64(header + 40) as usize;
+    if control_length == 0 {
+        return Ok(());
+    }
+    if control_length > MAX_CONTROL {
+        return Err(-7);
+    }
+    let control = buffer.copy_from_tracee(pid, control_pointer, control_length, 8)?;
+    append_ancillary_rights(&buffer.bytes[control..control + control_length], rights)
+}
+
+fn append_ancillary_rights(control: &[u8], rights: &mut ReceivedRights) -> Result<(), i64> {
+    let mut offset = 0usize;
+    while offset < control.len() {
+        if control.len() - offset < 16 {
+            return Err(-EINVAL);
+        }
+        let length = u64::from_ne_bytes(
+            control[offset..offset + 8]
+                .try_into()
+                .map_err(|_| -EINVAL)?,
+        ) as usize;
+        if length < 16 || length > control.len() - offset {
+            return Err(-EINVAL);
+        }
+        let level = i32::from_ne_bytes(
+            control[offset + 8..offset + 12]
+                .try_into()
+                .map_err(|_| -EINVAL)?,
+        );
+        let kind = i32::from_ne_bytes(
+            control[offset + 12..offset + 16]
+                .try_into()
+                .map_err(|_| -EINVAL)?,
+        );
+        if level == 1 && kind == 1 {
+            let payload = &control[offset + 16..offset + length];
+            if !payload.len().is_multiple_of(4) {
+                return Err(-EINVAL);
+            }
+            for encoded in payload.as_chunks::<4>().0 {
+                rights.push(i32::from_ne_bytes(*encoded))?;
+            }
+        }
+        offset = offset.checked_add((length + 7) & !7).ok_or(-EINVAL)?;
+    }
+    Ok(())
+}
+
+fn ancillary_contains_scm_rights(control: &[u8]) -> Result<bool, i64> {
+    let mut offset = 0usize;
+    while offset < control.len() {
+        if control.len() - offset < 16 {
+            return Err(-EINVAL);
+        }
+        let length = u64::from_ne_bytes(
+            control[offset..offset + 8]
+                .try_into()
+                .map_err(|_| -EINVAL)?,
+        ) as usize;
+        if length < 16 || length > control.len() - offset {
+            return Err(-EINVAL);
+        }
+        let level = i32::from_ne_bytes(
+            control[offset + 8..offset + 12]
+                .try_into()
+                .map_err(|_| -EINVAL)?,
+        );
+        let kind = i32::from_ne_bytes(
+            control[offset + 12..offset + 16]
+                .try_into()
+                .map_err(|_| -EINVAL)?,
+        );
+        if level == 1 && kind == 1 {
+            return Ok(true);
+        }
+        offset = offset.checked_add((length + 7) & !7).ok_or(-EINVAL)?;
+    }
+    Ok(false)
 }
 
 fn snapshot_loopback_netlink_msghdr(

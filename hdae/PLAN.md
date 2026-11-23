@@ -154,6 +154,11 @@ replace it.
     opt-in while profiling and optimizing it against a stable, matched workload
     matrix that requires every 1/2/4-thread row to remain within 5% of native
     without weakening accepted security properties.
+47. **Shared-network socket alias authority**: move managed socket aliases into
+    the authoritative native descriptor table, share one socket object across
+    aliases and forked table copies, preserve policy and lifecycle semantics
+    through every supported duplication path, and fail closed on unowned
+    `SCM_RIGHTS` descriptor transfer.
 
 Gates are stored in `hdae/gates-todo/` and remain there until they pass and are
 accepted at their checkpoint. Closed gate records move unchanged to
@@ -233,6 +238,8 @@ define their expected result.
   and verified by Gates 38 through 42.
 - Guarded allocator performance readiness is independently judged by Gate 43;
   passing it does not by itself authorize changing the default allocator.
+- Shared-network socket policy remains attached to the underlying socket object
+  across descriptor aliases and table sharing through Gate 47.
 
 ## Deferred roadmap
 

@@ -427,6 +427,242 @@ long native_fixture_main(const word *stack)
                      call3(46, sender, (word)&connected_message, 0));
         return 0;
     }
+    case 'A': {
+        /* Every descriptor alias of a managed socket must retain the same
+         * network authority. The exec at the end runs this scenario again
+         * with "alias-exec" and verifies descriptor-local CLOEXEC state. */
+        struct address { unsigned short family, port; unsigned address; char zero[8]; };
+        struct iovec { void *base; word length; };
+        struct message {
+            void *name; unsigned name_length, name_padding;
+            struct iovec *iov; word iov_count;
+            void *control; word control_length;
+            unsigned flags, flags_padding;
+        };
+        struct multimessage { struct message message; unsigned length, padding; };
+        const char *expected = "alias-exec";
+        const char *argument = stack[0] > 1 ? (const char *)stack[2] : "";
+        while (*expected && *argument == *expected) ++argument, ++expected;
+        static struct address allowed = {2, 0xa146, 0x0100007f, {0}}; /* 18081 */
+        static struct address denied = {2, 0xa246, 0x0100007f, {0}}; /* 18082 */
+        char payload = 'a';
+        if (*expected == 0 && *argument == 0) {
+            print_result("GINUX_FIXTURE: socket-exec-dropped=",
+                         call3(72, 110, 1 /* F_GETFD */, 0) == -9
+                         && call3(72, 111, 1, 0) == -9
+                         && call3(72, 112, 1, 0) == -9
+                         && call3(72, 113, 1, 0) == -9
+                         && call3(72, 114, 1, 0) == -9);
+            print_result("GINUX_FIXTURE: socket-exec-kept=",
+                         call3(72, 115, 1, 0) == 0 && call3(72, 116, 1, 0) == 0);
+            print_result("GINUX_FIXTURE: socket-exec-policy=",
+                         call6(44, 116, (word)&payload, 1, 0,
+                               (word)&denied, sizeof denied));
+            return 0;
+        }
+
+        long sender = call3(41, 2, 2, 0);
+        if (sender < 0) return 92;
+        long duplicate = call3(32, sender, 0, 0);
+        long duplicate2 = call3(33, sender, 100, 0);
+        long duplicate3 = call3(292, sender, 101, 0);
+        long fcntl_duplicate = call3(72, sender, 0 /* F_DUPFD */, 102);
+        long fcntl_cloexec = call3(72, sender, 1030 /* F_DUPFD_CLOEXEC */, 103);
+        print_result("GINUX_FIXTURE: socket-alias-created=",
+                     duplicate >= 0 && duplicate2 == 100 && duplicate3 == 101
+                     && fcntl_duplicate >= 102 && fcntl_cloexec >= 103);
+        print_result("GINUX_FIXTURE: socket-dup-denied=",
+                     call6(44, duplicate, (word)&payload, 1, 0,
+                           (word)&denied, sizeof denied));
+        print_result("GINUX_FIXTURE: socket-dup2-denied=",
+                     call6(44, duplicate2, (word)&payload, 1, 0,
+                           (word)&denied, sizeof denied));
+        print_result("GINUX_FIXTURE: socket-dup3-denied=",
+                     call6(44, duplicate3, (word)&payload, 1, 0,
+                           (word)&denied, sizeof denied));
+        print_result("GINUX_FIXTURE: socket-fcntl-denied=",
+                     call6(44, fcntl_duplicate, (word)&payload, 1, 0,
+                           (word)&denied, sizeof denied));
+        print_result("GINUX_FIXTURE: socket-fcntl-cloexec-denied=",
+                     call6(44, fcntl_cloexec, (word)&payload, 1, 0,
+                           (word)&denied, sizeof denied));
+        print_result("GINUX_FIXTURE: socket-alias-allowed=",
+                     call6(44, duplicate, (word)&payload, 1, 0,
+                           (word)&allowed, sizeof allowed));
+        print_result("GINUX_FIXTURE: socket-connect=",
+                     call3(42, sender, (word)&allowed, sizeof allowed));
+        print_result("GINUX_FIXTURE: socket-connect-alias=",
+                     call3(42, duplicate, (word)&allowed, sizeof allowed));
+        print_result("GINUX_FIXTURE: socket-connected-alias=",
+                     call6(44, duplicate, (word)&payload, 1, 0, 0, 0));
+
+        long translated = call3(41, 2, 2, 0);
+        long translated_alias = translated >= 0 ? call3(32, translated, 0, 0) : -1;
+        struct address observed = {0};
+        unsigned observed_length = sizeof observed;
+        print_result("GINUX_FIXTURE: socket-translated-bind=",
+                     translated_alias >= 0
+                     && call3(49, translated, (word)&allowed, sizeof allowed) == 0);
+        print_result("GINUX_FIXTURE: socket-translated-alias=",
+                     call3(51, translated_alias, (word)&observed,
+                           (word)&observed_length) == 0
+                     && observed.port == allowed.port);
+
+        long route = call3(41, 16 /* AF_NETLINK */, 3 /* SOCK_RAW */, 0);
+        long route_alias = route >= 0 ? call3(32, route, 0, 0) : -1;
+        print_result("GINUX_FIXTURE: netlink-alias-fail-closed=",
+                     route == -97 && route_alias == -1);
+
+        /* Failed descriptor mutations do not change the surviving alias. */
+        print_result("GINUX_FIXTURE: socket-dup3-invalid=",
+                     call3(292, duplicate, 105, 1));
+        print_result("GINUX_FIXTURE: socket-after-failed-dup=",
+                     call6(44, duplicate, (word)&payload, 1, 0,
+                           (word)&denied, sizeof denied));
+        call3(33, duplicate, 106, 0);
+        print_result("GINUX_FIXTURE: socket-dup2-invalid=", call3(33, -1, 106, 0));
+        print_result("GINUX_FIXTURE: socket-after-failed-replace=",
+                     call6(44, 106, (word)&payload, 1, 0,
+                           (word)&denied, sizeof denied));
+        print_result("GINUX_FIXTURE: socket-close-range-invalid=",
+                     call3(436, duplicate, duplicate, 8));
+        print_result("GINUX_FIXTURE: socket-after-failed-close-range=",
+                     call6(44, duplicate, (word)&payload, 1, 0,
+                           (word)&denied, sizeof denied));
+        print_result("GINUX_FIXTURE: socket-close-invalid=", call3(3, -1, 0, 0));
+        print_result("GINUX_FIXTURE: socket-after-failed-close=",
+                     call6(44, duplicate, (word)&payload, 1, 0,
+                           (word)&denied, sizeof denied));
+
+        /* A non-sharing fork receives a descriptor-table copy. */
+        int status = 0;
+        call3(33, duplicate, 108, 0);
+        long pid = call3(57, 0, 0, 0);
+        if (pid == 0) call3(231, call3(3, 108, 0, 0) == 0 ? 0 : 1, 0, 0);
+        if (pid > 0) call4(61, pid, (word)&status, 0, 0);
+        print_result("GINUX_FIXTURE: socket-private-fork=",
+                     status == 0 && call6(44, 108, (word)&payload, 1, 0,
+                                           (word)&denied, sizeof denied) == -1);
+
+        /* CLONE_FILES shares one authoritative table: closing in the child
+         * invalidates the parent's alias too. */
+        call3(33, duplicate, 107, 0);
+        pid = call5(56, 0x400 /* CLONE_FILES */ | 17, 0, 0, 0, 0);
+        if (pid == 0) call3(231, call3(3, 107, 0, 0) == 0 ? 0 : 1, 0, 0);
+        if (pid > 0) call4(61, pid, (word)&status, 0, 0);
+        print_result("GINUX_FIXTURE: socket-shared-close=",
+                     status == 0 && call6(44, 107, (word)&payload, 1, 0,
+                                           (word)&denied, sizeof denied) == -9);
+
+        /* Replacement, close and close_range remove only their aliases. */
+        call3(33, fd, duplicate2, 0);
+        print_result("GINUX_FIXTURE: socket-replaced=",
+                     call6(44, duplicate2, (word)&payload, 1, 0,
+                           (word)&denied, sizeof denied) == -88);
+        call3(3, duplicate3, 0, 0);
+        print_result("GINUX_FIXTURE: socket-closed=",
+                     call6(44, duplicate3, (word)&payload, 1, 0,
+                           (word)&denied, sizeof denied) == -9);
+        call3(436, fcntl_duplicate, fcntl_duplicate, 0);
+        print_result("GINUX_FIXTURE: socket-close-range=",
+                     call6(44, fcntl_duplicate, (word)&payload, 1, 0,
+                           (word)&denied, sizeof denied) == -9);
+        print_result("GINUX_FIXTURE: socket-survivor-denied=",
+                     call6(44, duplicate, (word)&payload, 1, 0,
+                           (word)&denied, sizeof denied));
+
+        /* SCM_RIGHTS is rejected before the host can enqueue the message. */
+        struct control { word length; int level, kind, passed, padding; };
+        struct iovec iov = {&payload, 1};
+        struct control control = {20, 1 /* SOL_SOCKET */, 1 /* SCM_RIGHTS */,
+                                  (int)fd, 0};
+        struct message message = {0, 0, 0, &iov, 1,
+                                  &control, sizeof control, 0, 0};
+        int pair[2] = {-1, -1};
+        if (call4(53, 1, 2 | 04000 /* SOCK_NONBLOCK */, 0, (word)pair) < 0) return 93;
+        print_result("GINUX_FIXTURE: scm-rights-denied=",
+                     call3(46, pair[0], (word)&message, 0));
+        struct multimessage multiple = {message, 0, 0};
+        print_result("GINUX_FIXTURE: scm-rights-multiple-denied=",
+                     call4(307, pair[0], (word)&multiple, 1, 0));
+        struct message received = {0, 0, 0, &iov, 1, &control, sizeof control, 0, 0};
+        print_result("GINUX_FIXTURE: scm-rights-not-received=",
+                     call3(47, pair[1], (word)&received, 0) == -11);
+
+        /* Capacity is checked before the host creates an untracked alias. */
+        long capacity = 0;
+        int capacity_count = 0;
+        while (capacity_count < 80
+               && (capacity = call3(72, duplicate, 0 /* F_DUPFD */, 200)) >= 0)
+            ++capacity_count;
+        print_result("GINUX_FIXTURE: socket-alias-capacity=",
+                     capacity == -24 /* EMFILE */ && capacity_count > 0);
+        print_result("GINUX_FIXTURE: socket-after-capacity=",
+                     call6(44, duplicate, (word)&payload, 1, 0,
+                           (word)&denied, sizeof denied));
+        call3(436, 200, 1000, 0);
+
+        /* CLOEXEC belongs to aliases, not to their shared socket object. */
+        call3(292, duplicate, 110, 0x80000 /* O_CLOEXEC */);
+        call3(72, duplicate, 1030 /* F_DUPFD_CLOEXEC */, 111);
+        call3(72, call3(72, duplicate, 0 /* F_DUPFD */, 112),
+              2 /* F_SETFD */, 1 /* FD_CLOEXEC */);
+        call3(16, call3(72, duplicate, 0, 113), 0x5451 /* FIOCLEX */, 0);
+        call3(72, duplicate, 0, 114);
+        call3(436, 114, 114, 4 /* CLOSE_RANGE_CLOEXEC */);
+        call3(292, duplicate, 115, 0x80000);
+        call3(16, 115, 0x5450 /* FIONCLEX */, 0);
+        call3(33, duplicate, 116, 0);
+        word exec_argv[] = {(word)"/usr/bin/bash", (word)"alias-exec", 0};
+        word exec_env[] = {0};
+        print_result("GINUX_FIXTURE: socket-exec=",
+                     call3(59, (word)"/usr/bin/bash", (word)exec_argv, (word)exec_env));
+        return 0;
+    }
+    case 'I': {
+        /* A host peer may attach descriptors to an otherwise ordinary Unix
+         * stream. Ginux must reclaim every installed descriptor and report
+         * EPERM before this task resumes after recvmsg or recvmmsg. */
+        struct local_address { unsigned short family; char path[108]; };
+        struct iovec { void *base; word length; };
+        struct message {
+            void *name; unsigned name_length, name_padding;
+            struct iovec *iov; word iov_count;
+            void *control; word control_length;
+            unsigned flags, flags_padding;
+        };
+        struct multimessage { struct message message; unsigned length, padding; };
+        static struct local_address server = {1, "/tmp/inbound-rights.sock"};
+        char payload = 0;
+        struct iovec iov = {&payload, 1};
+        word control[16] = {0};
+        struct message message = {0, 0, 0, &iov, 1,
+                                  control, sizeof control, 0, 0};
+        long receiver = call3(41, 1 /* AF_UNIX */, 1 /* SOCK_STREAM */, 0);
+        if (receiver < 0
+            || call3(42, receiver, (word)&server, sizeof server) < 0
+            || call3(1, receiver, (word)"1", 1) != 1) return 94;
+        long received = call3(47, receiver, (word)&message, 0);
+        int *passed = (int *)((char *)control + 16);
+        print_result("GINUX_FIXTURE: inbound-rights-recvmsg=", received);
+        print_result("GINUX_FIXTURE: inbound-rights-recvmsg-closed=",
+                     received == -1 && message.control_length >= 24
+                     && call3(72, passed[0], 1 /* F_GETFD */, 0) == -9
+                     && call3(72, passed[1], 1, 0) == -9);
+
+        for (word index = 0; index < sizeof control / sizeof control[0]; ++index)
+            control[index] = 0;
+        message.control_length = sizeof control;
+        struct multimessage multiple = {message, 0, 0};
+        if (call3(1, receiver, (word)"2", 1) != 1) return 95;
+        received = call5(299, receiver, (word)&multiple, 1, 0, 0);
+        passed = (int *)((char *)control + 16);
+        print_result("GINUX_FIXTURE: inbound-rights-recvmmsg=", received);
+        print_result("GINUX_FIXTURE: inbound-rights-recvmmsg-closed=",
+                     received == -1 && multiple.message.control_length >= 24
+                     && call3(72, passed[0], 1 /* F_GETFD */, 0) == -9);
+        return 0;
+    }
     case 'W': {
         struct local_address { unsigned short family; char path[108]; };
         struct local_address abstract = {1, {0, 'g', 'i', 'n', 'u', 'x'}};
@@ -1040,6 +1276,7 @@ long native_fixture_main(const word *stack)
         long first = native_gated_fcntl(thread, first_stack + 16384, &lock);
         long second = native_gated_dup(thread, second_stack + 16384, console);
         print_result("GINUX_FIXTURE: barrier-threads=", first > 0 && second > 0);
+        print_result("GINUX_FIXTURE: barrier-start=", 1);
         descriptor_mutation_start = 1;
         while (!descriptor_mutation_entered) __asm__ volatile("pause");
         /* Give the first thread time to reach the blocked host fcntl before
