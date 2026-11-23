@@ -686,4 +686,37 @@ mod tests {
         network.close();
         assert_eq!(network.send(b"after-close"), Err(DeviceError::Closed));
     }
+
+    #[test]
+    fn raw_index_is_invalid_descriptor() {
+        let mut registry: DeviceRegistry<4, 4> = DeviceRegistry::new();
+        registry
+            .assign(1, 10, DeviceName::new(b"null").unwrap(), DeviceKind::Null)
+            .unwrap();
+        let _fd = registry.open(1, b"null").unwrap();
+        assert_eq!(
+            registry.write(1, 0, b"x"),
+            Err(DeviceError::InvalidDescriptor)
+        );
+        let mut bytes = [0u8; 4];
+        assert_eq!(
+            registry.read(1, 0, &mut bytes),
+            Err(DeviceError::InvalidDescriptor)
+        );
+    }
+
+    #[test]
+    fn close_invalidates_and_frees_slot() {
+        let mut registry: DeviceRegistry<4, 4> = DeviceRegistry::new();
+        registry
+            .assign(1, 10, DeviceName::new(b"null").unwrap(), DeviceKind::Null)
+            .unwrap();
+        let fd = registry.open(1, b"null").unwrap();
+        assert_eq!(registry.close(1, fd), Ok(()));
+        assert_eq!(
+            registry.write(1, fd, b"x"),
+            Err(DeviceError::InvalidDescriptor)
+        );
+        assert_eq!(registry.open(1, b"null").unwrap(), fd);
+    }
 }
