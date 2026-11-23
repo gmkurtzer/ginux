@@ -663,6 +663,32 @@ long native_fixture_main(const word *stack)
                      && call3(72, passed[0], 1 /* F_GETFD */, 0) == -9);
         return 0;
     }
+    case 'U': {
+        /* The outer regression mutates this message after Ginux snapshots it.
+         * The host must still see the original pathname and payload. */
+        struct local_address { unsigned short family; char path[108]; };
+        struct iovec { void *base; word length; };
+        struct message {
+            void *name; unsigned name_length, name_padding;
+            struct iovec *iov; word iov_count;
+            void *control; word control_length;
+            unsigned flags, flags_padding;
+        };
+        static struct local_address destination = {1, "/tmp/unix-snap-a.sock"};
+        static char payload = 'A';
+        struct iovec iov = {&payload, 1};
+        struct message message = {&destination, sizeof destination, 0, &iov, 1,
+                                  0, 0, 0, 0};
+        long sender = call3(41, 1 /* AF_UNIX */, 2 /* SOCK_DGRAM */, 0);
+        if (sender < 0) return 96;
+        print_result("GINUX_FIXTURE: unix-race-address=", (word)&destination);
+        print_result("GINUX_FIXTURE: unix-race-payload=", (word)&payload);
+        print_result("GINUX_FIXTURE: unix-race-send=",
+                     call3(46, sender, (word)&message, 0));
+        print_result("GINUX_FIXTURE: unix-race-mutated=",
+                     payload == 'B' && destination.path[15] == 'b');
+        return 0;
+    }
     case 'W': {
         struct local_address { unsigned short family; char path[108]; };
         struct local_address abstract = {1, {0, 'g', 'i', 'n', 'u', 'x'}};

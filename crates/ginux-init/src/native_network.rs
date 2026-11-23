@@ -5,7 +5,7 @@
 //! syscall consume only that snapshot.  sendmmsg is replayed as bounded
 //! sendmsg calls because Linux writes `msg_len` into the caller's array.
 
-use crate::supervisor::{poke_tracee_bytes, syscall6, UserRegs, EFAULT, EINVAL};
+use crate::supervisor::{poke_tracee_bytes, syscall6, UserRegs, EFAULT, EINVAL, EPERM};
 
 const BASE: u64 = 0x6100_0000_0000;
 const SNAPSHOT_SIZE: usize = 16 * 1024;
@@ -32,6 +32,12 @@ pub enum Phase {
 #[derive(Clone, Copy)]
 pub struct Destination {
     pub port: u16,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AddressKind {
+    Internet,
+    UnixPath,
 }
 
 #[derive(Clone, Copy)]
@@ -179,6 +185,25 @@ impl Pending {
         regs: &UserRegs,
         buffer: &mut Buffer,
     ) -> Result<Self, i64> {
+        Self::snapshot_for(pid, slot, regs, buffer, AddressKind::Internet)
+    }
+
+    pub fn snapshot_unix(
+        pid: usize,
+        slot: usize,
+        regs: &UserRegs,
+        buffer: &mut Buffer,
+    ) -> Result<Self, i64> {
+        Self::snapshot_for(pid, slot, regs, buffer, AddressKind::UnixPath)
+    }
+
+    fn snapshot_for(
+        pid: usize,
+        slot: usize,
+        regs: &UserRegs,
+        buffer: &mut Buffer,
+        address_kind: AddressKind,
+    ) -> Result<Self, i64> {
         buffer.reset();
         let mut pending = Self {
             phase: Phase::Map,
@@ -189,9 +214,9 @@ impl Pending {
             ..Self::empty()
         };
         match regs.orig_rax {
-            SYS_SENDTO => pending.snapshot_sendto(pid, regs, buffer)?,
-            SYS_SENDMSG => pending.snapshot_sendmsg(pid, regs, buffer)?,
-            SYS_SENDMMSG => pending.snapshot_sendmmsg(pid, regs, buffer)?,
+            SYS_SENDTO => pending.snapshot_sendto(pid, regs, buffer, address_kind)?,
+            SYS_SENDMSG => pending.snapshot_sendmsg(pid, regs, buffer, address_kind)?,
+            SYS_SENDMMSG => pending.snapshot_sendmmsg(pid, regs, buffer, address_kind)?,
             _ => return Err(-EINVAL),
         }
         Ok(pending)
@@ -256,9 +281,11 @@ impl Pending {
         pid: usize,
         regs: &UserRegs,
         buffer: &mut Buffer,
+        address_kind: AddressKind,
     ) -> Result<(), i64> {
         let payload = buffer.copy_from_tracee(pid, regs.rsi, regs.rdx as usize, 8)?;
-        let (name, destination) = snapshot_destination(pid, regs.r8, regs.r9, buffer)?;
+        let (name, destination) =
+            snapshot_destination(pid, regs.r8, regs.r9, buffer, address_kind)?;
         self.message_count = 1;
         self.destinations[0] = destination;
         self.replay[0] = [
@@ -277,8 +304,10 @@ impl Pending {
         pid: usize,
         regs: &UserRegs,
         buffer: &mut Buffer,
+        address_kind: AddressKind,
     ) -> Result<(), i64> {
-        let (header, destination) = snapshot_msghdr(pid, regs.rsi, buffer, self.address)?;
+        let (header, destination) =
+            snapshot_msghdr(pid, regs.rsi, buffer, self.address, address_kind)?;
         self.message_count = 1;
         self.destinations[0] = destination;
         self.replay[0] = [regs.rdi, self.address + header as u64, regs.rdx, 0, 0, 0];
@@ -290,6 +319,7 @@ impl Pending {
         pid: usize,
         regs: &UserRegs,
         buffer: &mut Buffer,
+        address_kind: AddressKind,
     ) -> Result<(), i64> {
         let count = regs.rdx as usize;
         if count == 0 || count > MAX_MESSAGES || regs.rsi == 0 {
@@ -298,7 +328,8 @@ impl Pending {
         self.message_count = count;
         for index in 0..count {
             let original = regs.rsi.checked_add((index * 64) as u64).ok_or(-EFAULT)?;
-            let (header, destination) = snapshot_msghdr(pid, original, buffer, self.address)?;
+            let (header, destination) =
+                snapshot_msghdr(pid, original, buffer, self.address, address_kind)?;
             self.destinations[index] = destination;
             self.replay[index] = [regs.rdi, self.address + header as u64, regs.r10, 0, 0, 0];
             self.message_output[index] = original + 56;
@@ -410,6 +441,7 @@ fn snapshot_msghdr(
     address: u64,
     buffer: &mut Buffer,
     base: u64,
+    address_kind: AddressKind,
 ) -> Result<(usize, Option<Destination>), i64> {
     let source = buffer.copy_from_tracee(pid, address, 56, 8)?;
     let name_pointer = buffer.read_u64(source);
@@ -421,7 +453,8 @@ fn snapshot_msghdr(
     if iov_count > MAX_IOV || control_length > MAX_CONTROL {
         return Err(-7);
     }
-    let (name, destination) = snapshot_destination(pid, name_pointer, name_length, buffer)?;
+    let (name, destination) =
+        snapshot_destination(pid, name_pointer, name_length, buffer, address_kind)?;
     let iov_source = if iov_count == 0 {
         0
     } else {
@@ -791,16 +824,34 @@ fn snapshot_destination(
     address: u64,
     length: u64,
     buffer: &mut Buffer,
+    address_kind: AddressKind,
 ) -> Result<(usize, Option<Destination>), i64> {
     if address == 0 && length == 0 {
         return Ok((0, None));
     }
-    if address == 0 || length < 4 || length as usize > MAX_SOCKADDR {
+    if address == 0 || length as usize > MAX_SOCKADDR {
+        return Err(-EINVAL);
+    }
+    let minimum = match address_kind {
+        AddressKind::Internet => 4,
+        AddressKind::UnixPath => 3,
+    };
+    if length < minimum {
         return Err(-EINVAL);
     }
     let offset = buffer.copy_from_tracee(pid, address, length as usize, 8)?;
+    let family = u16::from_ne_bytes(
+        buffer.bytes[offset..offset + 2]
+            .try_into()
+            .map_err(|_| -EINVAL)?,
+    );
+    if address_kind == AddressKind::UnixPath {
+        if family != 1 || buffer.bytes[offset + 2] == 0 {
+            return Err(-EPERM);
+        }
+        return Ok((offset, None));
+    }
     let word = buffer.read_u64(offset);
-    let family = word & 0xffff;
     let required = match family {
         2 => 16,
         10 => 28,
