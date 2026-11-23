@@ -29,6 +29,9 @@ sharing a Linux descriptor table.
 - Deny `SCM_RIGHTS` descriptor transfer before host effect until Ginux has a
   separately reviewed descriptor-import design. Passing a managed socket
   through ancillary data must never create an unclassified alias.
+- Reject inbound `SCM_RIGHTS` before the receiving task resumes: close every
+  host descriptor installed by `recvmsg` or `recvmmsg`, return `EPERM`, and
+  fail the instance closed if the result cannot be parsed or reclaimed.
 - Apply descriptor-table metadata changes only after the host operation's
   Linux semantics establish a mutation, while retaining the Gate 30 mutation
   barrier. Failed operations leave state unchanged except that Linux may
@@ -69,6 +72,10 @@ sharing a Linux descriptor table.
 - [x] Pushed the signed implementation and opened reciprocal issue-linked pull
       request #308.
 - [x] Obtained passing PR CI on the implementation and delivery head.
+- [x] Close and reject inbound `SCM_RIGHTS` descriptors before userspace can
+      observe or use them.
+- [x] Reran focused and aggregate local verification after the inbound fix.
+- [ ] Obtain passing exact-head PR verification after the inbound fix.
 - [ ] Obtain human security-checkpoint review.
 
 ## Acceptance criteria
@@ -81,8 +88,9 @@ sharing a Linux descriptor table.
   ports; AF_NETLINK remains fail-closed at creation.
 - AF_NETLINK creation remains fail-closed, and unsupported non-INET aliases
   cannot bypass their bounded validators or fail-closed paths.
-- `SCM_RIGHTS` transfer is denied before host effect and cannot create an
-  unclassified descriptor.
+- Outbound `SCM_RIGHTS` transfer is denied before host effect. Inbound
+  `SCM_RIGHTS` descriptors are closed before the receiving task resumes, the
+  call returns `EPERM`, and no unclassified descriptor survives.
 - `CLONE_FILES` tasks observe one authoritative socket table; a non-sharing
   fork receives a consistent copy.
 - Replacement, close, close-range, and exec remove exactly the affected alias
@@ -111,7 +119,9 @@ sharing a Linux descriptor table.
   `F_DUPFD_CLOEXEC`, `close_range(CLOSE_RANGE_CLOEXEC)`, failed-operation, and
   deterministic mutation-barrier cases.
 - Add an ancillary-data fixture that attempts `SCM_RIGHTS`; expect `EPERM`, no
-  receiver-visible descriptor, and no host-side transfer.
+  receiver-visible descriptor, and no host-side transfer. Drive inbound rights
+  from a host-side Unix socket for both `recvmsg` and `recvmmsg`; expect every
+  installed descriptor to be closed before the tracee resumes.
 - `make check` -> formatting and strict lint pass.
 - `make test-unit` -> all component tests pass.
 - `sudo make test-native-supervision` -> focused socket-alias tests pass on
@@ -143,6 +153,15 @@ sharing a Linux descriptor table.
   virtual-kernel regressions.
 - Pull request #308 CI passed `changes`, `launch-integration`, and
   `static-and-unit` on implementation and delivery head `e569089e`.
+- The Rocky host-driven native regression passed descriptors from an external
+  Unix-stream peer: `recvmsg` installed two descriptors and `recvmmsg`
+  installed one. Ginux closed all three before the tracee resumed, returned
+  `EPERM` from both calls, and retained all existing socket-alias, credential,
+  clone, and network behavior.
+- Fresh `make check`, `make test-unit`, `make test-contract`, `make
+  test-security`, and aggregate `make test` passed after inbound rejection was
+  added. The security run also passed all nine bounded fuzz targets and its
+  native VFS, contract-runtime, device, and virtual-kernel QEMU checks.
 
 ## Decisions and limitations
 
@@ -152,6 +171,11 @@ sharing a Linux descriptor table.
   descriptor-table copies still reference the same open file description.
 - `SCM_RIGHTS` is fail-closed for this gate; supporting imported descriptors
   requires a future explicit authority and lifecycle design.
+- Inbound receive calls hold the authoritative descriptor-table mutation
+  barrier until every returned descriptor is closed. The receiver sees
+  `EPERM` only after cleanup. Malformed ancillary results, interruption during
+  cleanup, and more than the bounded 253 collected descriptors fail the whole
+  instance closed so no unclassified descriptor survives.
 - Malformed ancillary data retains its ordinary kernel or bounded-snapshot
   error; only a positively identified `SCM_RIGHTS` transfer is rewritten to
   `EPERM`, avoiding unrelated errno changes.
@@ -171,7 +195,8 @@ sharing a Linux descriptor table.
   deterministic regressions; evidence and reciprocal links.
 - Actual commits: `c973279f` (socket-object authority and lifecycle),
   `7563ebcc` (deterministic alias and ancillary regressions), `4cda05da`
-  (Linux close-result bookkeeping and regression); subsequent signed
+  (Linux close-result bookkeeping and regression), and `8dd928ab` (inbound
+  descriptor reclamation and host-driven regressions); subsequent signed
   documentation commits record local evidence, pull-request delivery, and CI.
 
 ## Review policy and outcome
@@ -180,4 +205,5 @@ Automatic implementation and pull-request delivery are authorized by the
 repository's scheduled proactive-remediation policy. Keep Gate 47 in
 `gates-todo/` as a security checkpoint pending human review; never merge it
 automatically through the HDAE implementation loop. Local technical evidence
-passes and pull-request CI is green; human acceptance remains pending.
+passes after the inbound fix. Exact-head pull-request CI and human acceptance
+remain pending.

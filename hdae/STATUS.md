@@ -4,8 +4,9 @@
 
 ### Gate 47 shared-network socket alias authority
 
-- Gate 47 is technically passed locally and is being delivered from
-  `hdae/network-socket-alias-policy` against `main` for human review.
+- Gate 47 is technically passed locally on
+  `hdae/network-socket-alias-policy` after adding the human-required inbound
+  `SCM_RIGHTS` closure to pull request #308.
 - Pull request https://github.com/gmkurtzer/ginux/pull/308 contains the signed
   implementation and references source issue #297 without closing it.
 - The source is issue #297. The defect allows `dup`, `dup2`, and `F_DUPFD`
@@ -13,22 +14,26 @@
 - The revised gate requires one supervisor-owned socket object shared across
   descriptor aliases and ordinary fork copies, descriptor-local close-on-exec
   state, Gate 30 mutation-barrier atomicity, and success-only bookkeeping.
-- `SCM_RIGHTS` is explicitly denied before host effect until Ginux has a
-  separately reviewed descriptor-import authority model.
+- Outbound `SCM_RIGHTS` is denied before host effect. Inbound `recvmsg` and
+  `recvmmsg` now hold the shared descriptor-table barrier, close every returned
+  descriptor while the receiver remains stopped, and return `EPERM`; malformed
+  or unbounded cleanup fails the instance closed.
 - This is a security checkpoint. Technical passage authorizes delivery but not
   merge, acceptance, issue closure, or gate closure.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Last evidence: `make check`, `make test-unit`, the complete Linux-native
-  `test-native-supervision` command set in Rocky QEMU, `make test-contract`,
-  `make test-security`, and a self-contained aggregate `make test` all pass.
-  Pull request #308 CI passed `changes`, `launch-integration`, and
-  `static-and-unit` on implementation and delivery head `e569089e`.
+- Last evidence: the complete Linux-native `test-native-supervision` command
+  set passed in Rocky QEMU, including host-to-instance `SCM_RIGHTS` transfers
+  through `recvmsg` and `recvmmsg` with every received fd proven closed. Fresh
+  `make check`, `make test-unit`, `make test-contract`, `make test-security`,
+  and aggregate `make test` all pass after the inbound fix. Pull request #308
+  exact-head CI has not yet run for this revision.
 - Open decisions or limitations: general `SCM_RIGHTS` support is intentionally
   deferred; issue #300 remains separate.
-- Exact next action: stop for human security-checkpoint review; do not merge
-  pull request #308 or close issue #297.
+- Exact next action: push the signed inbound fix and evidence to pull request
+  #308, obtain exact-head CI, and stop for human review; do not merge the pull
+  request or close issue #297.
 
 ## Approved future gate records
 
