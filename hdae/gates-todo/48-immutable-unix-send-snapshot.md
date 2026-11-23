@@ -49,7 +49,7 @@ destination, payload, vectors, or ancillary data after validation.
 - [x] Extend snapshot validation and replay to pathname Unix sends.
 - [x] Add deterministic regressions for mutation and ancillary-data denial.
 - [ ] Run the Linux focused regression plus security and aggregate verification.
-- [ ] Commit, push, open the issue-linked pull request, and add reciprocal
+- [x] Commit, push, open the issue-linked pull request, and add reciprocal
       comments.
 
 ## Acceptance criteria
@@ -108,7 +108,11 @@ destination, payload, vectors, or ancillary data after validation.
 - Planned commits: immutable Unix-send replay and deterministic regressions;
   HDAE evidence and reciprocal links.
 - Actual commits: `9d0e30d7` (immutable pathname Unix replay and deterministic
-  regression); evidence/delivery commit pending.
+  regression), `2d7b6a37` (gate and local evidence), plus the pending delivery
+  record commit.
+- Pull request: https://github.com/gmkurtzer/ginux/pull/315
+- Source comment: https://github.com/gmkurtzer/ginux/issues/297#issuecomment-7117505682
+- Pull-request comment: https://github.com/gmkurtzer/ginux/pull/315#issuecomment-7117505588
 
 ## Review policy and outcome
 

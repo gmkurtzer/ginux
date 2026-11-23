@@ -19,8 +19,11 @@
 - Last evidence: `make check`, `make test-unit`, and isolated Python compilation
   pass. Linux native, security, aggregate, and exact-head CI remain pending.
 - Open decisions or limitations: none; issue #300 remains a separate gate.
-- Exact next action: commit the gate evidence, push the dedicated branch, open
-  and reciprocally link its pull request, then use CI for Linux-native evidence.
+- Exact next action: inspect pull request #315 exact-head CI, repair any
+  regression on this branch, and stop for human security review when it passes.
+- Delivery: pull request https://github.com/gmkurtzer/ginux/pull/315 is open;
+  reciprocal source and pull-request comments are posted. Exact-head CI is the
+  next evidence boundary.
 
 ### Prior checkpoint: Gate 47 shared-network socket alias authority
 
