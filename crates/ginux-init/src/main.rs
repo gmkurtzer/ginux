@@ -3423,6 +3423,8 @@ struct NativeSupervisorTask {
     pending_mountinfo_open: bool,
     mountinfo_fd: i64,
     pending_recvmsg: usize,
+    pending_recvmsg_count: u32,
+    scm_rights_cleanup: NativeScmRightsCleanup,
     pending_peercred: usize,
     pending_stat: usize,
     close_range_first: i64,
@@ -3439,6 +3441,23 @@ struct NativeSupervisorTask {
     tracing: bool,
     limits: [[u64; 2]; 16],
 }
+
+#[derive(Clone, Copy)]
+struct NativeScmRightsCleanup {
+    active: bool,
+    fds: [i32; native_network::MAX_RECEIVED_RIGHTS],
+    count: usize,
+    current: usize,
+    rip: u64,
+}
+
+const EMPTY_SCM_RIGHTS_CLEANUP: NativeScmRightsCleanup = NativeScmRightsCleanup {
+    active: false,
+    fds: [-1; native_network::MAX_RECEIVED_RIGHTS],
+    count: 0,
+    current: 0,
+    rip: 0,
+};
 
 #[derive(Clone, Copy)]
 struct NativeDescriptorTable {
@@ -3466,7 +3485,7 @@ const EMPTY_NATIVE_DESCRIPTOR_TABLE: NativeDescriptorTable = NativeDescriptorTab
 fn native_descriptor_barrier_syscall(syscall: u64) -> bool {
     matches!(
         syscall,
-        2 | 3 | 16 | 32 | 33 | 56 | 57 | 58 | 59 | 72 | 257 | 292 | 435 | 436
+        2 | 3 | 16 | 32 | 33 | 47 | 56 | 57 | 58 | 59 | 72 | 257 | 292 | 299 | 435 | 436
     )
 }
 
@@ -5891,6 +5910,8 @@ fn supervise_native(
         pending_mountinfo_open: false,
         mountinfo_fd: -1,
         pending_recvmsg: 0,
+        pending_recvmsg_count: 0,
+        scm_rights_cleanup: EMPTY_SCM_RIGHTS_CLEANUP,
         pending_peercred: 0,
         pending_stat: 0,
         close_range_first: -1,
@@ -6075,6 +6096,10 @@ fn supervise_native(
         let signal = ((status >> 8) & 0xff) as u8;
         let event = ((status as usize) >> 16) & 0xffff;
         let seccomp_entry = event == PTRACE_EVENT_SECCOMP;
+        if task.scm_rights_cleanup.active && !seccomp_entry && !(event == 0 && signal == (5 | 0x80))
+        {
+            native_fail(instance, pid, b"native SCM_RIGHTS cleanup interrupted");
+        }
         if matches!(
             event,
             PTRACE_EVENT_FORK | PTRACE_EVENT_VFORK | PTRACE_EVENT_CLONE
@@ -6198,6 +6223,8 @@ fn supervise_native(
                 pending_mountinfo_open: false,
                 mountinfo_fd: task.mountinfo_fd,
                 pending_recvmsg: 0,
+                pending_recvmsg_count: 0,
+                scm_rights_cleanup: EMPTY_SCM_RIGHTS_CLEANUP,
                 pending_peercred: 0,
                 pending_stat: 0,
                 close_range_first: -1,
@@ -6432,6 +6459,29 @@ fn supervise_native(
             None
         };
 
+        if task.scm_rights_cleanup.active && seccomp_entry {
+            let cleanup = task.scm_rights_cleanup;
+            let registers = entry_registers.unwrap_or_else(|| {
+                native_fail(
+                    instance,
+                    pid,
+                    b"native SCM_RIGHTS cleanup registers missing",
+                )
+            });
+            if entry_syscall != Some(SYS_CLOSE)
+                || registers.rdi as u32 as i32 != cleanup.fds[cleanup.current]
+                || registers.rip != cleanup.rip
+            {
+                native_fail(instance, pid, b"native SCM_RIGHTS cleanup entry mismatch");
+            }
+            task.awaiting_exit = true;
+            tasks[task_index] = Some(task);
+            if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
+                native_fail(instance, pid, b"native SCM_RIGHTS cleanup resume failed");
+            }
+            continue;
+        }
+
         if entry_syscall.is_some_and(native_descriptor_barrier_syscall)
             && task.descriptor_barrier == usize::MAX
         {
@@ -6602,6 +6652,50 @@ fn supervise_native(
             tasks[task_index] = Some(task);
             if ptrace(PTRACE_CONT, host_pid, 0, 0) < 0 {
                 native_fail(instance, pid, b"native child phase synchronization failed");
+            }
+            continue;
+        }
+
+        if !seccomp_entry && task.awaiting_exit && task.scm_rights_cleanup.active {
+            let cleanup = &mut task.scm_rights_cleanup;
+            cleanup.current += 1;
+            if cleanup.current < cleanup.count {
+                native_scm_rights_cleanup_replay(cleanup, &mut registers);
+                task.awaiting_exit = false;
+                tasks[task_index] = Some(task);
+                if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_CONT, host_pid, 0, 0) < 0
+                {
+                    native_fail(
+                        instance,
+                        pid,
+                        b"native SCM_RIGHTS cleanup continuation failed",
+                    );
+                }
+                continue;
+            }
+            registers.rip = cleanup.rip;
+            registers.rax = (-EPERM) as u64;
+            registers.orig_rax = task.syscall;
+            task.scm_rights_cleanup = EMPTY_SCM_RIGHTS_CLEANUP;
+            task.awaiting_exit = false;
+            task.override_exit = false;
+            if task.descriptor_barrier == usize::MAX
+                || descriptor_tables[task.descriptor_barrier].mutation_owner != task.host_pid
+            {
+                native_fail(instance, pid, b"native SCM_RIGHTS cleanup barrier lost");
+            }
+            descriptor_tables[task.descriptor_barrier].mutation_owner = 0;
+            task.descriptor_barrier = usize::MAX;
+            tasks[task_index] = Some(task);
+            if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                || ptrace(PTRACE_CONT, host_pid, 0, 0) < 0
+            {
+                native_fail(
+                    instance,
+                    pid,
+                    b"native SCM_RIGHTS cleanup completion failed",
+                );
             }
             continue;
         }
@@ -6990,6 +7084,47 @@ fn supervise_native(
             }
             if task.pending_recvmsg != 0 {
                 if registers.rax as i64 >= 0 {
+                    let received = if task.syscall == 47 {
+                        native_network::recvmsg_scm_rights(host_pid, task.pending_recvmsg as u64)
+                    } else if task.syscall == 299
+                        && registers.rax <= u64::from(task.pending_recvmsg_count)
+                    {
+                        native_network::recvmmsg_scm_rights(
+                            host_pid,
+                            task.pending_recvmsg as u64,
+                            registers.rax,
+                        )
+                    } else {
+                        Err(-EINVAL)
+                    }
+                    .unwrap_or_else(|_| {
+                        native_fail(instance, pid, b"native SCM_RIGHTS result invalid")
+                    });
+                    if received.count != 0 {
+                        task.pending_recvmsg = 0;
+                        task.pending_recvmsg_count = 0;
+                        task.scm_rights_cleanup = NativeScmRightsCleanup {
+                            active: true,
+                            fds: received.fds,
+                            count: received.count,
+                            current: 0,
+                            rip: registers.rip,
+                        };
+                        write_all(b"GINUX_NETWORK_AUDIT: action=deny-scm-rights direction=receive descriptors=");
+                        write_u64(received.count as u64);
+                        write_all(b" result=-1\n");
+                        native_scm_rights_cleanup_replay(&task.scm_rights_cleanup, &mut registers);
+                        task.awaiting_exit = false;
+                        tasks[task_index] = Some(task);
+                        if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                            || ptrace(PTRACE_CONT, host_pid, 0, 0) < 0
+                        {
+                            native_fail(instance, pid, b"native SCM_RIGHTS cleanup start failed");
+                        }
+                        continue;
+                    }
+                }
+                if registers.rax as i64 >= 0 {
                     let socket = native_socket_object_index(table, registers.rdi)
                         .and_then(|object| socket_objects.get_mut(object))
                         .filter(|socket| socket.address_family == 16 && socket.netlink_count != 0);
@@ -7026,6 +7161,7 @@ fn supervise_native(
                     );
                 }
                 task.pending_recvmsg = 0;
+                task.pending_recvmsg_count = 0;
             }
             if task.pending_peercred != 0 {
                 if registers.rax as i64 == 0
@@ -10629,8 +10765,13 @@ fn supervise_native(
                 if cgroup_procs_path {
                     task.pending_cgroup_procs_open = true;
                 }
-                if mode == 3 && syscall == 47 {
+                if mode == 3 && matches!(syscall, 47 | 299) {
                     task.pending_recvmsg = registers.rsi as usize;
+                    task.pending_recvmsg_count = if syscall == 47 {
+                        1
+                    } else {
+                        registers.rdx as u32
+                    };
                 }
                 if mode == 3 && syscall == 55 && registers.rsi == 1 && registers.rdx == 17 {
                     task.pending_peercred = registers.r10 as usize;
@@ -11002,6 +11143,7 @@ fn native_arguments_allowed(syscall: u64, registers: &UserRegs, mode: usize) -> 
     if mode == 3 {
         match syscall {
             ginux_core::SYS_PIDFD_OPEN => registers.rdi > 0 && registers.rsi == 0,
+            299 => registers.rdx <= 16,
             293 => registers.rdi != 0 && registers.rsi & !(0x8_0000 | 0x800) == 0,
             ginux_core::SYS_CLOSE_RANGE => true,
             452 => {
@@ -11335,6 +11477,18 @@ fn native_socket_close_range(
             }
         }
     }
+}
+
+fn native_scm_rights_cleanup_replay(cleanup: &NativeScmRightsCleanup, regs: &mut UserRegs) {
+    regs.orig_rax = SYS_CLOSE;
+    regs.rax = SYS_CLOSE;
+    regs.rdi = cleanup.fds[cleanup.current] as u32 as u64;
+    regs.rsi = 0;
+    regs.rdx = 0;
+    regs.r10 = 0;
+    regs.r8 = 0;
+    regs.r9 = 0;
+    regs.rip = cleanup.rip - 2;
 }
 
 fn native_bind_socket_source(pid: usize, fd: i64, source: [u8; 4]) -> bool {

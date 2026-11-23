@@ -619,6 +619,50 @@ long native_fixture_main(const word *stack)
                      call3(59, (word)"/usr/bin/bash", (word)exec_argv, (word)exec_env));
         return 0;
     }
+    case 'I': {
+        /* A host peer may attach descriptors to an otherwise ordinary Unix
+         * stream. Ginux must reclaim every installed descriptor and report
+         * EPERM before this task resumes after recvmsg or recvmmsg. */
+        struct local_address { unsigned short family; char path[108]; };
+        struct iovec { void *base; word length; };
+        struct message {
+            void *name; unsigned name_length, name_padding;
+            struct iovec *iov; word iov_count;
+            void *control; word control_length;
+            unsigned flags, flags_padding;
+        };
+        struct multimessage { struct message message; unsigned length, padding; };
+        static struct local_address server = {1, "/tmp/inbound-rights.sock"};
+        char payload = 0;
+        struct iovec iov = {&payload, 1};
+        word control[16] = {0};
+        struct message message = {0, 0, 0, &iov, 1,
+                                  control, sizeof control, 0, 0};
+        long receiver = call3(41, 1 /* AF_UNIX */, 1 /* SOCK_STREAM */, 0);
+        if (receiver < 0
+            || call3(42, receiver, (word)&server, sizeof server) < 0
+            || call3(1, receiver, (word)"1", 1) != 1) return 94;
+        long received = call3(47, receiver, (word)&message, 0);
+        int *passed = (int *)((char *)control + 16);
+        print_result("GINUX_FIXTURE: inbound-rights-recvmsg=", received);
+        print_result("GINUX_FIXTURE: inbound-rights-recvmsg-closed=",
+                     received == -1 && message.control_length >= 24
+                     && call3(72, passed[0], 1 /* F_GETFD */, 0) == -9
+                     && call3(72, passed[1], 1, 0) == -9);
+
+        for (word index = 0; index < sizeof control / sizeof control[0]; ++index)
+            control[index] = 0;
+        message.control_length = sizeof control;
+        struct multimessage multiple = {message, 0, 0};
+        if (call3(1, receiver, (word)"2", 1) != 1) return 95;
+        received = call5(299, receiver, (word)&multiple, 1, 0, 0);
+        passed = (int *)((char *)control + 16);
+        print_result("GINUX_FIXTURE: inbound-rights-recvmmsg=", received);
+        print_result("GINUX_FIXTURE: inbound-rights-recvmmsg-closed=",
+                     received == -1 && multiple.message.control_length >= 24
+                     && call3(72, passed[0], 1 /* F_GETFD */, 0) == -9);
+        return 0;
+    }
     case 'W': {
         struct local_address { unsigned short family; char path[108]; };
         struct local_address abstract = {1, {0, 'g', 'i', 'n', 'u', 'x'}};

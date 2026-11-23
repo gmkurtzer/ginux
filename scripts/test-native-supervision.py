@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Check `ginux native` supervision edges with a fixture as /usr/bin/bash (Linux/root)."""
 import os
+import array
 import fcntl
 import resource
 import socket
+import threading
 from pathlib import Path
 import shutil
 import subprocess
@@ -350,6 +352,61 @@ port_forwards = ["udp/lo/18083/18081"]'''))
             "GINUX_FIXTURE: socket-exec-kept=1",
             "GINUX_FIXTURE: socket-exec-policy=-1"] and denied_packet == b"",
             code, out)
+
+        # SCM_RIGHTS from a trusted host peer must not leave an unclassified
+        # descriptor in the instance. Exercise both receive APIs and multiple
+        # descriptors in one control message.
+        rights_path = root / "tmp/inbound-rights.sock"
+        rights_errors = []
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as rights_server:
+            rights_server.bind(str(rights_path))
+            rights_path.chmod(0o777)
+            rights_server.listen(1)
+            rights_server.settimeout(10)
+            first = os.open(work / "regular", os.O_RDONLY)
+            second = os.open("/dev/null", os.O_RDONLY)
+
+            def send_rights():
+                try:
+                    connection, _ = rights_server.accept()
+                    with connection:
+                        connection.settimeout(10)
+                        if connection.recv(1) != b"1":
+                            raise RuntimeError("recvmsg rights handshake failed")
+                        connection.sendmsg(
+                            [b"x"],
+                            [(socket.SOL_SOCKET, socket.SCM_RIGHTS,
+                              array.array("i", [first, second]))])
+                        if connection.recv(1) != b"2":
+                            raise RuntimeError("recvmmsg rights handshake failed")
+                        connection.sendmsg(
+                            [b"y"],
+                            [(socket.SOL_SOCKET, socket.SCM_RIGHTS,
+                              array.array("i", [first]))])
+                except BaseException as error:
+                    rights_errors.append(error)
+
+            rights_thread = threading.Thread(target=send_rights)
+            rights_thread.start()
+            try:
+                code, out = run("Inbound-rights", credential_config,
+                                configured_launch=True)
+            finally:
+                rights_thread.join(timeout=12)
+                os.close(first)
+                os.close(second)
+        if rights_thread.is_alive():
+            raise RuntimeError(f"inbound SCM_RIGHTS sender did not finish: exit={code}\n{out}")
+        if rights_errors:
+            raise RuntimeError(
+                f"inbound SCM_RIGHTS sender failed: {rights_errors[0]} exit={code}\n{out}")
+        fixture = [line for line in out.splitlines()
+                   if line.startswith("GINUX_FIXTURE: ")]
+        check("inbound SCM_RIGHTS descriptors are reclaimed", code == 0 and fixture == [
+            "GINUX_FIXTURE: inbound-rights-recvmsg=-1",
+            "GINUX_FIXTURE: inbound-rights-recvmsg-closed=1",
+            "GINUX_FIXTURE: inbound-rights-recvmmsg=-1",
+            "GINUX_FIXTURE: inbound-rights-recvmmsg-closed=1"], code, out)
         code, out = run("W-socket-families", credential_config, configured_launch=True)
         fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
         check("unsupported socket families fail before host effect", code == 0 and fixture == [
