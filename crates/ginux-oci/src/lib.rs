@@ -606,6 +606,28 @@ mod tests {
     }
 
     #[test]
+    fn reference_rejects_overlong_digest() {
+        let long = "a".repeat(65);
+        assert!(parse_reference(&format!("docker.io/alpine@sha256:{long}")).is_err());
+    }
+
+    #[test]
+    fn reference_accepts_registry_host_with_port_and_hyphen() {
+        let digest = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        let parsed =
+            parse_reference(&format!("registry-1.io:5000/team/app@sha256:{digest}")).unwrap();
+        assert_eq!(parsed.registry, "registry-1.io:5000");
+        assert_eq!(parsed.repository, "team/app");
+    }
+
+    #[test]
+    fn docker_io_nested_repository_is_not_prefixed_twice() {
+        let digest = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        let parsed = parse_reference(&format!("docker.io/library/alpine@sha256:{digest}")).unwrap();
+        assert_eq!(parsed.repository, "library/alpine");
+    }
+
+    #[test]
     fn layer_whiteouts_replace_lower_entries() {
         let root = temp_dir("whiteout");
         fs::create_dir_all(root.join("etc/opaque")).unwrap();
