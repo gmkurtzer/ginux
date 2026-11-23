@@ -532,6 +532,57 @@ port_forwards = ["udp/lo/18083/18081"]'''))
                                       "GINUX_FIXTURE: writev-console=2"]
                   and (work / "console-output").read_bytes().startswith(b"K\nK\nK\n"), code, out)
 
+        # The protected null (240) and console (241) descriptors survive every
+        # call that would close, replace or mark them close-on-exec, with
+        # descriptor arguments read as 32 bits; a duplicate onto them fails
+        # with EPERM, or EBADF from a closed source. Each step runs in its
+        # own child, which then writes through both and checks their flags.
+        # A range from them still reaches the workload's descriptors above
+        # them and unshares. A range from below that goes past them runs in
+        # two parts and closes or marks the workload's descriptors from 239
+        # to 242 and up to its last descriptor, not 301; a closed console
+        # copy at 250 leaves the console view; the caller keeps its argument
+        # registers.
+        with open(work / "protected-console", "w+b") as console:
+            code, out = run("P-protected-descriptors", configured, stdin=console)
+            fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
+            steps = [("close-high-console", 0), ("close-high-null", 0), ("dup2-console", -1),
+                     ("dup2-high-console", -1), ("dup2-console-self", 241), ("dup3-null", -1),
+                     ("dup3-high-console", -1), ("dup2-closed-console", -9),
+                     ("dup3-closed-null", -9), ("setfd-console", 0), ("setfd-high-null", 0),
+                     ("fioclex-console", 0), ("fioclex-high-null", 0), ("fionclex-console", 0),
+                     ("console-range", 0), ("inverted-high-range", -22)]
+            # F_GETFD of the workload's descriptors 239, 242, 250, 300 and 301
+            # after each range (-9 closed, 1 close-on-exec, 0 untouched), and
+            # whether 250, a console copy, is still tracked as the console.
+            ranges = [("cloexec-range", (1, 1, 1, 1, 1, 1)),
+                      ("high-range", (-9, -9, -9, -9, -9, 0)),
+                      ("null-range", (0, -9, -9, -9, 0, 0)),
+                      ("null-cloexec-range", (0, 1, 1, 1, 0, 1)),
+                      ("unshare-range", (-9, -9, -9, -9, 0, 0)),
+                      ("span-range", (-9, -9, -9, -9, 0, 0)),
+                      ("span-cloexec-range", (1, 1, 1, 1, 0, 1)),
+                      ("span-unshare-range", (-9, -9, -9, -9, 0, 0))]
+            probes = ("fd-239", "fd-242", "fd-250", "fd-300", "fd-301", "console-250")
+            expected = [line for name, result in steps for line in (
+                f"GINUX_FIXTURE: {name}={result}", f"GINUX_FIXTURE: {name}-intact=1")]
+            expected += ["GINUX_FIXTURE: fd-239=239", "GINUX_FIXTURE: fd-242=242",
+                         "GINUX_FIXTURE: fd-250=250", "GINUX_FIXTURE: console-250=1",
+                         "GINUX_FIXTURE: fd-300=300", "GINUX_FIXTURE: fd-301=301"]
+            expected += [line for name, values in ranges for line in (
+                f"GINUX_FIXTURE: {name}=0",
+                *(f"GINUX_FIXTURE: {name}-{probe}={value}" for probe, value in zip(probes, values)),
+                f"GINUX_FIXTURE: {name}-intact=1")]
+            expected += ["GINUX_FIXTURE: span-unshare-files=1",
+                         "GINUX_FIXTURE: unshare-console-range=1",
+                         "GINUX_FIXTURE: cut-range-arguments-kept=1",
+                         "GINUX_FIXTURE: protected-range-arguments-kept=1",
+                         "GINUX_FIXTURE: span-range-arguments-kept=1"]
+            check("protected descriptors survive close, dup, close-on-exec and close_range",
+                  code == 0 and fixture == expected
+                  and (work / "protected-console").read_bytes()
+                  == b"P\n" * (len(steps) + len(ranges)), code, out)
+
         # Upstream owns cgroups in memory. Retain the public API and
         # containment regressions without requiring obsolete host files.
         cgroup_outside = work / "cgroup-outside"
