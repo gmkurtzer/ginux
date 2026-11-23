@@ -6511,7 +6511,8 @@ fn supervise_native(
             // The upper part of a close_range that spans the protected
             // descriptors (see NativeCloseRangeSplit). The caller's entry
             // record names its bounds; its exit stop restores the caller's
-            // arguments and signal mask and keeps the upper part's result.
+            // arguments and signal mask, keeps the upper part's result and
+            // releases the descriptor barrier the caller still holds.
             const CLOSE_RANGE_CLOEXEC: u64 = 4;
             if !task.close_range_split.matches_entry(&registers) {
                 native_fail(instance, pid, b"native close range replay mismatch");
@@ -7144,12 +7145,23 @@ fn supervise_native(
                     native_fd_clear_range(&mut table.console_fds, first, last);
                 }
             }
-            if task.descriptor_barrier != usize::MAX {
+            // A spanning close_range is one descriptor-table mutation: the
+            // caller keeps the barrier of the table it works on from the
+            // lower part's exit until the upper part's, so no CLONE_FILES
+            // sibling's call runs between the parts. A lower part with
+            // CLOSE_RANGE_UNSHARE moves it to the caller's new private table.
+            if task.descriptor_barrier != usize::MAX
+                && !(close_range_upper && task.descriptor_barrier == task.descriptor_table)
+            {
                 let barrier = task.descriptor_barrier;
                 if descriptor_tables[barrier].mutation_owner == task.host_pid {
                     descriptor_tables[barrier].mutation_owner = 0;
                 }
                 task.descriptor_barrier = usize::MAX;
+            }
+            if close_range_upper && task.descriptor_barrier == usize::MAX {
+                descriptor_tables[task.descriptor_table].mutation_owner = task.host_pid;
+                task.descriptor_barrier = task.descriptor_table;
             }
             task.awaiting_exit = false;
             task.override_exit = false;
@@ -10725,6 +10737,14 @@ enum NativeCloseRangeStage {
 ///   every signal but SIGKILL and SIGSTOP is blocked, and the caller's own
 ///   mask is kept here. A signal that arrives meanwhile stays pending and is
 ///   delivered when the call returns, as on Linux.
+/// - The two parts are one descriptor-table mutation: the caller holds the
+///   table's mutation barrier from its entry to the upper part's exit stop,
+///   so a CLONE_FILES sibling's descriptor call runs before or after the
+///   whole call. A failed lower part releases the barrier as for any other
+///   call. A CLONE_FILES sibling's `execve` is a deferred stop and cannot run
+///   between the two parts; a thread with its OWN descriptor table that execs
+///   kills a non-leader caller, which then releases the barrier in the exit
+///   path.
 #[derive(Clone, Copy)]
 struct NativeCloseRangeSplit {
     stage: NativeCloseRangeStage,

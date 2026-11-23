@@ -277,6 +277,48 @@ __asm__(".global native_gated_dup\n"
         "2: pop %r12\n"
         "ret\n");
 
+static volatile long descriptor_gap_ready;
+static volatile long descriptor_gap_result = -1000;
+
+/* A CLONE_FILES thread that sets descriptor_gap_ready once it runs, past
+ * its first trace stop, then calls dup2(source, target) once the byte at
+ * *gate, a shared mapping of a file the host test writes, is set. It makes
+ * no system call in between, so its dup2 is its next trace stop. */
+long native_gap_dup2(word flags, word stack, const volatile char *gate, word source,
+                     word target);
+__asm__(".global native_gap_dup2\n"
+        "native_gap_dup2:\n"
+        "push %r12\n"
+        "push %r13\n"
+        "push %r14\n"
+        "mov %rdx, %r12\n"
+        "mov %rcx, %r13\n"
+        "mov %r8, %r14\n"
+        "xor %edx, %edx\n"
+        "xor %r10d, %r10d\n"
+        "xor %r8d, %r8d\n"
+        "mov $56, %eax\n"
+        "syscall\n"
+        "test %rax, %rax\n"
+        "jnz 2f\n"
+        "movq $1, descriptor_gap_ready(%rip)\n"
+        "1: pause\n"
+        "cmpb $0, (%r12)\n"
+        "je 1b\n"
+        "mov $33, %eax\n"
+        "mov %r13, %rdi\n"
+        "mov %r14, %rsi\n"
+        "syscall\n"
+        "mov %rax, descriptor_gap_result(%rip)\n"
+        "mov $60, %eax\n"
+        "xor %edi, %edi\n"
+        "syscall\n"
+        "ud2\n"
+        "2: pop %r14\n"
+        "pop %r13\n"
+        "pop %r12\n"
+        "ret\n");
+
 long native_fixture_main(const word *stack)
 {
     char scenario[16] = {0};
@@ -1113,6 +1155,32 @@ long native_fixture_main(const word *stack)
         print_result("GINUX_FIXTURE: mutation-result=", descriptor_mutation_result);
         print_result("GINUX_FIXTURE: sibling-console=",
                      tracked_as_console(descriptor_sibling_result));
+        return 0;
+    }
+    case 'G': {
+        /* scripts/test-native-close-range-gap.py releases a CLONE_FILES
+         * thread's dup2 into 260 while Ginux sets up the upper part of a
+         * close_range from 3 to 300 and has Ginux take that dup2's stop
+         * first. The two parts are one table mutation, so the dup2 runs
+         * after the whole call and its 260 stays open. */
+        const word thread = 0x50f00; /* VM|FS|FILES|SIGHAND|THREAD|SYSVSEM */
+        word stack = call6(9, 0, 16384, 3, 0x22, -1, 0);
+        long gate_fd = call3(2, (word)"/gap", 0 /* O_RDONLY */, 0);
+        if (gate_fd < 0) return 84;
+        long gate = call6(9, 0, 4096, 1 /* PROT_READ */, 1 /* MAP_SHARED */, gate_fd, 0);
+        if (gate < 0 || call3(72, fd, 0 /* F_DUPFD */, 250) != 250
+            || call3(72, fd, 0, 301) != 301) return 83;
+        if (native_gap_dup2(thread, stack + 16384, (const volatile char *)gate, 301, 260) <= 0)
+            return 85;
+        while (!descriptor_gap_ready) __asm__ volatile("pause");
+        long result = call3(436, 3, 300, 0);
+        while (descriptor_gap_result == -1000) __asm__ volatile("pause");
+        print_result("GINUX_FIXTURE: gap-close-range=", result);
+        print_result("GINUX_FIXTURE: gap-dup2=", descriptor_gap_result);
+        print_result("GINUX_FIXTURE: gap-closed=",
+                     call3(72, 250, 1 /* F_GETFD */, 0) == -9 && call3(72, 301, 1, 0) == 0
+                     && call3(72, 240, 1, 0) == 0 && call3(72, 241, 1, 0) == 0);
+        print_result("GINUX_FIXTURE: gap-dup2-open=", call3(72, 260, 1, 0));
         return 0;
     }
     case 'P': {
