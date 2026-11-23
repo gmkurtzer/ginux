@@ -75,7 +75,7 @@ sharing a Linux descriptor table.
 - [x] Close and reject inbound `SCM_RIGHTS` descriptors before userspace can
       observe or use them.
 - [x] Reran focused and aggregate local verification after the inbound fix.
-- [ ] Obtain passing exact-head PR verification after the inbound fix.
+- [x] Obtained passing exact-head PR verification after the inbound fix.
 - [ ] Obtain human security-checkpoint review.
 
 ## Acceptance criteria
@@ -162,6 +162,9 @@ sharing a Linux descriptor table.
   test-security`, and aggregate `make test` passed after inbound rejection was
   added. The security run also passed all nine bounded fuzz targets and its
   native VFS, contract-runtime, device, and virtual-kernel QEMU checks.
+- Pull request #308 CI passed `changes`, `launch-integration`, and
+  `static-and-unit` on inbound-fix evidence head `d1abc738`; the integration
+  job included the complete native-supervision regression.
 
 ## Decisions and limitations
 
@@ -206,4 +209,5 @@ repository's scheduled proactive-remediation policy. Keep Gate 47 in
 `gates-todo/` as a security checkpoint pending human review; never merge it
 automatically through the HDAE implementation loop. Local technical evidence
 passes after the inbound fix. Exact-head pull-request CI and human acceptance
-remain pending.
+are split at the checkpoint: CI passes on inbound-fix evidence head
+`d1abc738`, while human acceptance remains pending.

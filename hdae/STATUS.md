@@ -28,12 +28,13 @@
   through `recvmsg` and `recvmmsg` with every received fd proven closed. Fresh
   `make check`, `make test-unit`, `make test-contract`, `make test-security`,
   and aggregate `make test` all pass after the inbound fix. Pull request #308
-  exact-head CI has not yet run for this revision.
+  exact-head CI passed `changes`, `launch-integration`, and `static-and-unit`
+  on inbound-fix evidence head `d1abc738`, including native supervision.
 - Open decisions or limitations: general `SCM_RIGHTS` support is intentionally
   deferred; issue #300 remains separate.
-- Exact next action: push the signed inbound fix and evidence to pull request
-  #308, obtain exact-head CI, and stop for human review; do not merge the pull
-  request or close issue #297.
+- Exact next action: stop for human security review of pull request #308; do
+  not merge the pull request, close issue #297, or close Gate 47 without
+  explicit human acceptance.
 
 ## Approved future gate records
 
