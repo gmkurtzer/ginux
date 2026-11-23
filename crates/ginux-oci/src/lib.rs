@@ -1,4 +1,4 @@
-use flate2::read::GzDecoder;
+use flate2::bufread::MultiGzDecoder;
 use reqwest::blocking::{Client, Response};
 use reqwest::header::{ACCEPT, WWW_AUTHENTICATE};
 use serde_json::Value;
@@ -369,7 +369,7 @@ fn apply_layer(blob: &Path, media_type: &str, destination: &Path) -> Result<(), 
         | "application/vnd.docker.image.rootfs.diff.tar.gzip"
         | "" => {
             apply_archive(
-                Archive::new(GzDecoder::new(BufReader::new(
+                Archive::new(MultiGzDecoder::new(BufReader::new(
                     File::open(blob).map_err(io_error)?,
                 ))),
                 blob,
@@ -406,7 +406,7 @@ fn apply_archive<R: Read>(
     };
     if is_gzip {
         unpack_entries(
-            Archive::new(GzDecoder::new(BufReader::new(
+            Archive::new(MultiGzDecoder::new(BufReader::new(
                 File::open(blob).map_err(io_error)?,
             ))),
             destination,
@@ -668,6 +668,62 @@ mod tests {
             fs::read(destination.join("message")).unwrap(),
             b"from the layer"
         );
+        fs::remove_dir_all(cache).unwrap();
+    }
+
+    #[test]
+    fn cached_gzip_members_form_one_tar_stream() {
+        use flate2::{write::GzEncoder, Compression};
+
+        let cache = temp_dir("gzip-members");
+        let config = cache_bytes(&cache, b"{}");
+        let mut lower = tar::Builder::new(Vec::new());
+        append(&mut lower, "obsolete", b"lower layer");
+        let lower = cache_bytes(&cache, &lower.into_inner().unwrap());
+
+        let mut upper = tar::Builder::new(Vec::new());
+        append(&mut upper, "first", b"first file");
+        let between_entries = upper.get_ref().len();
+        append(&mut upper, ".wh.obsolete", b"");
+        append(&mut upper, "second", b"second file");
+        let upper = upper.into_inner().unwrap();
+
+        for (case, member_size) in [
+            ("single", upper.len()),
+            ("between-entries", between_entries),
+            ("inside-file", tar::Header::new_gnu().as_bytes().len() + 3),
+        ] {
+            let mut gzip = Vec::new();
+            for member in upper.chunks(member_size) {
+                let mut encoder = GzEncoder::new(&mut gzip, Compression::fast());
+                encoder.write_all(member).unwrap();
+                encoder.finish().unwrap();
+            }
+            let manifest = serde_json::json!({
+                "config": {"digest": config},
+                "layers": [
+                    {"digest": lower, "mediaType": "application/vnd.oci.image.layer.v1.tar"},
+                    {"digest": cache_bytes(&cache, &gzip), "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip"}
+                ]
+            });
+            let digest = cache_bytes(&cache, &serde_json::to_vec(&manifest).unwrap());
+            let reference = format!("127.0.0.1:0/example@{digest}");
+            let root = cache.join(case);
+            materialize(&reference, &cache, &root, io::sink())
+                .unwrap_or_else(|error| panic!("{case}: {error}"));
+            assert!(!root.join("obsolete").exists(), "{case}: whiteout missed");
+            assert_eq!(
+                fs::read(root.join("first")).unwrap(),
+                b"first file",
+                "{case}"
+            );
+            assert_eq!(
+                fs::read(root.join("second")).unwrap(),
+                b"second file",
+                "{case}"
+            );
+            assert_eq!(fs::read_dir(root).unwrap().count(), 2, "{case}");
+        }
         fs::remove_dir_all(cache).unwrap();
     }
 
