@@ -767,6 +767,5 @@ mod tests {
             partition.read_at(16, &mut [0; 1]),
             Err(DeviceError::OutOfRange)
         );
-
     }
 }
