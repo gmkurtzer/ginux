@@ -154,11 +154,26 @@ replace it.
     opt-in while profiling and optimizing it against a stable, matched workload
     matrix that requires every 1/2/4-thread row to remain within 5% of native
     without weakening accepted security properties.
+44. **Deny host-global filesystem synchronization**: keep `sync` and `syncfs`
+    outside instance authority even under permissive wildcard contracts.
+45. **Preserve netlink acknowledgement errors**: retain the host kernel's exact
+    loopback netlink success or failure result while retiring matched sequences.
+46. **Enforce network default deny**: make empty ingress and egress allow lists
+    deny corresponding operations without weakening explicit grants.
 47. **Shared-network socket alias authority**: move managed socket aliases into
     the authoritative native descriptor table, share one socket object across
     aliases and forked table copies, preserve policy and lifecycle semantics
     through every supported duplication path, and fail closed on unowned
     `SCM_RIGHTS` descriptor transfer.
+48. **Immutable pathname Unix sends**: snapshot all pathname Unix send inputs
+    before policy and host effect.
+49. **Immutable connect and bind addresses**: make policy, translation, and host
+    execution consume one supervisor-owned sockaddr snapshot.
+50. **Scoped freestanding Rust flags**: apply freestanding linker flags only to
+    explicit freestanding builds, never ordinary host units.
+51. **Gate-ledger reconciliation**: verify current `main`, reconcile every
+    technically delivered open gate, preserve locked history, and present one
+    consolidated human checkpoint before Gate 43 execution.
 
 Gates are stored in `hdae/gates-todo/` and remain there until they pass and are
 accepted at their checkpoint. Closed gate records move unchanged to

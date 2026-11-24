@@ -2,7 +2,32 @@
 
 ## Current checkpoint
 
-### Gate 50 scoped freestanding Rust flags
+### Gate 51 HDAE gate-ledger reconciliation
+
+- The human approved a complete gate-ledger reconciliation batch on 2026-11-24.
+- The authoritative audit runs from current `origin/main` on dedicated branch
+  `hdae/gate-ledger-reconciliation`; the primary checkout's older Gate 31
+  branch is not used as repository authority.
+- Initial state is 29 closed gates, 29 open gates, and one deferred gate.
+- Twenty-seven open gates have merged implementations but stale or
+  acceptance-pending records. Gate 11 remains partial at its unchanged 4%
+  thread-performance threshold, Gate 43 is not implemented, and Gate 14 remains
+  intentionally deferred.
+- Every referenced gate pull request is merged and no pull request is currently
+  open. Merge state is delivery evidence, not automatic human acceptance.
+- Active skill: `hdae-development`
+- Skill path: `.agents/skills/hdae-development/SKILL.md`
+- Reload after context shift: required
+- Last evidence: refreshed remote and gate, PR, issue, branch, checklist, and
+  lifecycle audits at `origin/main` commit `9b0ce6d9`.
+- Open decisions or limitations: Gate 43 begins only after the consolidated
+  acceptance checkpoint; its performance effort has no reliable duration until
+  its stable harness and profiling baseline exist.
+- Exact next action: record Gate 11's approved deferral, run the complete
+  current-main verification matrix, reconcile every delivered open gate, and
+  publish the dedicated reconciliation pull request for human acceptance.
+
+### Prior checkpoint: Gate 50 scoped freestanding Rust flags
 
 - Gate 50 is active on `hdae/scope-freestanding-rustflags` for issue #318.
 - The x86-64 GNU target configuration applied freestanding linker flags to

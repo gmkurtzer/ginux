@@ -534,3 +534,20 @@ Current outcome: **partial**. The implementation and regression work are
 complete, but all five mandatory selective thread rows in the authoritative
 retained-code matrix exceed the unchanged 4% budget and no accepted baseline
 has been published.
+
+## Deferred reason
+
+On 2026-11-24 the human approved deferring Gate 11 without weakening its 4%
+mandatory per-row threshold. Exhaustive userspace-path profiling found no
+credible invariant-preserving optimization that closes the retained selective
+thread gap, and silently publishing the failing matrix as an accepted baseline
+would invalidate the gate.
+
+## Return condition
+
+Reactivate Gate 11 only after explicit human direction and one of these changes:
+a materially different enforcement architecture with a credible path to the
+unchanged 4% threshold, a new reproducible environment that invalidates the
+retained measurements, or an explicitly approved replacement performance goal.
+Gate 15 remains the accepted characterization of current dispatch modes; it
+does not retroactively pass Gate 11.
