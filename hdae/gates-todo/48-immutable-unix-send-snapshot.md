@@ -97,6 +97,8 @@ destination, payload, vectors, or ancillary data after validation.
 - `python3 -m py_compile scripts/test-native-unix-send-snapshot.py` passed with
   an isolated bytecode cache. The Linux/root execution remains pending CI or a
   Rocky host because this macOS host cannot execute the native ptrace fixture.
+- After correcting the disposable socket-node permissions, fresh `make check`,
+  `make test-unit`, and isolated Python compilation passed on `7317bd74`.
 
 ## Decisions and limitations
 
@@ -114,8 +116,8 @@ destination, payload, vectors, or ancillary data after validation.
 - Planned commits: immutable Unix-send replay and deterministic regressions;
   HDAE evidence and reciprocal links.
 - Actual commits: `9d0e30d7` (immutable pathname Unix replay and deterministic
-  regression), `2d7b6a37` (gate and local evidence), plus the pending delivery
-  record commit.
+  regression), `2d7b6a37` (gate and local evidence), `acc22c0e` (delivery
+  record), and `7317bd74` (Linux fixture permission correction).
 - Pull request: https://github.com/gmkurtzer/ginux/pull/315
 - Source comment: https://github.com/gmkurtzer/ginux/issues/297#issuecomment-7117505682
 - Pull-request comment: https://github.com/gmkurtzer/ginux/pull/315#issuecomment-7117505588
