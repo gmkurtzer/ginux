@@ -3401,6 +3401,8 @@ struct NativeSupervisorTask {
     pending_console_duplicate: i8,
     pending_console_cloexec: bool,
     pending_device_arguments: Option<[u64; 3]>,
+    // A duplicate onto a protected descriptor runs as F_GETFD of its source.
+    pending_protected_duplicate: bool,
     // Index into the supervisor-owned descriptor table pool. CLONE_FILES
     // tasks use the same entry rather than copied state.
     descriptor_table: usize,
@@ -3429,6 +3431,7 @@ struct NativeSupervisorTask {
     pending_stat: usize,
     close_range_first: i64,
     close_range_last: i64,
+    close_range_split: NativeCloseRangeSplit,
     syscall: u64,
     translated_rdi: u64,
     wait_status: u64,
@@ -5891,6 +5894,7 @@ fn supervise_native(
         pending_console_duplicate: 0,
         pending_console_cloexec: false,
         pending_device_arguments: None,
+        pending_protected_duplicate: false,
         descriptor_table: 0,
         descriptor_barrier: usize::MAX,
         pipe2_address: 0,
@@ -5916,6 +5920,7 @@ fn supervise_native(
         pending_stat: 0,
         close_range_first: -1,
         close_range_last: -1,
+        close_range_split: NativeCloseRangeSplit::IDLE,
         syscall: 0,
         translated_rdi: 0,
         wait_status: 0,
@@ -6027,6 +6032,11 @@ fn supervise_native(
             pid_map.remove(task.host_pid);
             native_virtual_kernel_clear_owner(&mut virtual_kernel_fds, task.host_pid);
             task.tracing = false;
+            // A caller killed inside a two-part close_range or a duplicate's
+            // source check leaves no pending state behind.
+            task.close_range_split = NativeCloseRangeSplit::IDLE;
+            task.pending_protected_duplicate = false;
+            task.pending_device_arguments = None;
             if task.descriptor_barrier != usize::MAX {
                 let barrier = task.descriptor_barrier;
                 if descriptor_tables[barrier].mutation_owner == task.host_pid {
@@ -6204,6 +6214,7 @@ fn supervise_native(
                 pending_console_duplicate: 0,
                 pending_console_cloexec: false,
                 pending_device_arguments: None,
+                pending_protected_duplicate: false,
                 descriptor_table,
                 descriptor_barrier: usize::MAX,
                 pipe2_address: 0,
@@ -6229,6 +6240,7 @@ fn supervise_native(
                 pending_stat: 0,
                 close_range_first: -1,
                 close_range_last: -1,
+                close_range_split: NativeCloseRangeSplit::IDLE,
                 syscall: 0,
                 translated_rdi: 0,
                 wait_status: 0,
@@ -6648,6 +6660,31 @@ fn supervise_native(
             }
             continue;
         }
+        if seccomp_entry && task.close_range_split.stage == NativeCloseRangeStage::Upper {
+            // The upper part of a close_range that spans the protected
+            // descriptors (see NativeCloseRangeSplit). The caller's entry
+            // record names its bounds; its exit stop restores the caller's
+            // arguments and signal mask, keeps the upper part's result and
+            // releases the descriptor barrier the caller still holds.
+            const CLOSE_RANGE_CLOEXEC: u64 = 4;
+            if !task.close_range_split.matches_entry(&registers) {
+                native_fail(instance, pid, b"native close range replay mismatch");
+            }
+            let [first, last, flags] = task.close_range_split.upper;
+            if flags & CLOSE_RANGE_CLOEXEC == 0 {
+                task.close_range_first = first as i64;
+                task.close_range_last = last as i64;
+            }
+            task.pending_device_arguments = Some(task.close_range_split.caller);
+            task.close_range_split.stage = NativeCloseRangeStage::Running;
+            task.syscall = ginux_core::SYS_CLOSE_RANGE;
+            task.awaiting_exit = true;
+            tasks[task_index] = Some(task);
+            if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
+                native_fail(instance, pid, b"native close range replay resume failed");
+            }
+            continue;
+        }
         if !seccomp_entry && !task.awaiting_exit && registers.orig_rax == u64::MAX {
             tasks[task_index] = Some(task);
             if ptrace(PTRACE_CONT, host_pid, 0, 0) < 0 {
@@ -6956,9 +6993,50 @@ fn supervise_native(
                 task.override_exit = true;
                 task.override_result = task.virtual_id.pid as i64;
             }
+            // The close_range bookkeeping below follows the bounds and flags
+            // the kernel ran with, which the restore replaces.
+            let (ran_first, ran_last, ran_flags) = (registers.rdi, registers.rsi, registers.rdx);
+            // The lower part of a close_range that spans the protected
+            // descriptors returned. After 0 the upper part runs next, and
+            // its exit stop ends the call and writes the exit record. An
+            // error ends the call here.
+            let close_range_upper = task.close_range_split.stage == NativeCloseRangeStage::Lower
+                && registers.rax as i64 == 0;
+            if task.close_range_split.stage == NativeCloseRangeStage::Lower && !close_range_upper {
+                task.close_range_split = NativeCloseRangeSplit::IDLE;
+            }
+            if task.close_range_split.stage == NativeCloseRangeStage::Running {
+                // The upper part returned. The caller's own signal mask
+                // comes back, and a signal blocked between the parts is
+                // delivered as the call returns.
+                const PTRACE_SETSIGMASK: usize = 0x420b;
+                let mask = task.close_range_split.mask;
+                task.close_range_split = NativeCloseRangeSplit::IDLE;
+                if ptrace(
+                    PTRACE_SETSIGMASK,
+                    host_pid,
+                    core::mem::size_of_val(&mask),
+                    &mask as *const _ as usize,
+                ) < 0
+                {
+                    native_fail(instance, pid, b"native close range mask restore failed");
+                }
+            }
+            if task.pending_protected_duplicate {
+                // A duplicate onto a protected descriptor ran as F_GETFD of
+                // its source. Linux checks the source first, so a closed one
+                // fails with EBADF; otherwise Ginux refuses with EPERM.
+                task.pending_protected_duplicate = false;
+                task.override_exit = true;
+                task.override_result = if registers.rax as i64 == -EBADF {
+                    -EBADF
+                } else {
+                    -EPERM
+                };
+            }
             if let Some([rdi, rsi, rdx]) = task.pending_device_arguments.take() {
-                // The syscall ABI preserves the open's arguments, which the
-                // copy replaced.
+                // The syscall ABI preserves the arguments, which the copy of
+                // a device open or the bounds of a close_range replaced.
                 registers.rdi = rdi;
                 registers.rsi = rsi;
                 registers.rdx = rdx;
@@ -6975,23 +7053,25 @@ fn supervise_native(
                     native_fail(instance, pid, b"native result override failed");
                 }
             }
-            write_all(b"GINUX_NATIVE_AUDIT: sequence=");
-            write_u64(sequence);
-            write_all(b" instance=");
-            write_all(audit_instance_id.as_bytes());
-            write_all(b" virtual-pid=");
-            write_u64(task.virtual_id.pid as u64);
-            write_all(b" contract=");
-            write_all(contract.digest());
-            write_all(b" phase=exit result=");
-            // A reissued clone3 has its number back in RAX; record what the
-            // kernel returned for the abandoned attempt.
-            write_i64(if reissued {
-                task.clone_call.result
-            } else {
-                registers.rax as i64
-            });
-            write_all(b"\n");
+            if !close_range_upper {
+                write_all(b"GINUX_NATIVE_AUDIT: sequence=");
+                write_u64(sequence);
+                write_all(b" instance=");
+                write_all(audit_instance_id.as_bytes());
+                write_all(b" virtual-pid=");
+                write_u64(task.virtual_id.pid as u64);
+                write_all(b" contract=");
+                write_all(contract.digest());
+                write_all(b" phase=exit result=");
+                // A reissued clone3 has its number back in RAX; record what
+                // the kernel returned for the abandoned attempt.
+                write_i64(if reissued {
+                    task.clone_call.result
+                } else {
+                    registers.rax as i64
+                });
+                write_all(b"\n");
+            }
             let table = &mut descriptor_tables[task.descriptor_table];
             if task.pending_console_open {
                 table.console_fd = registers.rax as i64;
@@ -7298,6 +7378,16 @@ fn supervise_native(
                 }
             }
             if task.syscall == ginux_core::SYS_CLOSE_RANGE && registers.rax as i64 == 0 {
+                // Ranges without CLOSE_RANGE_CLOEXEC, with the bounds this
+                // call (or this part of a spanning one) ran with.
+                if task.close_range_first >= 0 {
+                    native_virtual_kernel_clear_range(
+                        &mut virtual_kernel_fds,
+                        host_pid,
+                        task.close_range_first,
+                        task.close_range_last,
+                    );
+                }
                 for pipe_fd in &mut task.pipe_fds {
                     if *pipe_fd >= task.close_range_first && *pipe_fd <= task.close_range_last {
                         *pipe_fd = -1;
@@ -7311,14 +7401,16 @@ fn supervise_native(
                     );
                 }
                 // The console view follows every admitted close_range as the
-                // kernel ran it (the arguments may have been bounded above):
-                // CLOSE_RANGE_UNSHARE first gives this task a private table,
-                // and CLOSE_RANGE_CLOEXEC marks the range instead of closing.
+                // kernel ran it (the arguments may have been bounded above,
+                // and a spanning range runs as two parts, each followed at
+                // its own exit stop): CLOSE_RANGE_UNSHARE first gives this
+                // task a private table, and CLOSE_RANGE_CLOEXEC marks the
+                // range instead of closing.
                 const CLOSE_RANGE_UNSHARE: u64 = 2;
                 const CLOSE_RANGE_CLOEXEC: u64 = 4;
-                let first = registers.rdi as u32 as usize;
-                let last = registers.rsi as u32 as usize;
-                if registers.rdx & CLOSE_RANGE_UNSHARE != 0 {
+                let first = ran_first as u32 as usize;
+                let last = ran_last as u32 as usize;
+                if ran_flags & CLOSE_RANGE_UNSHARE != 0 {
                     let old_table = task.descriptor_table;
                     let shared = tasks.iter().enumerate().any(|(slot, candidate)| {
                         slot != task_index
@@ -7361,9 +7453,9 @@ fn supervise_native(
                     &mut socket_objects,
                     first as u32,
                     last as u32,
-                    registers.rdx & CLOSE_RANGE_CLOEXEC != 0,
+                    ran_flags & CLOSE_RANGE_CLOEXEC != 0,
                 );
-                if registers.rdx & CLOSE_RANGE_CLOEXEC != 0 {
+                if ran_flags & CLOSE_RANGE_CLOEXEC != 0 {
                     for fd in first..=core::cmp::min(last, NATIVE_PROC_FD_LIMIT - 1) {
                         native_fd_set(&mut table.console_cloexec, fd);
                     }
@@ -7371,12 +7463,23 @@ fn supervise_native(
                     native_fd_clear_range(&mut table.console_fds, first, last);
                 }
             }
-            if task.descriptor_barrier != usize::MAX {
+            // A spanning close_range is one descriptor-table mutation: the
+            // caller keeps the barrier of the table it works on from the
+            // lower part's exit until the upper part's, so no CLONE_FILES
+            // sibling's call runs between the parts. A lower part with
+            // CLOSE_RANGE_UNSHARE moves it to the caller's new private table.
+            if task.descriptor_barrier != usize::MAX
+                && !(close_range_upper && task.descriptor_barrier == task.descriptor_table)
+            {
                 let barrier = task.descriptor_barrier;
                 if descriptor_tables[barrier].mutation_owner == task.host_pid {
                     descriptor_tables[barrier].mutation_owner = 0;
                 }
                 task.descriptor_barrier = usize::MAX;
+            }
+            if close_range_upper && task.descriptor_barrier == usize::MAX {
+                descriptor_tables[task.descriptor_table].mutation_owner = task.host_pid;
+                task.descriptor_barrier = task.descriptor_table;
             }
             task.awaiting_exit = false;
             task.override_exit = false;
@@ -7389,6 +7492,33 @@ fn supervise_native(
             task.pending_getsockname = 0;
             task.close_range_first = -1;
             task.close_range_last = -1;
+            if close_range_upper {
+                // Block every signal the kernel lets a tracer block until the
+                // upper part's exit stop, keeping the caller's mask.
+                const PTRACE_GETSIGMASK: usize = 0x420a;
+                const PTRACE_SETSIGMASK: usize = 0x420b;
+                let mut mask = 0u64;
+                let blocked = u64::MAX;
+                if ptrace(
+                    PTRACE_GETSIGMASK,
+                    host_pid,
+                    core::mem::size_of_val(&mask),
+                    &mut mask as *mut _ as usize,
+                ) < 0
+                    || ptrace(
+                        PTRACE_SETSIGMASK,
+                        host_pid,
+                        core::mem::size_of_val(&blocked),
+                        &blocked as *const _ as usize,
+                    ) < 0
+                {
+                    native_fail(instance, pid, b"native close range mask failed");
+                }
+                task.close_range_split.replay(&mut registers, mask);
+                if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0 {
+                    native_fail(instance, pid, b"native close range replay failed");
+                }
+            }
             tasks[task_index] = Some(task);
             let signal = if task.clone_call.sigchld { 17 } else { 0 };
             task.clone_call.sigchld = false;
@@ -9007,6 +9137,50 @@ fn supervise_native(
             }
             Action::Mediate
                 if mode == 3
+                    && native_protected_descriptor_result(syscall, &registers).is_some() =>
+            {
+                let result = native_protected_descriptor_result(syscall, &registers).unwrap_or(0);
+                // Linux looks up a duplicate's source before its target, so
+                // a closed source fails with EBADF. The source check runs as
+                // F_GETFD, unless the source is a virtual kernel descriptor,
+                // which has no host descriptor and is open.
+                if matches!(syscall, SYS_DUP2 | SYS_DUP3)
+                    && native_virtual_kernel_fd(
+                        &virtual_kernel_fds,
+                        host_pid,
+                        registers.rdi as u32 as i64,
+                    )
+                    .is_none()
+                {
+                    write_all(
+                        b"mediate surface=protected-descriptor check=source result=pending\n",
+                    );
+                    task.pending_device_arguments =
+                        Some([registers.rdi, registers.rsi, registers.rdx]);
+                    task.pending_protected_duplicate = true;
+                    registers.orig_rax = SYS_FCNTL;
+                    registers.rsi = F_GETFD;
+                } else {
+                    write_all(b"emulate surface=protected-descriptor result=");
+                    write_i64(result);
+                    write_all(b"\n");
+                    registers.orig_rax = u64::MAX;
+                    task.override_exit = true;
+                    task.override_result = result;
+                }
+                task.awaiting_exit = true;
+                if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+                {
+                    native_fail(
+                        instance,
+                        pid,
+                        b"native protected descriptor emulation failed",
+                    );
+                }
+            }
+            Action::Mediate
+                if mode == 3
                     && syscall == 3
                     && native_virtual_kernel_fd(
                         &virtual_kernel_fds,
@@ -10474,7 +10648,9 @@ fn supervise_native(
                 }
             }
             Action::Mediate
-                if mode == 3 && syscall == 3 && registers.rdi as usize == INSTANCE_NULL_FD =>
+                if mode == 3
+                    && syscall == 3
+                    && registers.rdi as u32 as usize == INSTANCE_NULL_FD =>
             {
                 line(b"mediate surface=virtual-device result=protected");
                 registers.orig_rax = u64::MAX;
@@ -10488,7 +10664,9 @@ fn supervise_native(
                 }
             }
             Action::Mediate
-                if mode == 3 && syscall == 3 && registers.rdi as usize == INSTANCE_CONSOLE_FD =>
+                if mode == 3
+                    && syscall == 3
+                    && registers.rdi as u32 as usize == INSTANCE_CONSOLE_FD =>
             {
                 line(b"mediate surface=virtual-console result=protected");
                 registers.orig_rax = u64::MAX;
@@ -10661,26 +10839,56 @@ fn supervise_native(
             Action::Mediate
                 if mode == 3
                     && syscall == ginux_core::SYS_CLOSE_RANGE
-                    && registers.rdi >= 3
-                    && registers.rdi < INSTANCE_NULL_FD as u64
-                    && registers.rsi >= registers.rdi
-                    && registers.rdx == 0 =>
+                    && registers.rdi as u32 as usize <= INSTANCE_CONSOLE_FD
+                    && registers.rsi as u32 >= registers.rdi as u32
+                    // Only CLOSE_RANGE_UNSHARE (2) and CLOSE_RANGE_CLOEXEC (4).
+                    && registers.rdx as u32 & !6 == 0 =>
             {
-                native_virtual_kernel_clear_range(
-                    &mut virtual_kernel_fds,
-                    host_pid,
-                    registers.rdi as i64,
-                    core::cmp::min(registers.rsi, i64::MAX as u64) as i64,
-                );
-                let last = core::cmp::min(registers.rsi, INSTANCE_NULL_FD as u64 - 1);
+                const CLOSE_RANGE_CLOEXEC: u64 = 4;
+                // The kernel reads the bounds and flags as 32 bits. Its range
+                // never reaches the protected descriptors: one from below
+                // them stops at 239, one from them starts at 242, and one
+                // within them becomes the empty range at u32::MAX, which the
+                // kernel accepts and which still unshares the table. One
+                // from below them that goes past 241 runs in two parts: this
+                // call stops at 239, and its exit stop runs the rest from 242
+                // (see NativeCloseRangeSplit).
+                let requested_first = registers.rdi as u32 as u64;
+                let requested_last = registers.rsi as u32 as u64;
+                let (first, last) = if requested_first < INSTANCE_NULL_FD as u64 {
+                    (
+                        requested_first,
+                        core::cmp::min(requested_last, INSTANCE_NULL_FD as u64 - 1),
+                    )
+                } else if requested_last > INSTANCE_CONSOLE_FD as u64 {
+                    (INSTANCE_CONSOLE_FD as u64 + 1, requested_last)
+                } else {
+                    (u64::from(u32::MAX), u64::from(u32::MAX))
+                };
+                if requested_first < INSTANCE_NULL_FD as u64
+                    && requested_last > INSTANCE_CONSOLE_FD as u64
+                {
+                    task.close_range_split =
+                        NativeCloseRangeSplit::lower(&registers, requested_last);
+                }
+                if registers.rdx & CLOSE_RANGE_CLOEXEC == 0 {
+                    task.close_range_first = first as i64;
+                    task.close_range_last = last as i64;
+                }
                 write_all(b"mediate surface=task-close-range first=");
-                write_u64(registers.rdi);
+                write_u64(first);
                 write_all(b" last=");
                 write_u64(last);
+                if task.close_range_split.stage == NativeCloseRangeStage::Lower {
+                    write_all(b" upper-first=");
+                    write_u64(task.close_range_split.upper[0]);
+                    write_all(b" upper-last=");
+                    write_u64(task.close_range_split.upper[1]);
+                }
                 write_all(b" result=pending\n");
+                task.pending_device_arguments = Some([registers.rdi, registers.rsi, registers.rdx]);
+                registers.rdi = first;
                 registers.rsi = last;
-                task.close_range_first = registers.rdi as i64;
-                task.close_range_last = last as i64;
                 task.awaiting_exit = true;
                 if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
                     || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
@@ -11134,6 +11342,131 @@ fn virtual_credential_target(current: u32, values: &[u64]) -> Option<u32> {
         target = Some(value);
     }
     Some(target.unwrap_or(current))
+}
+
+/// The result Ginux returns, without running the call, for a call that
+/// would replace or mark close-on-exec the protected null or console
+/// descriptor (close and close_range are handled where they are mediated).
+/// The kernel reads descriptors and commands as 32 bits. As with close,
+/// marking one close-on-exec only seems to succeed. A duplicate onto one
+/// fails with EPERM: the number is a valid descriptor, and Ginux refuses to
+/// replace it because it holds the instance's own null device or console.
+/// Where it is applied, a duplicate from a closed source fails with EBADF
+/// first, as on Linux.
+fn native_protected_descriptor_result(syscall: u64, registers: &UserRegs) -> Option<i64> {
+    const FIONCLEX: u32 = 0x5450;
+    const FIOCLEX: u32 = 0x5451;
+    let protected = |fd: u64| matches!(fd as u32 as usize, INSTANCE_NULL_FD | INSTANCE_CONSOLE_FD);
+    match syscall {
+        // dup2 onto itself changes nothing, and dup3 onto itself or with
+        // unknown flags fails before the kernel checks the number.
+        SYS_DUP2 | SYS_DUP3
+            if protected(registers.rsi)
+                && registers.rdi as u32 != registers.rsi as u32
+                && (syscall == SYS_DUP2 || registers.rdx as u32 as u64 & !O_CLOEXEC == 0) =>
+        {
+            Some(-EPERM)
+        }
+        SYS_FCNTL if protected(registers.rdi) && registers.rsi as u32 as u64 == F_SETFD => Some(0),
+        16 if protected(registers.rdi) && matches!(registers.rsi as u32, FIONCLEX | FIOCLEX) => {
+            Some(0)
+        }
+        _ => None,
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum NativeCloseRangeStage {
+    Idle,
+    /// The caller's call is running as the lower part.
+    Lower,
+    /// The lower part returned 0, and the upper part is set up at the
+    /// caller's `syscall` instruction but has not entered yet.
+    Upper,
+    /// The upper part entered and its exit stop is pending.
+    Running,
+}
+
+/// A close_range whose range spans the protected null (240) and console
+/// (241) descriptors runs as two calls, the way the clone3 and network
+/// snapshots replay theirs: the caller's call runs as the lower part, ending
+/// at 239, and its exit stop sets up the upper part, from 242 to the caller's
+/// last descriptor, at the caller's `syscall` instruction. The seccomp entry
+/// of that replay is admitted without a new decision, and its exit stop ends
+/// the call. The caller sees one call: the upper part's result, with its own
+/// rdi, rsi and rdx.
+///
+/// - The upper part drops CLOSE_RANGE_UNSHARE: the lower part already gave
+///   the caller a private table, which the upper part works on.
+/// - A lower part that fails ends the call with its error; the upper part
+///   never runs.
+/// - The descriptor bookkeeping follows each part at its own exit stop, so
+///   it always matches what the kernel did, also when the caller is killed
+///   between the parts. Together the two parts cover the requested range
+///   except 240 and 241.
+/// - close_range is not interruptible on Linux, so no handler may run
+///   between the parts. From the lower part's exit stop to the upper part's
+///   every signal but SIGKILL and SIGSTOP is blocked, and the caller's own
+///   mask is kept here. A signal that arrives meanwhile stays pending and is
+///   delivered when the call returns, as on Linux.
+/// - The two parts are one descriptor-table mutation: the caller holds the
+///   table's mutation barrier from its entry to the upper part's exit stop,
+///   so a CLONE_FILES sibling's descriptor call runs before or after the
+///   whole call. A failed lower part releases the barrier as for any other
+///   call. A CLONE_FILES sibling's `execve` is a deferred stop and cannot run
+///   between the two parts; a thread with its OWN descriptor table that execs
+///   kills a non-leader caller, which then releases the barrier in the exit
+///   path.
+#[derive(Clone, Copy)]
+struct NativeCloseRangeSplit {
+    stage: NativeCloseRangeStage,
+    rip: u64,
+    caller: [u64; 3],
+    upper: [u64; 3],
+    mask: u64,
+}
+
+impl NativeCloseRangeSplit {
+    const IDLE: Self = Self {
+        stage: NativeCloseRangeStage::Idle,
+        rip: 0,
+        caller: [0; 3],
+        upper: [0; 3],
+        mask: 0,
+    };
+
+    /// At the caller's seccomp entry, with the caller's registers.
+    fn lower(registers: &UserRegs, last: u64) -> Self {
+        const CLOSE_RANGE_UNSHARE: u64 = 2;
+        Self {
+            stage: NativeCloseRangeStage::Lower,
+            rip: registers.rip,
+            caller: [registers.rdi, registers.rsi, registers.rdx],
+            upper: [
+                INSTANCE_CONSOLE_FD as u64 + 1,
+                last,
+                registers.rdx as u32 as u64 & !CLOSE_RANGE_UNSHARE,
+            ],
+            mask: 0,
+        }
+    }
+
+    /// At the lower part's exit stop, after it returned 0, with the caller's
+    /// signal mask, which is blocked until the upper part's exit stop.
+    fn replay(&mut self, registers: &mut UserRegs, mask: u64) {
+        self.stage = NativeCloseRangeStage::Upper;
+        self.mask = mask;
+        registers.orig_rax = ginux_core::SYS_CLOSE_RANGE;
+        registers.rax = ginux_core::SYS_CLOSE_RANGE;
+        [registers.rdi, registers.rsi, registers.rdx] = self.upper;
+        registers.rip = self.rip - 2;
+    }
+
+    fn matches_entry(&self, registers: &UserRegs) -> bool {
+        registers.rip == self.rip
+            && registers.orig_rax == ginux_core::SYS_CLOSE_RANGE
+            && [registers.rdi, registers.rsi, registers.rdx] == self.upper
+    }
 }
 
 fn native_arguments_allowed(syscall: u64, registers: &UserRegs, mode: usize) -> bool {
