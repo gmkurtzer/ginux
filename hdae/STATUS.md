@@ -18,9 +18,11 @@
   and all Rust targets in `make build` pass. Linux fixture execution remains
   delegated to exact-head CI because this host is macOS arm64.
 - Open decisions or limitations: none; Gate 48 is a separate Unix-send change.
-- Signed implementation commit `9482014f` is ready for delivery.
-- Exact next action: push Gate 49 and open a referencing pull request, then
-  require exact-head Linux CI and human security review.
+- Signed implementation commit `9482014f` and evidence commit `2caf859e` are
+  delivered in pull request https://github.com/gmkurtzer/ginux/pull/321, with
+  reciprocal links recorded in the gate.
+- Exact next action: require exact-head Linux CI and human security review of
+  pull request #321 before merge or issue closure.
 
 ### Prior checkpoint: Gate 48 immutable pathname Unix send snapshot
 

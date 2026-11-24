@@ -43,8 +43,8 @@ consume one supervisor-owned immutable sockaddr snapshot.
 ## Remaining work
 
 - [ ] Run focused Linux, security, aggregate, and exact-head CI verification.
-- [ ] Commit, push, open the issue-linked pull request, and add reciprocal
-      comments.
+- [x] Committed and pushed the dedicated branch, opened the issue-linked pull
+      request, and added reciprocal comments.
 
 ## Acceptance criteria
 
@@ -111,11 +111,15 @@ consume one supervisor-owned immutable sockaddr snapshot.
 - Planned commits: immutable connect/bind snapshot and deterministic
   regressions; HDAE evidence and reciprocal links.
 - Actual commits: `9482014f` implements immutable connect/bind replay and its
-  deterministic regressions; the evidence/delivery record follows separately.
+  deterministic regressions; `2caf859e` records the local evidence.
+- Pull request: [PR #321](https://github.com/gmkurtzer/ginux/pull/321)
+- Source comment:
+  https://github.com/gmkurtzer/ginux/issues/300#issuecomment-7131725056
+- Pull-request comment:
+  https://github.com/gmkurtzer/ginux/pull/321#issuecomment-7131726895
 
 ## Review policy and outcome
 
-Implementation and pull-request delivery are authorized by the user's current
-request and the repository proactive-remediation policy. This is a security
-checkpoint: keep the gate in `gates-todo/` for exact-head human review before
-merge or issue closure.
+Implementation and pull-request delivery are complete under the repository
+proactive-remediation policy. This is a security checkpoint: keep the gate in
+`gates-todo/` for exact-head human review before merge or issue closure.
