@@ -2088,4 +2088,16 @@ mod tests {
         pipes.duplicate(1, 7, 0, false).unwrap();
         assert_eq!(origin(&pipes, 1, 0), Some((FdKind::PipeWrite, 0)));
     }
+
+    #[test]
+    fn set_groups_pins_capacity_and_error_classification() {
+        let mut table: ProcessTable<4> = ProcessTable::new();
+        let init = table.create_init(Credentials::root()).unwrap();
+        let cred = table.credentials_mut(init).unwrap();
+        let ok = [7u32; MAX_GROUPS];
+        assert!(cred.set_groups(&ok).is_ok());
+        assert_eq!(cred.groups().len(), MAX_GROUPS);
+        let over = [7u32; MAX_GROUPS + 1];
+        assert_eq!(cred.set_groups(&over), Err(ProcessError::GroupLimit));
+    }
 }
