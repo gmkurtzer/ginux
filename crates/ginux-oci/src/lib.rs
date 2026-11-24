@@ -448,16 +448,45 @@ fn unpack_entries<R: Read>(mut archive: Archive<R>, destination: &Path) -> Resul
     Ok(())
 }
 
+/// Resolve a whiteout's parent directory under `root` without following any
+/// symlink component. A whiteout must only ever affect the rootfs being
+/// assembled; a symlinked directory (from a lower layer) would otherwise let
+/// `read_dir`/`remove_path` escape the root and delete arbitrary host files.
+fn safe_whiteout_dir(root: &Path, parent: &Path) -> Result<PathBuf, String> {
+    let mut current = root.to_path_buf();
+    for component in parent.components() {
+        match component {
+            Component::Normal(value) => {
+                current.push(value);
+                match fs::symlink_metadata(&current) {
+                    Ok(metadata) if metadata.file_type().is_symlink() => {
+                        return Err(format!(
+                            "OCI whiteout path traverses a symlink: {}",
+                            current.display()
+                        ));
+                    }
+                    Ok(_) => {}
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(io_error(error)),
+                }
+            }
+            _ => return Err(format!("unsafe OCI whiteout path: {}", parent.display())),
+        }
+    }
+    Ok(current)
+}
+
 fn apply_whiteout(root: &Path, path: &Path) -> Result<(), String> {
     let name = path
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or_else(|| "OCI whiteout name is not UTF-8".to_owned())?;
     let parent = path.parent().unwrap_or_else(|| Path::new(""));
+    let parent_target = safe_whiteout_dir(root, parent)?;
     let target = if name == ".wh..wh..opq" {
-        root.join(parent)
+        parent_target
     } else {
-        root.join(parent).join(name.trim_start_matches(".wh."))
+        parent_target.join(name.trim_start_matches(".wh."))
     };
     if name == ".wh..wh..opq" {
         if target.is_dir() {
@@ -795,5 +824,22 @@ mod tests {
         header.set_mode(0o644);
         header.set_cksum();
         builder.append_data(&mut header, path, body).unwrap();
+    }
+
+    #[test]
+    fn whiteouts_do_not_follow_symlinks_out_of_root() {
+        let root = temp_dir("whiteout-symlink");
+        let outside = temp_dir("whiteout-outside");
+        fs::write(outside.join("victim.txt"), b"secret").unwrap();
+        // opaque whiteout under a symlinked directory must not escape the root
+        std::os::unix::fs::symlink(&outside, root.join("link")).unwrap();
+        assert!(apply_whiteout(&root, Path::new("link/.wh..wh..opq")).is_err());
+        assert!(outside.join("victim.txt").exists());
+        // regular whiteout through an intermediate symlink must not escape either
+        std::os::unix::fs::symlink(&outside, root.join("a")).unwrap();
+        assert!(apply_whiteout(&root, Path::new("a/.wh.victim.txt")).is_err());
+        assert!(outside.join("victim.txt").exists());
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(outside).unwrap();
     }
 }

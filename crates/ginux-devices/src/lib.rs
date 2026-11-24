@@ -744,6 +744,19 @@ mod tests {
     }
 
     #[test]
+    fn device_name_and_frame_size_boundaries_are_exact() {
+        let ok = [b'a'; MAX_DEVICE_NAME];
+        assert!(DeviceName::new(&ok).is_ok());
+        let over = [b'a'; MAX_DEVICE_NAME + 1];
+        assert_eq!(DeviceName::new(&over), Err(DeviceError::InvalidName));
+        let mut net: IsolatedNetwork<2> = IsolatedNetwork::new();
+        let frame = [b'x'; MAX_FRAME_SIZE];
+        assert!(net.send(&frame).is_ok());
+        let over = [b'x'; MAX_FRAME_SIZE + 1];
+        assert_eq!(net.send(&over), Err(DeviceError::FrameTooLarge));
+    }
+
+    #[test]
     fn partition_range_accepts_exact_fit_and_rejects_past_end() {
         let mut partition = Partition::new(block(), 16, 16, false).unwrap();
         assert!(partition.write_at(14, b"xx").is_ok());
@@ -754,5 +767,6 @@ mod tests {
             partition.read_at(16, &mut [0; 1]),
             Err(DeviceError::OutOfRange)
         );
+
     }
 }
