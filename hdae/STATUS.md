@@ -30,9 +30,11 @@
 - Open decisions or limitations: Gate 43 begins only after the consolidated
   acceptance checkpoint; its performance effort has no reliable duration until
   its stable harness and profiling baseline exist.
-- Exact next action: commit and publish the dedicated reconciliation pull
-  request, then stop for consolidated human acceptance. Do not move records to
-  `gates-done` or begin Gate 43 before that acceptance.
+- Delivery: pull request https://github.com/gmkurtzer/ginux/pull/333 contains
+  the signed reconciliation series against `main`.
+- Exact next action: stop for consolidated human review and acceptance of pull
+  request #333. Do not move records to `gates-done` or begin Gate 43 before
+  that acceptance.
 
 ### Prior checkpoint: Gate 50 scoped freestanding Rust flags
 

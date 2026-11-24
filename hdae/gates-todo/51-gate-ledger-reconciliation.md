@@ -61,10 +61,11 @@ acceptance checkpoint before Gate 43 begins.
       systemd, multi-instance, RPM, and allocator verification matrix.
 - [x] Completed forward, reverse, coverage, orphan, lifecycle-uniqueness, and
       locked-history checks across the ledger.
+- [x] Committed and pushed the signed reconciliation series and opened
+      pull request #333 against `main`.
 
 ## Remaining work
 
-- [ ] Commit, push, and open the dedicated reconciliation pull request.
 - [ ] Stop for consolidated human review and acceptance before moving accepted
       records to `gates-done` or beginning Gate 43.
 
@@ -150,6 +151,8 @@ acceptance checkpoint before Gate 43 begins.
   QEMU runs could not bind localhost forwarding ports and one overloaded TCG
   run reported guest soft-lockups. Outside-sandbox clean reruns with fresh
   state passed the aggregate and complete security/recovery matrices.
+- Pull request #333 contains the signed reconciliation series:
+  https://github.com/gmkurtzer/ginux/pull/333
 
 ## Decisions and limitations
 
@@ -165,12 +168,12 @@ acceptance checkpoint before Gate 43 begins.
 
 - Working branch: `hdae/gate-ledger-reconciliation`
 - Intended base: `main`
-- Pull request: intended
+- Pull request: https://github.com/gmkurtzer/ginux/pull/333
 - Planned commits: establish reconciliation and deferrals; reconcile delivered
   gate records; record complete verification and delivery evidence
 - Actual commits: `65ef529c` establishes reconciliation and deferrals;
-  `0a3f555d` reconciles delivered records; final evidence and delivery commit
-  is this gate's closing branch update.
+  `0a3f555d` reconciles delivered records; `83f9b906` records final verification
+  evidence; the final delivery-record update follows these commits.
 
 ## Review policy and outcome
 
