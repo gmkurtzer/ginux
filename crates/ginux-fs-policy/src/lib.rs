@@ -1956,4 +1956,29 @@ mod tests {
         stale.authority.descriptor_generation += 1;
         assert!(!filesystem_hook_authorized(&stale, true));
     }
+
+    #[test]
+    fn rights_contains_requires_every_requested_bit() {
+        let all = [
+            Rights::LOOKUP,
+            Rights::READ,
+            Rights::WRITE,
+            Rights::CREATE,
+            Rights::METADATA,
+            Rights::EXECUTE,
+        ];
+        for required in all {
+            assert!(required.contains(required));
+            for other in all {
+                let joined = required.union(other);
+                assert!(joined.contains(required));
+                assert!(joined.contains(other));
+            }
+        }
+        let need = Rights::READ.union(Rights::WRITE);
+        assert!(need.contains(Rights::READ.union(Rights::WRITE)));
+        assert!(!need.contains(Rights::READ.union(Rights::EXECUTE)));
+        assert!(!Rights::READ.contains(need));
+        assert!(!Rights(0).contains(Rights::LOOKUP));
+    }
 }
