@@ -2,7 +2,30 @@
 
 ## Current checkpoint
 
-### Gate 47 shared-network socket alias authority
+### Gate 48 immutable pathname Unix send snapshot
+
+- Gate 48 is active on `hdae/immutable-unix-sendmsg-snapshot` as the remaining
+  issue #297 security follow-up after Gate 47 and pull request #308.
+- Current `main` validates pathname Unix `sendmsg` from mutable guest memory,
+  then lets the host kernel reread the original header, vectors, destination,
+  and ancillary data. A sharing sibling can therefore change what executes
+  after validation.
+- The approved correction extends the existing bounded read-only native-network
+  snapshot/replay path to connected and pathname-addressed Unix `sendto`,
+  `sendmsg`, and `sendmmsg`; abstract addresses and `SCM_RIGHTS` remain denied.
+- Implementation commit `9d0e30d7` routes the complete Unix send object graph
+  through the read-only snapshot owner and adds a ptrace-controlled regression
+  that mutates the original pathname and payload after replay is staged.
+- Last evidence: `make check`, `make test-unit`, and isolated Python compilation
+  pass. Linux native, security, aggregate, and exact-head CI remain pending.
+- Open decisions or limitations: none; issue #300 remains a separate gate.
+- Exact next action: inspect pull request #315 exact-head CI, repair any
+  regression on this branch, and stop for human security review when it passes.
+- Delivery: pull request https://github.com/gmkurtzer/ginux/pull/315 is open;
+  reciprocal source and pull-request comments are posted. Exact-head CI is the
+  next evidence boundary.
+
+### Prior checkpoint: Gate 47 shared-network socket alias authority
 
 - Gate 47 is technically passed locally on
   `hdae/network-socket-alias-policy` after adding the human-required inbound

@@ -7853,11 +7853,9 @@ fn supervise_native(
                 registers.rdi,
             )
             .unwrap_or_default();
-            if family != 1 || !native_unix_send_allowed(host_pid, syscall, &registers) {
+            if family != 1 {
                 // Non-Internet socket families have no generic host-send
-                // route. Pathname Unix sockets are contained by the tracee's
-                // instance root; abstract Unix and every other family require
-                // a separate bounded owner.
+                // route. Every family needs a separate bounded owner.
                 line(b"emulate surface=unsupported-socket-family result=-1");
                 registers.orig_rax = u64::MAX;
                 task.awaiting_exit = true;
@@ -7871,6 +7869,35 @@ fn supervise_native(
                 }
                 continue;
             }
+            let snapshot = native_network::Pending::snapshot_unix(
+                host_pid,
+                task_index,
+                &registers,
+                &mut network_buffers[task_index],
+            );
+            task.awaiting_exit = true;
+            match snapshot {
+                Ok(snapshot) => {
+                    task.network_call = snapshot;
+                    task.network_call.map(&mut registers);
+                    line(b"mediate surface=immutable-unix-send result=pending");
+                }
+                Err(error) => {
+                    write_all(b"emulate surface=immutable-unix-send result=");
+                    write_i64(error);
+                    write_all(b"\n");
+                    registers.orig_rax = u64::MAX;
+                    task.override_exit = true;
+                    task.override_result = error;
+                }
+            }
+            tasks[task_index] = Some(task);
+            if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+            {
+                native_fail(instance, pid, b"native Unix-send snapshot setup failed");
+            }
+            continue;
         }
         if shared_network
             && matches!(syscall, 44 | 46 | 307)
@@ -11881,34 +11908,6 @@ fn native_unix_address_allowed(pid: usize, address: usize, length: u64) -> bool 
         return false;
     }
     socket_address[2] != 0
-}
-
-fn native_unix_send_allowed(pid: usize, syscall: u64, registers: &UserRegs) -> bool {
-    match syscall {
-        // A connected Unix socket has no per-send destination. Its connect(2)
-        // address was already restricted to an instance-root pathname.
-        44 if registers.r8 == 0 && registers.r9 == 0 => true,
-        44 => native_unix_address_allowed(pid, registers.r8 as usize, registers.r9),
-        46 => {
-            let mut header = [0u8; 16];
-            if registers.rsi == 0 || !read_tracee_bytes(pid, registers.rsi as usize, &mut header) {
-                return false;
-            }
-            if !matches!(
-                native_network::sendmsg_has_scm_rights(pid, registers.rsi),
-                Ok(false)
-            ) {
-                return false;
-            }
-            let address = u64::from_ne_bytes(header[..8].try_into().unwrap());
-            let length = u32::from_ne_bytes(header[8..12].try_into().unwrap()) as u64;
-            (address == 0 && length == 0)
-                || native_unix_address_allowed(pid, address as usize, length)
-        }
-        // sendmmsg(2) needs its own bounded per-message pathname owner before
-        // it may reach a host Unix socket.
-        _ => false,
-    }
 }
 
 fn native_sockaddr_with_port(word: u64, port: u16) -> u64 {
