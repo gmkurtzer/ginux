@@ -1400,6 +1400,53 @@ long native_fixture_main(const word *stack)
                      call3(59, (word)"/usr/bin/bash", (word)exec_argv, (word)exec_env));
         return 0;
     }
+    case 'F': {
+        /* Pipe descriptor tracking follows the host descriptor table: a
+         * pipe a CLONE_FILES child closes is closed for its creator too, a
+         * file duplicated over a pipe end replaces it, a pipe end duplicated
+         * onto itself stays one, and exec drops the
+         * close-on-exec pipes. Many more pipes than are open at once run
+         * through it. The exec at the end runs this scenario again with
+         * "after-exec". */
+        int fds[2] = {-1, -1};
+        const char *expected = "after-exec", *argument = stack[0] > 1 ? (const char *)stack[2] : "";
+        while (*expected && *argument == *expected) ++argument, ++expected;
+        if (*expected == 0 && *argument == 0) {
+            /* The scenario open reused the number of a close-on-exec pipe
+             * end, and closing it is not a pipe close. */
+            int kept[8];
+            long made = 0;
+            while (made < 8 && call3(293, (word)&kept[made], 0, 0) == 0) made += 2;
+            print_result("GINUX_FIXTURE: exec-pipes=", made);
+            for (long index = 0; index < made; ++index) call3(3, kept[index], 0, 0);
+            print_result("GINUX_FIXTURE: exec-reused-close=", call3(3, fd, 0, 0));
+            return 0;
+        }
+        int status = 0;
+        long released = 0;
+        for (int round = 0; round < 16; ++round) {
+            if (call3(293, (word)fds, 0x80000 /* O_CLOEXEC */, 0) != 0) break;
+            long pid = call5(56, 0x400 /* CLONE_FILES */ | 17, 0, 0, 0, 0);
+            if (pid == 0) call3(231, call3(3, fds[0], 0, 0) | call3(3, fds[1], 0, 0), 0, 0);
+            if (pid < 0 || call4(61, pid, (word)&status, 0, 0) != pid || status != 0
+                || call3(72, fds[0], 1 /* F_GETFD */, 0) != -9
+                || call3(72, fds[1], 1, 0) != -9) break;
+            ++released;
+        }
+        print_result("GINUX_FIXTURE: shared-close-released=", released);
+        if (call3(293, (word)fds, 0, 0) != 0) return 82;
+        print_result("GINUX_FIXTURE: dup2-over-pipe=", call3(33, fd, fds[0], 0) == fds[0]);
+        /* dup2 onto itself leaves the write end a pipe end. */
+        print_result("GINUX_FIXTURE: dup2-self-pipe=", call3(33, fds[1], fds[1], 0) == fds[1]);
+        call3(3, fds[0], 0, 0);
+        call3(3, fds[1], 0, 0);
+        for (int round = 0; round < 3; ++round)
+            if (call3(293, (word)fds, 0x80000, 0) != 0) return 83;
+        word exec_argv[] = {(word)"/usr/bin/bash", (word)"after-exec", 0}, exec_env[] = {0};
+        print_result("GINUX_FIXTURE: exec=",
+                     call3(59, (word)"/usr/bin/bash", (word)exec_argv, (word)exec_env));
+        return 0;
+    }
     case 'M': {
         /* stdout is a regular file whose conflicting host-process lock is
          * released after this test observes the sibling waiting. */

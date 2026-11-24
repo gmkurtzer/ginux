@@ -459,6 +459,26 @@ port_forwards = ["udp/lo/18083/18081"]'''))
                                   "GINUX_FIXTURE: exec-dropped-console=0",
                                   "GINUX_FIXTURE: exec-kept-console=4"], code, out)
 
+        # Pipe descriptor tracking follows the host descriptor table too:
+        # pipes a CLONE_FILES child closes, pipe ends a dup2 replaces and
+        # close-on-exec pipes an exec drops leave it, a pipe end dup2 copies
+        # onto itself stays, and a workload that makes many more pipes than
+        # it holds open at once keeps running.
+        # Each pipe2 and each close of a tracked pipe end is one task-pipe
+        # record: 16 shared rounds of three, the replaced pair's pipe2 and
+        # the close of its write end after the dup2 onto itself (the
+        # replaced read end's close is not one), three close-on-exec pipe2
+        # calls, and after the exec four pipe2 calls and eight closes.
+        code, out = run("F-pipe-tracking", configured)
+        fixture = [line for line in out.splitlines() if line.startswith("GINUX_FIXTURE: ")]
+        check("pipe tracking follows shared tables, dup2 and exec", code == 0
+              and fixture == ["GINUX_FIXTURE: shared-close-released=16",
+                              "GINUX_FIXTURE: dup2-over-pipe=1",
+                              "GINUX_FIXTURE: dup2-self-pipe=1",
+                              "GINUX_FIXTURE: exec-pipes=8",
+                              "GINUX_FIXTURE: exec-reused-close=0"]
+              and out.count("surface=task-pipe ") == 16 * 3 + 2 + 3 + 4 + 8, code, out)
+
         # Force a shared-table mutation to remain in the host kernel while a
         # sibling reaches another descriptor operation. The host process owns
         # the conflicting byte-range lock; without the supervisor barrier the
