@@ -19,8 +19,9 @@
 - Open decisions or limitations: none.
 - Signed implementation commit `f845cbf9` contains the correction and local
   evidence.
-- Exact next action: deliver the issue-linked pull request, then require
-  exact-head Linux CI before integration.
+- Delivery: pull request https://github.com/gmkurtzer/ginux/pull/322 and both
+  reciprocal discussion links are present.
+- Exact next action: require exact-head Linux CI before integration.
 
 ### Prior checkpoint: Gate 48 immutable pathname Unix send snapshot
 

@@ -97,9 +97,14 @@ binary builds.
   evidence and reciprocal links.
 - Actual commits: `f845cbf9` scopes the existing freestanding flags, adds the
   Linux host-package regression, and records the local evidence.
+- Pull request: [PR #322](https://github.com/gmkurtzer/ginux/pull/322)
+- Source comment:
+  https://github.com/gmkurtzer/ginux/issues/318#issuecomment-7135134269
+- Pull-request comment:
+  https://github.com/gmkurtzer/ginux/pull/322#issuecomment-7135135213
 
 ## Review policy and outcome
 
-Implementation and pull-request delivery are authorized by the repository's
+Implementation and pull-request delivery are complete under the repository's
 proactive-remediation policy. Keep the gate in `gates-todo/` until exact-head
 Linux review and merge.
