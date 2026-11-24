@@ -17,8 +17,10 @@
   test-unit`, and `make build` pass on macOS arm64. Exact x86-64 Linux behavior
   remains delegated to pull-request CI.
 - Open decisions or limitations: none.
-- Exact next action: commit and deliver the issue-linked pull request, then
-  require exact-head Linux CI before integration.
+- Signed implementation commit `f845cbf9` contains the correction and local
+  evidence.
+- Exact next action: deliver the issue-linked pull request, then require
+  exact-head Linux CI before integration.
 
 ### Prior checkpoint: Gate 48 immutable pathname Unix send snapshot
 

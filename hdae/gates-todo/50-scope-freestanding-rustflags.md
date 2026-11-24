@@ -41,7 +41,8 @@ binary builds.
 
 ## Remaining work
 
-- [ ] Run local checks and exact-head Linux CI.
+- [x] Run local host-package, lint, unit, and canonical build checks.
+- [ ] Run exact-head Linux CI.
 - [ ] Deliver the verified branch in a linked pull request and add reciprocal
       issue/PR comments.
 
@@ -94,7 +95,8 @@ binary builds.
   merge.
 - Planned commits: scoped build configuration and Linux regression; HDAE
   evidence and reciprocal links.
-- Actual commits: pending.
+- Actual commits: `f845cbf9` scopes the existing freestanding flags, adds the
+  Linux host-package regression, and records the local evidence.
 
 ## Review policy and outcome
 
