@@ -91,6 +91,9 @@ consume one supervisor-owned immutable sockaddr snapshot.
 - `make build` -> all Rust x86-64 Linux targets passed; the subsequent host C
   fixture compile is unavailable with the macOS arm64 compiler, so focused
   native execution is delegated to exact-head Linux CI.
+- `clang -target x86_64-unknown-linux-gnu ... -c
+  tests/fixtures/native-fixture.c` -> the native fixture passes x86-64 syntax
+  and warning validation without linking on the macOS host.
 
 ## Decisions and limitations
 
@@ -107,7 +110,8 @@ consume one supervisor-owned immutable sockaddr snapshot.
   and merge.
 - Planned commits: immutable connect/bind snapshot and deterministic
   regressions; HDAE evidence and reciprocal links.
-- Actual commits: pending until the signed implementation commit is created.
+- Actual commits: `9482014f` implements immutable connect/bind replay and its
+  deterministic regressions; the evidence/delivery record follows separately.
 
 ## Review policy and outcome
 
