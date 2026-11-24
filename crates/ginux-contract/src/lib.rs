@@ -2751,4 +2751,38 @@ mod tests {
         assert_eq!(budget.emitted(), 2);
         assert_eq!(budget.dropped(), 4);
     }
+
+    #[test]
+    fn audit_budget_invariants_hold_for_all_limits_and_loads() {
+        for limit in [0u64, 1, 2, 3, 7, 16, 100] {
+            let mut budget = AuditBudget::new(limit);
+            let mut emitted = 0u64;
+            let mut dropped = 0u64;
+            for n in 1..=200u64 {
+                let disposition = budget.admit();
+                if n <= limit {
+                    assert_eq!(
+                        disposition,
+                        AuditDisposition::Emit,
+                        "limit {limit} admit {n}"
+                    );
+                    emitted += 1;
+                } else {
+                    dropped += 1;
+                    let expected = if dropped.is_power_of_two() {
+                        AuditDisposition::DropAndReport(dropped)
+                    } else {
+                        AuditDisposition::Drop
+                    };
+                    assert_eq!(
+                        disposition, expected,
+                        "limit {limit} admit {n} dropped {dropped}"
+                    );
+                }
+                assert_eq!(budget.emitted(), emitted, "limit {limit} admit {n}");
+                assert_eq!(budget.dropped(), dropped, "limit {limit} admit {n}");
+                assert!(budget.emitted() <= limit, "limit {limit} admit {n}");
+            }
+        }
+    }
 }
