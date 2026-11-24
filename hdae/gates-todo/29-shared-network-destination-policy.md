@@ -126,3 +126,13 @@ supervisor-owned immutable arguments for the host effect.
 - `8476539c` — immutable bounded native network-send snapshots.
 - `b2812bdc` — positive, negative, bounds, connected-send, and mutation tests.
 - `195a38bd` — implementation checkpoint and local evidence.
+
+## Gate 51 reconciliation
+
+- Pull request #289 is merged into `main`; bounded immutable send snapshots
+  and destination-policy regressions remain present.
+- Fresh Gate 51 contract, security, aggregate, systemd, and multi-instance
+  runs revalidate explicit destinations, connected sends, bounds, and shared
+  networking without weakening denial-before-effect behavior.
+- Technical status: passed. Lifecycle status remains open pending the
+  consolidated human acceptance checkpoint.

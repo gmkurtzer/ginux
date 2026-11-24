@@ -94,3 +94,11 @@ handling of mutable inputs, unknown operations, and stale catalogs.
 
 Technically passed under the authorized batch. Kept open for the final human
 checkpoint on the combined pull request.
+
+## Gate 51 reconciliation
+
+- Pull request #292 is merged into `main`. Fresh Gate 51 contract, security,
+  recovery, aggregate, systemd, and multi-instance runs revalidate
+  contract-before-effect ordering, immutable inputs, and fail-closed routing.
+- Technical status remains passed; lifecycle status remains open pending the
+  consolidated human acceptance checkpoint.

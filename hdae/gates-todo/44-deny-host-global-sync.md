@@ -30,8 +30,9 @@ Make the runtime contract and filesystem-operation inventory deliberately deny
 
 ## Status
 
-Technically passed on `hdae/deny-host-global-sync`; pending pull-request CI and
-human acceptance.
+Pull request #304 is merged into `main`. Technical status remains passed;
+lifecycle status remains open pending the consolidated Gate 51 human
+acceptance checkpoint.
 
 ## Evidence
 
@@ -39,3 +40,6 @@ human acceptance.
 - `cargo test -p ginux-fs-policy`
 - `make check`
 - `make test-unit`
+- Fresh Gate 51 `make check test-cli test-unit`, `make test-contract`,
+  `make test-security`, and aggregate `make test` revalidate the explicit
+  fail-closed classification and generated inventories on current `main`.

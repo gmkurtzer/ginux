@@ -2,7 +2,41 @@
 
 ## Current checkpoint
 
-### Gate 50 scoped freestanding Rust flags
+### Gate 51 HDAE gate-ledger reconciliation
+
+- The human approved a complete gate-ledger reconciliation batch on 2026-11-24.
+- The authoritative audit runs from current `origin/main` on dedicated branch
+  `hdae/gate-ledger-reconciliation`; the primary checkout's older Gate 31
+  branch is not used as repository authority.
+- Initial state was 29 closed gates, 29 open gates, and one deferred gate.
+  Gate 11 is now deferred under its approved return condition, yielding 29
+  closed, 29 open, and two deferred records.
+- Twenty-seven open gates have merged implementations but stale or
+  acceptance-pending records. Gate 11 remains partial at its unchanged 4%
+  thread-performance threshold, Gate 43 is not implemented, and Gate 14 remains
+  intentionally deferred.
+- Every referenced gate pull request is merged and the final GitHub audit found
+  no open pull request. Merge state is delivery evidence, not automatic human
+  acceptance.
+- Active skill: `hdae-development`
+- Skill path: `.agents/skills/hdae-development/SKILL.md`
+- Reload after context shift: required
+- Last evidence: the complete static, unit, aggregate, security, recovery,
+  contract, systemd, multi-instance, RPM, and allocator matrix passed against
+  `3d4ececf`; the final `origin/main` delta through `3185b79b` contains only PR
+  #332's device boundary unit test, and the full static/unit lane passed at that
+  final base. Ledger uniqueness, locked-history, forward, reverse, coverage,
+  and orphan checks also pass.
+- Open decisions or limitations: Gate 43 begins only after the consolidated
+  acceptance checkpoint; its performance effort has no reliable duration until
+  its stable harness and profiling baseline exist.
+- Delivery: pull request https://github.com/gmkurtzer/ginux/pull/333 contains
+  the signed reconciliation series against `main`.
+- Exact next action: stop for consolidated human review and acceptance of pull
+  request #333. Do not move records to `gates-done` or begin Gate 43 before
+  that acceptance.
+
+### Prior checkpoint: Gate 50 scoped freestanding Rust flags
 
 - Gate 50 is active on `hdae/scope-freestanding-rustflags` for issue #318.
 - The x86-64 GNU target configuration applied freestanding linker flags to

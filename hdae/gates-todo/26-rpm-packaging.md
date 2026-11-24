@@ -281,3 +281,14 @@ verification, publish one dedicated pull request and stop for human acceptance.
 Technical passage alone does not close the gate. All mandatory criteria and the
 post-merge `make run-host` refinement now pass; Gate 26 remains in
 `gates-todo/` pending explicit human acceptance.
+
+## Gate 51 reconciliation
+
+- Pull request #282 and its authorized post-merge host-run refinements are in
+  `main`; the RPM/SRPM, state layout, compiled OCI acquisition, recipes, and
+  package lifecycle are current.
+- Fresh Gate 51 RPM metadata, clean package lifecycle, allocator package,
+  aggregate, security, recovery, and Rocky systemd verification recheck the
+  installed product rather than only source-tree binaries.
+- Technical status: passed. Lifecycle status remains open pending the
+  consolidated human acceptance checkpoint.

@@ -87,3 +87,12 @@ upgrade, persistence, recovery, and removal behavior.
 
 Technically passed under the authorized batch. Kept open for the final human
 checkpoint on the combined pull request.
+
+## Gate 51 reconciliation
+
+- Pull request #292 is merged into `main`. Fresh Gate 51 security, recovery,
+  RPM metadata, clean install/reinstall/erase, allocator package, and aggregate
+  runs revalidate least privilege, verified acquisition, persistence, and
+  operator recovery.
+- Technical status remains passed; lifecycle status remains open pending the
+  consolidated human acceptance checkpoint.

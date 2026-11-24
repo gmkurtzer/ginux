@@ -92,3 +92,12 @@ pressure state without exposing host-global memory information.
 
 The batch selected virtual cgroup views as the narrowest supported interface.
 Technically passed; kept open for the final human checkpoint on the combined PR.
+
+## Gate 51 reconciliation
+
+- Pull request #292 is merged into `main`. Fresh Gate 51 allocator, virtual
+  kernel, security, systemd, and concurrent-instance runs revalidate the
+  `memory.max`/`memory.current` interface, bounded credits, pressure recovery,
+  and instance isolation.
+- Technical status remains passed; lifecycle status remains open pending the
+  consolidated human acceptance checkpoint.

@@ -88,3 +88,12 @@ lifecycle authority stays inside the owning instance and is revoked reliably.
 
 Technically passed under the authorized batch. Kept open for the final human
 checkpoint on the combined pull request.
+
+## Gate 51 reconciliation
+
+- Pull request #292 is merged into `main`. Fresh Gate 51 security, recovery,
+  aggregate, complete Rocky systemd, and concurrent-instance runs revalidate
+  process, descriptor, root, network, device, virtual-kernel, and lifecycle
+  separation.
+- Technical status remains passed; lifecycle status remains open pending the
+  consolidated human acceptance checkpoint.

@@ -211,3 +211,16 @@ automatically through the HDAE implementation loop. Local technical evidence
 passes after the inbound fix. Exact-head pull-request CI and human acceptance
 are split at the checkpoint: CI passes on inbound-fix evidence head
 `d1abc738`, while human acceptance remains pending.
+
+## Gate 51 reconciliation
+
+- Pull request #308 is merged into `main`; authoritative socket objects,
+  descriptor-local close-on-exec state, mutation barriers, outbound denial,
+  and inbound `SCM_RIGHTS` reclamation are present in the current tree.
+- Fresh Gate 51 static, unit, aggregate, contract, security, recovery,
+  systemd, and multi-instance verification rechecks the surrounding network,
+  descriptor, and lifecycle boundaries; the original exact-head Linux suite
+  remains the criterion-specific descriptor-transfer evidence.
+- Technical status: passed. Lifecycle status remains open pending the
+  consolidated human security acceptance checkpoint. General `SCM_RIGHTS`
+  support remains intentionally outside this gate.

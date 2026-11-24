@@ -116,3 +116,12 @@ complete, instance-isolated output.
 ## Review policy and outcome
 Technically passed checkpoint gate delivered in pull request 267. Stop for
 human review. Do not merge or close either Gate 23 or Gate 24 pull request.
+
+## Gate 51 reconciliation
+
+- Pull request #267 is merged into `main`; the bounded credential tombstone
+  and credential-after-reap regression are present in the current tree.
+- Fresh Gate 51 aggregate, complete Rocky systemd, recovery, and concurrent
+  instance runs revalidate concurrent service output after child reaping.
+- Technical status: passed. Lifecycle status remains open pending the
+  consolidated human acceptance checkpoint.

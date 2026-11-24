@@ -107,3 +107,12 @@ Technically passed checkpoint gate. The sysinfo correction passes focused,
 aggregate, full systemd, and concurrent-instance evidence after the separately
 approved Gate 24 correction. Publish it and stop for human review; technical
 passage does not close Gate 23.
+
+## Gate 51 reconciliation
+
+- Pull request #266 is merged into `main`; the virtual sysinfo correction and
+  focused regressions are present in the current tree.
+- Fresh Gate 51 aggregate, complete Rocky systemd, recovery, and concurrent
+  instance runs revalidate configured virtual memory and per-instance counters.
+- Technical status: passed. Lifecycle status remains open pending the
+  consolidated human acceptance checkpoint.

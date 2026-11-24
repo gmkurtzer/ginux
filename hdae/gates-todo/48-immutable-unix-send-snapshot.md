@@ -48,7 +48,7 @@ destination, payload, vectors, or ancillary data after validation.
 
 - [x] Extend snapshot validation and replay to pathname Unix sends.
 - [x] Add deterministic regressions for mutation and ancillary-data denial.
-- [ ] Run the Linux focused regression plus security and aggregate verification.
+- [x] Run the Linux focused regression plus security and aggregate verification.
 - [x] Commit, push, open the issue-linked pull request, and add reciprocal
       comments.
 
@@ -128,3 +128,13 @@ Implementation and pull-request delivery are authorized by the user's current
 request and the repository proactive-remediation policy. This is a security
 checkpoint: keep the gate in `gates-todo/` for exact-head human review before
 merge or issue closure.
+
+## Gate 51 reconciliation
+
+- Pull request #315 is merged into `main`; exact-head Linux CI and the merged
+  native Unix snapshot regression passed after the disposable fixture
+  permission correction.
+- The fresh Gate 51 static, unit, aggregate, security, recovery, contract, and
+  systemd matrix rechecks the surrounding network and lifecycle boundaries.
+- Technical status: passed. Lifecycle status remains open pending the
+  consolidated human acceptance checkpoint.

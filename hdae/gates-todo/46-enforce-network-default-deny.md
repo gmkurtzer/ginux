@@ -29,11 +29,16 @@ default-deny model.
 
 ## Status
 
-Technically passed on `hdae/network-default-deny`; pending pull-request CI and
-human acceptance.
+Pull request #306 is merged into `main`. Technical status remains passed;
+lifecycle status remains open pending the consolidated Gate 51 human
+acceptance checkpoint.
 
 ## Evidence
 
 - `cargo test -p ginux-instance network_default_deny_rejects_empty_allow_lists`
 - `cargo test -p ginux-instance`
 - `make check`
+- Fresh Gate 51 `make check test-cli test-unit`, `make test-contract`,
+  `make test-security`, concurrent-instance networking, and aggregate
+  `make test` revalidate empty-list default denial and explicit grants on
+  current `main`.

@@ -284,6 +284,16 @@ before the native filesystem lane claims any syscall.
 Security checkpoint. The approved gate may run autonomously through repair,
 security review, complete final testing, commit, push, and pull-request update.
 Stop after delivering the repaired pull request for explicit human review.
-Gate 31 is partial at exact head `c4609fbe`; passing tests do not override the
-unresolved exact-head security findings, and pull-request delivery does not
-close the gate.
+The exact-head review findings were repaired before pull request #291 merged;
+the operation inventory, route interlocks, capability model, oracle-sensitivity
+tests, bounded socket behavior, and package lifecycle all passed. Technical
+status is passed, while lifecycle status remains open pending the consolidated
+Gate 51 human acceptance checkpoint.
+
+## Gate 51 reconciliation
+
+- Pull request #291 is merged into `main`; the repaired exact head and its
+  regression evidence are present in the current tree.
+- Fresh Gate 51 static, unit, aggregate, security, recovery, contract, Rocky
+  systemd, multi-instance, and packaged-product runs revalidate the foundation
+  while `fs_hooks` continues to claim no filesystem syscall.

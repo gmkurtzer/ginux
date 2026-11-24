@@ -30,11 +30,15 @@ success or failure acknowledgement returned to the instance.
 
 ## Status
 
-Technically passed on `hdae/preserve-netlink-ack-errors`; pending pull-request
-CI and human acceptance.
+Pull request #305 is merged into `main`. Technical status remains passed;
+lifecycle status remains open pending the consolidated Gate 51 human
+acceptance checkpoint.
 
 ## Evidence
 
 - `cargo test -p ginux-core loopback_ack`
 - `cargo clippy -p ginux-core --all-targets -- -D warnings`
 - `make check`
+- Fresh Gate 51 `make check test-cli test-unit`, `make test-security`, the
+  complete Rocky systemd matrix, and aggregate `make test` revalidate exact
+  loopback acknowledgement result preservation on current `main`.
