@@ -659,6 +659,21 @@ mod tests {
         assert!(safe_tar_path(Path::new("/absolute")).is_err());
     }
 
+    #[test]
+    fn reference_rejects_empty_registry_or_repository_parts() {
+        let digest = format!("sha256:{}", "a".repeat(64));
+        assert!(parse_reference(&format!("/alpine@{digest}")).is_err());
+        assert!(parse_reference(&format!("docker.io/@{digest}")).is_err());
+    }
+
+    #[test]
+    fn digest_requires_exactly_64_hex_digits() {
+        assert!(validate_digest("sha256:aaaa").is_err());
+        assert!(validate_digest(&format!("sha256:{}", "a".repeat(63))).is_err());
+        assert!(validate_digest(&format!("sha256:{}", "a".repeat(64))).is_ok());
+        assert!(validate_digest(&format!("sha256:{}", "a".repeat(65))).is_err());
+    }
+
     fn cache_bytes(cache: &Path, bytes: &[u8]) -> String {
         let hex = format!("{:x}", Sha256::digest(bytes));
         let directory = cache.join("blobs/sha256");
