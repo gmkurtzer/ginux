@@ -742,4 +742,17 @@ mod tests {
         );
         assert_eq!(registry.open(1, b"null").unwrap(), fd);
     }
+
+    #[test]
+    fn device_name_and_frame_size_boundaries_are_exact() {
+        let ok = [b'a'; MAX_DEVICE_NAME];
+        assert!(DeviceName::new(&ok).is_ok());
+        let over = [b'a'; MAX_DEVICE_NAME + 1];
+        assert_eq!(DeviceName::new(&over), Err(DeviceError::InvalidName));
+        let mut net: IsolatedNetwork<2> = IsolatedNetwork::new();
+        let frame = [b'x'; MAX_FRAME_SIZE];
+        assert!(net.send(&frame).is_ok());
+        let over = [b'x'; MAX_FRAME_SIZE + 1];
+        assert_eq!(net.send(&over), Err(DeviceError::FrameTooLarge));
+    }
 }
