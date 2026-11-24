@@ -7,6 +7,7 @@ cache=$state_root/images/gate125-fixture
 rootfs=$cache/rootfs.tar
 name=maintenance
 directory=$state_root/instances/$name
+runtime_directory=/run/ginux/instances/$name
 
 rm -rf "$state_root/instances" "$state_root/work" "$cache"
 mkdir -p "$state_root/instances" "$state_root/work" "$cache" "$image_root"
@@ -67,13 +68,14 @@ fi
 sleep 60 &
 fake_pid=$!
 fake_start=$(awk '{ print $22 }' "/proc/$fake_pid/stat")
-printf '%s %s\n' "$fake_pid" "$fake_start" >"$directory/supervisor.pid"
+mkdir -p "$runtime_directory"
+printf '%s %s\n' "$fake_pid" "$fake_start" >"$runtime_directory/supervisor.pid"
 if /usr/local/bin/ginux lock "$name" >/dev/null 2>&1; then
     printf '%s\n' 'running instance contract lock was incorrectly changed' >&2
     exit 1
 fi
 test "$(awk -F '\\t' '$1 == "contract" && $2 == "unlocked" { count++ } END { print count + 0 }' "$directory/deployment.state")" -eq 1
-rm -f "$directory/supervisor.pid"
+rm -f "$runtime_directory/supervisor.pid"
 kill "$fake_pid"
 wait "$fake_pid" 2>/dev/null || true
 fake_pid=
