@@ -1217,5 +1217,4 @@ mod tests {
         rec[40] = b'/';
         assert_eq!(Index::new(&buf).err(), Some(VfsError::InvalidIndex));
     }
-
 }
