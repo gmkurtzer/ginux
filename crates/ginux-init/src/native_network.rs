@@ -1,9 +1,10 @@
-//! Immutable native network-send arguments.
+//! Immutable native network arguments.
 //!
-//! The supervisor copies every userspace object consumed by sendto/sendmsg/
-//! sendmmsg into a private read-only tracee mapping, then makes the host
-//! syscall consume only that snapshot.  sendmmsg is replayed as bounded
-//! sendmsg calls because Linux writes `msg_len` into the caller's array.
+//! The supervisor copies every userspace object consumed by connect, bind,
+//! sendto, sendmsg, and sendmmsg into a private read-only tracee mapping, then
+//! makes the host syscall consume only that snapshot. sendmmsg is replayed as
+//! bounded sendmsg calls because Linux writes `msg_len` into the caller's
+//! array.
 
 use crate::supervisor::{poke_tracee_bytes, syscall6, UserRegs, EFAULT, EINVAL, EPERM};
 
@@ -20,6 +21,8 @@ pub const MAX_RECEIVED_RIGHTS: usize = 253;
 const SYS_SENDTO: u64 = 44;
 const SYS_SENDMSG: u64 = 46;
 const SYS_SENDMMSG: u64 = 307;
+const SYS_CONNECT: u64 = 42;
+const SYS_BIND: u64 = 49;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Phase {
@@ -54,6 +57,8 @@ pub struct Pending {
     address: u64,
     pub result: i64,
     pub netlink_sequence: u32,
+    sockaddr_offset: usize,
+    sockaddr_word: u64,
 }
 
 pub struct Buffer {
@@ -176,7 +181,47 @@ impl Pending {
             address: 0,
             result: 0,
             netlink_sequence: 0,
+            sockaddr_offset: 0,
+            sockaddr_word: 0,
         }
+    }
+
+    pub fn snapshot_sockaddr(
+        pid: usize,
+        slot: usize,
+        regs: &UserRegs,
+        buffer: &mut Buffer,
+    ) -> Result<Self, i64> {
+        if !matches!(regs.orig_rax, SYS_CONNECT | SYS_BIND) {
+            return Err(-EINVAL);
+        }
+        buffer.reset();
+        let mut pending = Self {
+            phase: Phase::Map,
+            original_syscall: regs.orig_rax,
+            original: arguments(regs),
+            rip: regs.rip,
+            address: BASE + slot as u64 * STRIDE,
+            ..Self::empty()
+        };
+        let (offset, destination) =
+            snapshot_destination(pid, regs.rsi, regs.rdx, buffer, AddressKind::Internet)?;
+        let destination = destination.ok_or(-EINVAL)?;
+        pending.message_count = 1;
+        pending.destinations[0] = Some(destination);
+        pending.sockaddr_offset = offset;
+        pending.sockaddr_word = buffer.read_u64(offset);
+        pending.replay[0] = [regs.rdi, pending.address + offset as u64, regs.rdx, 0, 0, 0];
+        Ok(pending)
+    }
+
+    pub fn sockaddr_word(&self) -> u64 {
+        self.sockaddr_word
+    }
+
+    pub fn set_sockaddr_word(&mut self, buffer: &mut Buffer, word: u64) {
+        buffer.write_u64(self.sockaddr_offset, word);
+        self.sockaddr_word = word;
     }
 
     pub fn snapshot(

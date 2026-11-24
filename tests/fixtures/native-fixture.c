@@ -796,6 +796,40 @@ long native_fixture_main(const word *stack)
         print_result("GINUX_FIXTURE: network-race-mutated=", allowed.port == 0xa246);
         return 0;
     }
+    case 'B': {
+        struct address { unsigned short family, port; unsigned address; char zero[8]; };
+        static struct address allowed = {2, 0xa146, 0x0100007f, {0}};
+        struct address actual = {0};
+        unsigned actual_length = sizeof actual;
+        long socket = call3(41, 2, 2, 0);
+        if (socket < 0) return 97;
+        print_result("GINUX_FIXTURE: network-race-address=", (word)&allowed);
+        print_result("GINUX_FIXTURE: network-race-bind=",
+                     call3(49, socket, (word)&allowed, sizeof allowed));
+        print_result("GINUX_FIXTURE: network-race-bound-allowed=",
+                     call3(51, socket, (word)&actual, (word)&actual_length) == 0
+                     && actual.port == 0xa146);
+        print_result("GINUX_FIXTURE: network-race-mutated=", allowed.port == 0xa246);
+        return 0;
+    }
+    case 'D': {
+        struct address { unsigned short family, port; unsigned address; char zero[8]; };
+        static struct address allowed = {2, 0xa146, 0x0100007f, {0}};
+        char payload = 'x', received = 0;
+        long receiver = call3(41, 2, 2, 0), sender = call3(41, 2, 2, 0);
+        if (receiver < 0 || sender < 0
+            || call3(49, receiver, (word)&allowed, sizeof allowed) < 0)
+            return 98;
+        print_result("GINUX_FIXTURE: network-race-address=", (word)&allowed);
+        print_result("GINUX_FIXTURE: network-race-connect=",
+                     call3(42, sender, (word)&allowed, sizeof allowed));
+        print_result("GINUX_FIXTURE: network-race-connected-send=",
+                     call6(44, sender, (word)&payload, 1, 0, 0, 0));
+        print_result("GINUX_FIXTURE: network-race-connected-recv=",
+                     call6(45, receiver, (word)&received, 1, 0, 0, 0));
+        print_result("GINUX_FIXTURE: network-race-mutated=", allowed.port == 0xa246);
+        return 0;
+    }
     case 'd': {
         /* descriptors: the launcher passed a host directory as 239, 242 and
          * 300; only the protected null (240) and console (241) stay open. */
