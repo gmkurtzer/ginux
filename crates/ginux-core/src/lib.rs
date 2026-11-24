@@ -919,4 +919,20 @@ mod tests {
         assert_eq!(decide_balanced(435).action, Action::Deny(38));
         assert_eq!(decide_balanced(247).action, Action::Deny(38));
     }
+
+    #[test]
+    fn writev_admission_pins_fd_and_iovec_boundaries() {
+        // writev (20) mirrors write: only stdout/stderr, bounded iovec count.
+        for fd in 0u64..6 {
+            for iovcnt in [0u64, 1, 15, 16, 17, 32, 100] {
+                let allowed = matches!(fd, 1 | 2) && iovcnt <= 16;
+                assert_eq!(
+                    balanced_arguments_allowed(20, fd, 0, iovcnt),
+                    allowed,
+                    "writev fd {fd} iovcnt {iovcnt}"
+                );
+            }
+        }
+    }
+
 }
