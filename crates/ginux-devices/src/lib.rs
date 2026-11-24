@@ -555,6 +555,29 @@ mod tests {
     }
 
     #[test]
+    fn revoke_only_tears_down_its_own_instance() {
+        let mut registry: DeviceRegistry<8, 8> = DeviceRegistry::new();
+        registry
+            .assign(1, 10, DeviceName::new(b"null").unwrap(), DeviceKind::Null)
+            .unwrap();
+        registry
+            .assign(2, 11, DeviceName::new(b"zero").unwrap(), DeviceKind::Zero)
+            .unwrap();
+        let one = registry.open(1, b"null").unwrap();
+        let two = registry.open(2, b"zero").unwrap();
+        registry.revoke(1);
+        assert_eq!(
+            registry.write(1, one, b"x"),
+            Err(DeviceError::InvalidDescriptor)
+        );
+        assert_eq!(
+            registry.write(2, two, b"keep"),
+            Err(DeviceError::PermissionDenied)
+        );
+        assert!(registry.open(2, b"zero").is_ok());
+    }
+
+    #[test]
     fn registry_projects_only_assigned_devices_and_uses_virtual_handles() {
         let mut registry: DeviceRegistry<8, 8> = DeviceRegistry::new();
         registry
