@@ -42,7 +42,7 @@ consume one supervisor-owned immutable sockaddr snapshot.
 
 ## Remaining work
 
-- [ ] Run focused Linux, security, aggregate, and exact-head CI verification.
+- [x] Run focused Linux, security, aggregate, and exact-head CI verification.
 - [x] Committed and pushed the dedicated branch, opened the issue-linked pull
       request, and added reciprocal comments.
 
@@ -123,3 +123,13 @@ consume one supervisor-owned immutable sockaddr snapshot.
 Implementation and pull-request delivery are complete under the repository
 proactive-remediation policy. This is a security checkpoint: keep the gate in
 `gates-todo/` for exact-head human review before merge or issue closure.
+
+## Gate 51 reconciliation
+
+- Pull request #321 is merged into `main`; its exact-head Linux native
+  supervision and required CI verify immutable connect/bind replay.
+- The fresh Gate 51 static, unit, aggregate, security, recovery, contract,
+  systemd, and multi-instance matrix rechecks surrounding network policy,
+  translation, and lifecycle behavior.
+- Technical status: passed. Lifecycle status remains open pending the
+  consolidated human acceptance checkpoint.

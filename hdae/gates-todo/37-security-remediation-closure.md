@@ -86,3 +86,13 @@ limitation, and security claim into one evidence-backed closure report.
 
 Technically passed under the authorized batch. Kept open for the final human
 checkpoint on the combined pull request.
+
+## Gate 51 reconciliation
+
+- Pull request #292 is merged into `main`. Fresh Gate 51 static findings
+  checks, bounded fuzzing, native boundary, recovery, contract, aggregate,
+  systemd, multi-instance, RPM, and allocator runs revalidate the ten closed
+  sanitized findings and their permanent regressions.
+- Technical status remains passed; lifecycle status remains open pending the
+  consolidated human acceptance checkpoint. This remains a project-owned
+  defensive review, not independent certification.

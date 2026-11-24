@@ -59,5 +59,8 @@ Keep configured native workloads from observing their host TID through
 
 ## Status
 
-- Implemented, locally and in Linux CI verified, pushed, and delivered in PR
-  #286; awaiting exact-head pull-request review.
+- Pull request #286 is merged into `main`. The configured-native virtual-TID
+  translation remains covered by its exact-head Linux native-supervision CI
+  and the fresh Gate 51 aggregate, security, recovery, and contract matrix.
+- Technical status: passed. Lifecycle status remains open pending the
+  consolidated human acceptance checkpoint.

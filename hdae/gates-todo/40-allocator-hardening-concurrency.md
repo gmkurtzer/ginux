@@ -94,3 +94,12 @@ errors cannot silently steer allocator state.
 
 Technically passed under the authorized batch. Kept open for the final human
 checkpoint on the combined pull request.
+
+## Gate 51 reconciliation
+
+- Pull request #292 is merged into `main`. Fresh Gate 51 allocator, security,
+  aggregate, and package runs revalidate metadata separation, guarded large
+  allocations, sharded ownership, cross-thread release, accounting rollback,
+  and full-arena recovery.
+- Technical status remains passed; lifecycle status remains open pending the
+  consolidated human acceptance checkpoint.

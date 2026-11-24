@@ -100,3 +100,11 @@ allocator.
 The authorized batch selected the independent opt-in Ginux allocator and
 continued through Gates 39-42. Technically passed; kept open for the final human
 checkpoint on the combined pull request.
+
+## Gate 51 reconciliation
+
+- Pull request #292 is merged into `main`. Fresh Gate 51 allocator and package
+  runs retain the selected independent, opt-in Rust allocator and its matched
+  native/jemalloc controls; upstream challoc remains a support-limited control.
+- Technical status remains passed; lifecycle status remains open pending the
+  consolidated human acceptance checkpoint.

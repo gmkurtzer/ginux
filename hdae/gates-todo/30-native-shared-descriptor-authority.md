@@ -127,3 +127,12 @@ maintainer on 2026-11-13. Gate 30 is technically passed at exact PR head
 `50ca4da2`: local static/unit evidence and both implementation-head and
 delivered-head Linux CI pass. Keep in `gates-todo/` pending human review before
 any merge.
+
+## Gate 51 reconciliation
+
+- Pull request #288 is merged into `main`; shared descriptor-table authority,
+  mutation barriers, and forced-concurrency regressions are present.
+- Fresh Gate 51 unit, aggregate, security, recovery, contract, systemd, and
+  multi-instance runs revalidate descriptor lifecycle and cross-task sharing.
+- Technical status: passed. Lifecycle status remains open pending the
+  consolidated human acceptance checkpoint.

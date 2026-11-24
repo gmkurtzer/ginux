@@ -57,5 +57,8 @@ before any host `clone` or replayed `clone3` can create a child.
 
 ## Status
 
-- Implemented, locally and in Linux CI verified, pushed, and delivered in PR
-  #287; awaiting exact-head pull-request review.
+- Pull request #287 is merged into `main`. Configured-native clone and clone3
+  policy remains covered by its exact-head Linux native-supervision CI and the
+  fresh Gate 51 aggregate, security, recovery, and contract matrix.
+- Technical status: passed. Lifecycle status remains open pending the
+  consolidated human acceptance checkpoint.

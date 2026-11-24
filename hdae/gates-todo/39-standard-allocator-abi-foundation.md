@@ -93,3 +93,12 @@ standard C allocation ABI and can run transparently inside a Ginux instance.
 
 Technically passed under the authorized batch after Gate 38 selected the
 architecture. Kept open for the final human checkpoint on the combined pull request.
+
+## Gate 51 reconciliation
+
+- Pull request #292 is merged into `main`. Fresh Gate 51 allocator and RPM
+  runs revalidate the standard C allocation ABI, bounded jemalloc subset,
+  native conformance, threaded stress, packaged loading, and unsupported-input
+  behavior.
+- Technical status remains passed; lifecycle status remains open pending the
+  consolidated human acceptance checkpoint.

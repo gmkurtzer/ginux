@@ -42,8 +42,8 @@ binary builds.
 ## Remaining work
 
 - [x] Run local host-package, lint, unit, and canonical build checks.
-- [ ] Run exact-head Linux CI.
-- [ ] Deliver the verified branch in a linked pull request and add reciprocal
+- [x] Run exact-head Linux CI.
+- [x] Deliver the verified branch in a linked pull request and add reciprocal
       issue/PR comments.
 
 ## Acceptance criteria
@@ -108,3 +108,12 @@ binary builds.
 Implementation and pull-request delivery are complete under the repository's
 proactive-remediation policy. Keep the gate in `gates-todo/` until exact-head
 Linux review and merge.
+
+## Gate 51 reconciliation
+
+- Pull request #322 is merged into `main`; its exact-head Linux CI compiled
+  ordinary host packages before the explicitly scoped freestanding builds.
+- The fresh Gate 51 `make check test-cli test-unit` and aggregate `make test`
+  rebuild the canonical host and freestanding surfaces on current `main`.
+- Technical status: passed. Lifecycle status remains open pending the
+  consolidated human acceptance checkpoint.

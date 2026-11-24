@@ -116,3 +116,13 @@ performance evidence for the allocator without overstating its maturity.
 
 Technically passed. Final checkpoint for the authorized Gates 32-42 batch:
 deliver one combined pull request and stop for explicit human testing and acceptance.
+
+## Gate 51 reconciliation
+
+- Pull request #292 is merged into `main`. Fresh Gate 51 allocator and RPM
+  matrices rerun C ABI conformance, exact-commit matched controls, supported
+  Rocky/Ubuntu loading, Alpine runtime exclusion, package lifecycle, and the
+  complete surrounding regression suite.
+- Technical status remains passed; lifecycle status remains open pending the
+  consolidated human acceptance checkpoint. Gate 43 owns the separate 5%
+  guarded-performance target and is not implied complete here.

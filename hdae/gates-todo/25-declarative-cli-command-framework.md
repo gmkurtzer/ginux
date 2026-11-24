@@ -86,12 +86,13 @@ runtime, fixture, helper, and backend commands out of the public interface.
 
 ## Remaining work
 
-- [ ] Implement the approved declarative public CLI and narrow internal
-  protocol on this dedicated branch.
-- [ ] Add parser, help, failure, installation, and end-to-end workflow tests.
-- [ ] Update active operator and maintainer documentation and examples.
-- [ ] Run all criterion-mapped verification and record fresh evidence.
-- [ ] Publish the dedicated pull request and stop for final human review.
+- [x] Implement the approved declarative public CLI and narrow internal
+      protocol on this dedicated branch.
+- [x] Add parser, help, failure, installation, and end-to-end workflow tests.
+- [x] Update active operator and maintainer documentation and examples.
+- [x] Run all criterion-mapped verification and record fresh evidence.
+- [x] Publish the dedicated pull request and stop for final human review.
+- [ ] Complete the consolidated Gate 51 human checkpoint.
 
 ## Acceptance criteria
 
@@ -219,3 +220,15 @@ changing the CLI. The human approved the design on 2026-11-13 after removing
 public `diff`. After implementation and complete verification, publish one
 dedicated pull request and stop again for final human acceptance. Technical
 passage alone does not close Gate 25.
+
+## Gate 51 reconciliation
+
+- Pull request #273 is merged into `main`; the compiled `clap` CLI, versioned
+  helper protocol, command inventory, tests, documentation, and public `diff`
+  removal are present in the current tree.
+- The fresh Gate 51 matrix rechecks generated command inventory, global and
+  per-command help, parser behavior, component tests, aggregate integration,
+  Rocky systemd lifecycle, security, recovery, contract, and packaged CLI
+  behavior.
+- Technical status: passed. Lifecycle status remains open pending the
+  consolidated human acceptance checkpoint.
