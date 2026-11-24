@@ -3409,7 +3409,6 @@ struct NativeSupervisorTask {
     // Table whose mutation barrier this task currently owns, or usize::MAX.
     descriptor_barrier: usize,
     pipe2_address: usize,
-    pipe_fds: [i64; 8],
     pending_socket_duplicate: i16,
     pending_socket_cloexec: bool,
     pending_socket_family: u16,
@@ -3466,8 +3465,12 @@ struct NativeDescriptorTable {
     generation: u64,
     console_fd: i64,
     console_fds: [u64; NATIVE_PROC_FD_LIMIT / 64],
-    // Close-on-exec flags are meaningful only for console_fds entries.
-    console_cloexec: [u64; NATIVE_PROC_FD_LIMIT / 64],
+    // Descriptors pipe2 created, until they are closed, replaced or dropped
+    // by exec. Numbers past the bitmap are not followed.
+    pipe_fds: [u64; NATIVE_PROC_FD_LIMIT / 64],
+    // Close-on-exec flags are meaningful only for console_fds and pipe_fds
+    // entries.
+    cloexec: [u64; NATIVE_PROC_FD_LIMIT / 64],
     socket_aliases: [NativeSocketAlias; NATIVE_SOCKET_FD_LIMIT],
     // Host PID of the tracee executing a descriptor-table mutation.
     mutation_owner: usize,
@@ -3478,7 +3481,8 @@ const EMPTY_NATIVE_DESCRIPTOR_TABLE: NativeDescriptorTable = NativeDescriptorTab
     generation: 0,
     console_fd: -1,
     console_fds: [0; NATIVE_PROC_FD_LIMIT / 64],
-    console_cloexec: [0; NATIVE_PROC_FD_LIMIT / 64],
+    pipe_fds: [0; NATIVE_PROC_FD_LIMIT / 64],
+    cloexec: [0; NATIVE_PROC_FD_LIMIT / 64],
     socket_aliases: [EMPTY_SOCKET_ALIAS; NATIVE_SOCKET_FD_LIMIT],
     mutation_owner: 0,
 };
@@ -3486,7 +3490,7 @@ const EMPTY_NATIVE_DESCRIPTOR_TABLE: NativeDescriptorTable = NativeDescriptorTab
 fn native_descriptor_barrier_syscall(syscall: u64) -> bool {
     matches!(
         syscall,
-        2 | 3 | 16 | 32 | 33 | 47 | 56 | 57 | 58 | 59 | 72 | 257 | 292 | 299 | 435 | 436
+        2 | 3 | 16 | 32 | 33 | 47 | 56 | 57 | 58 | 59 | 72 | 257 | 292 | 293 | 299 | 435 | 436
     )
 }
 
@@ -5872,7 +5876,8 @@ fn supervise_native(
         generation: 1,
         console_fd: INSTANCE_CONSOLE_FD as i64,
         console_fds: root_console_fds,
-        console_cloexec: [0; NATIVE_PROC_FD_LIMIT / 64],
+        pipe_fds: [0; NATIVE_PROC_FD_LIMIT / 64],
+        cloexec: [0; NATIVE_PROC_FD_LIMIT / 64],
         socket_aliases: [EMPTY_SOCKET_ALIAS; NATIVE_SOCKET_FD_LIMIT],
         mutation_owner: 0,
     };
@@ -5896,7 +5901,6 @@ fn supervise_native(
         descriptor_table: 0,
         descriptor_barrier: usize::MAX,
         pipe2_address: 0,
-        pipe_fds: [-1; 8],
         pending_socket_duplicate: 0,
         pending_socket_cloexec: false,
         pending_socket_family: 0,
@@ -6214,7 +6218,6 @@ fn supervise_native(
                 descriptor_table,
                 descriptor_barrier: usize::MAX,
                 pipe2_address: 0,
-                pipe_fds: task.pipe_fds,
                 pending_socket_duplicate: 0,
                 pending_socket_cloexec: false,
                 pending_socket_family: 0,
@@ -6310,8 +6313,11 @@ fn supervise_native(
             let table = &mut descriptor_tables[task.descriptor_table];
             native_socket_exec(table, &mut socket_objects);
             let latest_open = native_fd_contains(&table.console_fds, table.console_fd as usize);
-            for (console, cloexec) in table.console_fds.iter_mut().zip(table.console_cloexec) {
+            for (console, cloexec) in table.console_fds.iter_mut().zip(table.cloexec) {
                 *console &= !cloexec;
+            }
+            for (pipe, cloexec) in table.pipe_fds.iter_mut().zip(table.cloexec) {
+                *pipe &= !cloexec;
             }
             if latest_open && !native_fd_contains(&table.console_fds, table.console_fd as usize) {
                 table.console_fd = INSTANCE_CONSOLE_FD as i64;
@@ -7075,7 +7081,7 @@ fn supervise_native(
                     native_fail(instance, pid, b"native console descriptor table full");
                 }
                 native_fd_assign(
-                    &mut table.console_cloexec,
+                    &mut table.cloexec,
                     registers.rax as usize,
                     task.pending_console_cloexec,
                 );
@@ -7090,11 +7096,7 @@ fn supervise_native(
                     {
                         native_fail(instance, pid, b"native console descriptor table full");
                     }
-                    native_fd_assign(
-                        &mut table.console_cloexec,
-                        duplicated,
-                        task.pending_console_cloexec,
-                    );
+                    native_fd_assign(&mut table.cloexec, duplicated, task.pending_console_cloexec);
                 }
                 task.pending_console_duplicate = 0;
             }
@@ -7135,12 +7137,20 @@ fn supervise_native(
             if let Some(cloexec) =
                 cloexec.filter(|_| registers.rax == 0 && registers.orig_rax != u64::MAX)
             {
-                native_fd_assign(
-                    &mut table.console_cloexec,
-                    registers.rdi as u32 as usize,
-                    cloexec,
-                );
+                native_fd_assign(&mut table.cloexec, registers.rdi as u32 as usize, cloexec);
                 native_socket_set_cloexec(table, registers.rdi, cloexec);
+            }
+            // A duplicate is not a pipe2 descriptor, and dup2 and dup3 over a
+            // pipe end replace it; dup2 onto itself changes nothing. Emulated
+            // calls ran as something else.
+            let duplicated = match registers.orig_rax {
+                SYS_DUP | SYS_DUP3 => true,
+                SYS_DUP2 => registers.rdi as u32 != registers.rsi as u32,
+                SYS_FCNTL => matches!(registers.rsi as u32 as u64, F_DUPFD | F_DUPFD_CLOEXEC),
+                _ => false,
+            };
+            if duplicated && registers.rax as i64 >= 0 {
+                native_fd_clear(&mut table.pipe_fds, registers.rax as usize);
             }
             if task.pending_mountinfo_open {
                 if registers.rax as i64 >= 0 {
@@ -7309,6 +7319,7 @@ fn supervise_native(
                     registers.orig_rax != u64::MAX && registers.rax as i64 != -EBADF;
                 if host_consumed {
                     native_fd_clear(&mut table.console_fds, registers.rdi as u32 as usize);
+                    native_fd_clear(&mut table.pipe_fds, registers.rdi as u32 as usize);
                     native_socket_remove_alias(table, &mut socket_objects, registers.rdi);
                 }
             }
@@ -7351,11 +7362,10 @@ fn supervise_native(
                 let Some((read_fd, write_fd)) = read_fd.zip(write_fd) else {
                     native_fail(instance, pid, b"native pipe2 descriptor read failed");
                 };
-                for pipe_fd in [i64::from(read_fd), i64::from(write_fd)] {
-                    let Some(slot) = task.pipe_fds.iter_mut().find(|fd| **fd < 0) else {
-                        native_fail(instance, pid, b"native pipe descriptor table full");
-                    };
-                    *slot = pipe_fd;
+                let table = &mut descriptor_tables[task.descriptor_table];
+                for pipe_fd in [read_fd as usize, write_fd as usize] {
+                    native_fd_set(&mut table.pipe_fds, pipe_fd);
+                    native_fd_assign(&mut table.cloexec, pipe_fd, registers.rsi & O_CLOEXEC != 0);
                 }
             }
             if task.syscall == ginux_core::SYS_CLOSE_RANGE && registers.rax as i64 == 0 {
@@ -7368,11 +7378,6 @@ fn supervise_native(
                         task.close_range_first,
                         task.close_range_last,
                     );
-                }
-                for pipe_fd in &mut task.pipe_fds {
-                    if *pipe_fd >= task.close_range_first && *pipe_fd <= task.close_range_last {
-                        *pipe_fd = -1;
-                    }
                 }
                 if task.close_range_first >= 0 && task.close_range_last >= 0 {
                     native_fd_clear_range(
@@ -7438,10 +7443,11 @@ fn supervise_native(
                 );
                 if ran_flags & CLOSE_RANGE_CLOEXEC != 0 {
                     for fd in first..=core::cmp::min(last, NATIVE_PROC_FD_LIMIT - 1) {
-                        native_fd_set(&mut table.console_cloexec, fd);
+                        native_fd_set(&mut table.cloexec, fd);
                     }
                 } else {
                     native_fd_clear_range(&mut table.console_fds, first, last);
+                    native_fd_clear_range(&mut table.pipe_fds, first, last);
                 }
             }
             // A spanning close_range is one descriptor-table mutation: the
@@ -10728,15 +10734,13 @@ fn supervise_native(
                 }
             }
             Action::Mediate
-                if mode == 3 && syscall == 3 && task.pipe_fds.contains(&(registers.rdi as i64)) =>
+                if mode == 3
+                    && syscall == 3
+                    && native_fd_contains(
+                        &descriptor_tables[task.descriptor_table].pipe_fds,
+                        registers.rdi as u32 as usize,
+                    ) =>
             {
-                if let Some(slot) = task
-                    .pipe_fds
-                    .iter_mut()
-                    .find(|fd| **fd == registers.rdi as i64)
-                {
-                    *slot = -1;
-                }
                 line(b"mediate surface=task-pipe result=pending");
                 task.awaiting_exit = true;
                 if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
