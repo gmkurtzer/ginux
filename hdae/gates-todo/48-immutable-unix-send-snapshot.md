@@ -79,6 +79,12 @@ destination, payload, vectors, or ancillary data after validation.
 
 ## Evidence
 
+- Exact-head CI initially reached the new regression but timed out receiving
+  the datagram because the root-created Unix socket nodes were not writable by
+  Ginux's deliberately unprivileged host tracee. The fixture now mirrors the
+  established inbound-rights setup by making only its disposable test socket
+  nodes mode `0777`; no runtime permission or mediation rule changed.
+
 - Current `native_unix_send_allowed` reads the guest `msghdr`, destination, and
   control data, while the admitted syscall later executes against the original
   guest pointers.

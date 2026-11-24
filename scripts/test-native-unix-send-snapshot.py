@@ -82,6 +82,8 @@ sys_read = ["/"]
                 socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as mutated_receiver:
             original_receiver.bind(str(original_path))
             mutated_receiver.bind(str(mutated_path))
+            original_path.chmod(0o777)
+            mutated_path.chmod(0o777)
             original_receiver.settimeout(2)
             mutated_receiver.settimeout(0.1)
             read_fd, write_fd = os.pipe()
