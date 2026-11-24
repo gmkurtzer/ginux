@@ -2761,7 +2761,11 @@ mod tests {
             for n in 1..=200u64 {
                 let disposition = budget.admit();
                 if n <= limit {
-                    assert_eq!(disposition, AuditDisposition::Emit, "limit {limit} admit {n}");
+                    assert_eq!(
+                        disposition,
+                        AuditDisposition::Emit,
+                        "limit {limit} admit {n}"
+                    );
                     emitted += 1;
                 } else {
                     dropped += 1;
@@ -2770,7 +2774,10 @@ mod tests {
                     } else {
                         AuditDisposition::Drop
                     };
-                    assert_eq!(disposition, expected, "limit {limit} admit {n} dropped {dropped}");
+                    assert_eq!(
+                        disposition, expected,
+                        "limit {limit} admit {n} dropped {dropped}"
+                    );
                 }
                 assert_eq!(budget.emitted(), emitted, "limit {limit} admit {n}");
                 assert_eq!(budget.dropped(), dropped, "limit {limit} admit {n}");
@@ -2778,5 +2785,4 @@ mod tests {
             }
         }
     }
-
 }
