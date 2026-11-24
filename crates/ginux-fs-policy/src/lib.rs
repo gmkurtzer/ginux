@@ -1830,6 +1830,62 @@ mod tests {
         assert_ne!(identity_token(b""), 0);
     }
 
+    fn path_admission_context() -> CallContext {
+        let cap = Capability::new(
+            CapabilityKind::Root,
+            2,
+            3,
+            5,
+            ObjectId {
+                device: 7,
+                inode: 11,
+            },
+            Rights::LOOKUP,
+        );
+        let typed = |kind| Capability { kind, ..cap };
+        CallContext::x86_64(
+            2,
+            [0; 6],
+            TaskContext {
+                host: 13,
+                virtual_id: 17,
+                generation: 19,
+            },
+            InstanceContext {
+                identity: 2,
+                lifetime: 3,
+                root_generation: 5,
+            },
+            AuthorityContext {
+                root: cap,
+                cwd: typed(CapabilityKind::WorkingDirectory),
+                descriptor_table: typed(CapabilityKind::DescriptorTable),
+                cwd_generation: 5,
+                descriptor_generation: 5,
+            },
+            ContractAuthorization::Mediate,
+        )
+    }
+
+    #[test]
+    fn path_admission_requires_complete_identity_and_capability_kinds() {
+        let base = path_admission_context();
+        assert!(filesystem_hook_authorized(&base, true));
+        for zero in [
+            |c: &mut CallContext| c.task.host = 0,
+            |c: &mut CallContext| c.task.virtual_id = 0,
+            |c: &mut CallContext| c.task.generation = 0,
+            |c: &mut CallContext| c.instance.identity = 0,
+            |c: &mut CallContext| c.instance.lifetime = 0,
+            |c: &mut CallContext| c.authority.root.kind = CapabilityKind::WorkingDirectory,
+            |c: &mut CallContext| c.authority.cwd.kind = CapabilityKind::Root,
+        ] {
+            let mut c = base;
+            zero(&mut c);
+            assert!(!filesystem_hook_authorized(&c, true));
+        }
+    }
+
     #[test]
     fn filesystem_lookup_fails_closed_for_denial_unknown_abi_and_wrong_owner() {
         let capability = Capability::new(
