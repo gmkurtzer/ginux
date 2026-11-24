@@ -53,14 +53,17 @@ acceptance checkpoint before Gate 43 begins.
 - [x] Identified Gate 11 as partial, Gate 43 as not implemented, and Gate 14 as
       intentionally deferred.
 - [x] Received human approval for this batch and checkpoint map on 2026-11-24.
+- [x] Persisted Gate 11's approved deferral without changing its 4% target or
+      its four unsuccessful mandatory thread rows.
+- [x] Reconciled all 27 technically delivered open records against merged
+      delivery, exact-head CI, current source, and fresh verification.
+- [x] Ran the complete static, unit, aggregate, security, recovery, contract,
+      systemd, multi-instance, RPM, and allocator verification matrix.
+- [x] Completed forward, reverse, coverage, orphan, lifecycle-uniqueness, and
+      locked-history checks across the ledger.
 
 ## Remaining work
 
-- [ ] Persist Gate 11's approved deferral without changing its 4% target.
-- [ ] Run and record the complete current-main verification matrix.
-- [ ] Reconcile every technically delivered open gate with current delivery,
-      CI, and fresh verification evidence.
-- [ ] Perform forward, reverse, coverage, and orphan checks across the ledger.
 - [ ] Commit, push, and open the dedicated reconciliation pull request.
 - [ ] Stop for consolidated human review and acceptance before moving accepted
       records to `gates-done` or beginning Gate 43.
@@ -106,11 +109,47 @@ acceptance checkpoint before Gate 43 begins.
 
 - Initial audit at `9b0ce6d9` found 29 files in `gates-done`, 29 in
   `gates-todo`, and Gate 14 in `gates-deferred`.
-- PR-state audit found no open pull requests. Every PR referenced by Gates 23
-  through 42 and 44 through 50 is merged.
+- Final reconciliation base is `origin/main` commit `3185b79b`. The ledger has
+  29 closed, 29 open, and two deferred records: Gate 11 joined unchanged Gate
+  14 under its approved return conditions.
+- PR-state audit on 2026-11-24 found no open pull requests. Every PR referenced
+  by Gates 23 through 42 and 44 through 50 is merged.
 - Source issues for Gates 27 through 30 and 44 through 50 are closed except the
   intentionally broader Gate 31 umbrella issue #290.
-- Fresh verification: pending.
+- `make check test-cli test-unit` passed at final base `3185b79b`, including
+  the PR #329 OCI whiteout, PR #330 set-groups, PR #331 filesystem-rights, and
+  PR #332 partition-range boundary regressions.
+- At immediate parent base `3d4ececf`, `make test` passed the complete
+  deterministic and isolated-QEMU aggregate. The only following source change
+  was PR #332's 13-line device unit regression, which passed in the final-base
+  unit rerun.
+- At `3d4ececf`, `make test-security test-recovery test-contract` passed all
+  nine bounded fuzz targets, native authority and fail-closed behavior,
+  contract denial, virtual devices and kernel views, systemd console audit,
+  startup failure, supervisor loss, forced stop, bounded audit, and controlled
+  shutdown. Its invoked systemd matrix passed cold, warm, repeat, offline, DNF
+  failure, configured failure, and shutdown paths.
+- At `3d4ececf`, `make test-multi-instance` passed concurrent Rocky systemd
+  instances, independent roots, virtual state, contracts, lifecycle, and the
+  documented shared-network model.
+- At `3d4ececf`, `make test-rpm-metadata test-rpm test-allocator-rocky` passed
+  clean offline RPM/SRPM construction, rpmlint with zero errors, DNF install,
+  package verification, Alpine/Rocky/Ubuntu runtime coverage, offline cache
+  reuse, reinstall, state-preserving erase/reinstall, allocator conformance,
+  and all 45 matched allocator samples.
+- Ledger checks found 60 unique numeric positions and exactly one lifecycle
+  file per gate. The locked `gates-done` tree is byte-for-byte unchanged from
+  `origin/main`; every remaining unchecked item maps to a human checkpoint,
+  Gate 43 implementation, Gate 51 delivery/review, or Gate 11's intentionally
+  unpublished baseline while its fixed budget remains unmet.
+- Forward and coverage review maps every project outcome to its gate criteria
+  and fresh matrix evidence. Reverse and orphan review found no reconciliation
+  change outside the approved ledger scope and no unmapped delivered gate,
+  criterion, failure, decision, or open question.
+- Two non-product harness events were isolated rather than hidden: sandboxed
+  QEMU runs could not bind localhost forwarding ports and one overloaded TCG
+  run reported guest soft-lockups. Outside-sandbox clean reruns with fresh
+  state passed the aggregate and complete security/recovery matrices.
 
 ## Decisions and limitations
 
@@ -129,7 +168,9 @@ acceptance checkpoint before Gate 43 begins.
 - Pull request: intended
 - Planned commits: establish reconciliation and deferrals; reconcile delivered
   gate records; record complete verification and delivery evidence
-- Actual commits: pending
+- Actual commits: `65ef529c` establishes reconciliation and deferrals;
+  `0a3f555d` reconciles delivered records; final evidence and delivery commit
+  is this gate's closing branch update.
 
 ## Review policy and outcome
 

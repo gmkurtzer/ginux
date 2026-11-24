@@ -8,24 +8,31 @@
 - The authoritative audit runs from current `origin/main` on dedicated branch
   `hdae/gate-ledger-reconciliation`; the primary checkout's older Gate 31
   branch is not used as repository authority.
-- Initial state is 29 closed gates, 29 open gates, and one deferred gate.
+- Initial state was 29 closed gates, 29 open gates, and one deferred gate.
+  Gate 11 is now deferred under its approved return condition, yielding 29
+  closed, 29 open, and two deferred records.
 - Twenty-seven open gates have merged implementations but stale or
   acceptance-pending records. Gate 11 remains partial at its unchanged 4%
   thread-performance threshold, Gate 43 is not implemented, and Gate 14 remains
   intentionally deferred.
-- Every referenced gate pull request is merged and no pull request is currently
-  open. Merge state is delivery evidence, not automatic human acceptance.
+- Every referenced gate pull request is merged and the final GitHub audit found
+  no open pull request. Merge state is delivery evidence, not automatic human
+  acceptance.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Last evidence: refreshed remote and gate, PR, issue, branch, checklist, and
-  lifecycle audits at `origin/main` commit `9b0ce6d9`.
+- Last evidence: the complete static, unit, aggregate, security, recovery,
+  contract, systemd, multi-instance, RPM, and allocator matrix passed against
+  `3d4ececf`; the final `origin/main` delta through `3185b79b` contains only PR
+  #332's device boundary unit test, and the full static/unit lane passed at that
+  final base. Ledger uniqueness, locked-history, forward, reverse, coverage,
+  and orphan checks also pass.
 - Open decisions or limitations: Gate 43 begins only after the consolidated
   acceptance checkpoint; its performance effort has no reliable duration until
   its stable harness and profiling baseline exist.
-- Exact next action: record Gate 11's approved deferral, run the complete
-  current-main verification matrix, reconcile every delivered open gate, and
-  publish the dedicated reconciliation pull request for human acceptance.
+- Exact next action: commit and publish the dedicated reconciliation pull
+  request, then stop for consolidated human acceptance. Do not move records to
+  `gates-done` or begin Gate 43 before that acceptance.
 
 ### Prior checkpoint: Gate 50 scoped freestanding Rust flags
 
