@@ -2,27 +2,26 @@
 
 ## Current checkpoint
 
-### Gate 49 immutable connect and bind sockaddr
+### Gate 50 scoped freestanding Rust flags
 
-- Gate 49 is active on `hdae/immutable-connect-bind-sockaddr` for issue #300.
-- Current `main` peeks an Internet sockaddr for policy and translation, then
-  lets the host kernel reread the original guest pointer for `connect` or
-  `bind`; a sharing sibling can change what executes after validation.
-- The approved correction extends the bounded read-only native-network
-  snapshot/replay owner to both syscalls, evaluates policy from captured bytes,
-  and applies translations only to the owned copy.
-- Implementation now snapshots and replays Internet `connect` and `bind` from
-  the same read-only owner used by network sends. The regression mutates the
-  original send, bind, and connect sockaddr only after staged replay exists.
-- Last evidence: `make check`, `make test-unit`, isolated Python compilation,
-  and all Rust targets in `make build` pass. Linux fixture execution remains
-  delegated to exact-head CI because this host is macOS arm64.
-- Open decisions or limitations: none; Gate 48 is a separate Unix-send change.
-- Signed implementation commit `9482014f` and evidence commit `2caf859e` are
-  delivered in pull request https://github.com/gmkurtzer/ginux/pull/321, with
-  reciprocal links recorded in the gate.
-- Exact next action: require exact-head Linux CI and human security review of
-  pull request #321 before merge or issue closure.
+- Gate 50 is active on `hdae/scope-freestanding-rustflags` for issue #318.
+- The x86-64 GNU target configuration applied freestanding linker flags to
+  ordinary host units whenever an x86-64 Linux host shared that triple.
+- The correction removes those repository-wide target flags and supplies the
+  unchanged flag set only to explicit freestanding package commands that also
+  specify `--target x86_64-unknown-linux-gnu`.
+- Linux CI now compiles every ordinary host package before the canonical
+  freestanding build; the five freestanding-only packages are excluded from
+  that host check.
+- Last evidence: the scoped host workspace check, `make check`, `make
+  test-unit`, and `make build` pass on macOS arm64. Exact x86-64 Linux behavior
+  remains delegated to pull-request CI.
+- Open decisions or limitations: none.
+- Signed implementation commit `f845cbf9` contains the correction and local
+  evidence.
+- Delivery: pull request https://github.com/gmkurtzer/ginux/pull/322 and both
+  reciprocal discussion links are present.
+- Exact next action: require exact-head Linux CI before integration.
 
 ### Prior checkpoint: Gate 48 immutable pathname Unix send snapshot
 

@@ -65,6 +65,14 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: rustup target add x86_64-unknown-linux-gnu x86_64-unknown-linux-musl
+      - name: Host Cargo metadata is free of freestanding linker flags
+        run: >-
+          cargo check --workspace --all-targets
+          --exclude ginux-init
+          --exclude managed-payload
+          --exclude baseline-runner
+          --exclude runtime-fixture
+          --exclude process-native-fixture
       - run: make build build-launch-fixture build-process-fixtures build-gate1-fixture
       - run: sudo make test-launch
       - run: sudo make test-native-supervision
