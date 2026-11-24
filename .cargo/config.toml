@@ -1,14 +1,3 @@
-[target.x86_64-unknown-linux-gnu]
-# Keep the freestanding linker in target-only flags. A target linker setting
-# also affects host build scripts when the host is x86-64 Linux.
-rustflags = [
-    "-C", "linker=rust-lld",
-    "-C", "link-arg=-nostdlib",
-    "-C", "link-arg=-static",
-    "-C", "link-arg=-no-pie",
-    "-C", "relocation-model=static",
-]
-
 [target.x86_64-unknown-linux-musl]
 # The public CLI is a normal std binary. Build it as a static Linux executable
 # so macOS development hosts do not need a GNU cross-linker or target libc.

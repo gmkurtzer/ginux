@@ -2,6 +2,7 @@ SHELL := /bin/sh
 
 X86_TARGET := x86_64-unknown-linux-gnu
 CLI_TARGET := x86_64-unknown-linux-musl
+FREESTANDING_RUSTFLAGS := -C linker=rust-lld -C link-arg=-nostdlib -C link-arg=-static -C link-arg=-no-pie -C relocation-model=static
 BUILD_DIR := build
 GINUX := target/$(X86_TARGET)/release/ginux
 GINUX_CLI := target/$(CLI_TARGET)/release/ginux-cli
@@ -61,12 +62,12 @@ image-cache-clean:
 	rm -rf build/cache/instance
 
 build:
-	cargo build -p ginux-init --target $(X86_TARGET) --release
+	RUSTFLAGS='$(FREESTANDING_RUSTFLAGS)' cargo build -p ginux-init --target $(X86_TARGET) --release
 	cargo build -p ginux-cli --target $(CLI_TARGET) --release
-	cargo build -p managed-payload --target $(X86_TARGET) --release
-	cargo build -p baseline-runner --target $(X86_TARGET) --release
-	cargo build -p runtime-fixture --target $(X86_TARGET) --release
-	cargo build -p process-native-fixture --target $(X86_TARGET) --release
+	RUSTFLAGS='$(FREESTANDING_RUSTFLAGS)' cargo build -p managed-payload --target $(X86_TARGET) --release
+	RUSTFLAGS='$(FREESTANDING_RUSTFLAGS)' cargo build -p baseline-runner --target $(X86_TARGET) --release
+	RUSTFLAGS='$(FREESTANDING_RUSTFLAGS)' cargo build -p runtime-fixture --target $(X86_TARGET) --release
+	RUSTFLAGS='$(FREESTANDING_RUSTFLAGS)' cargo build -p process-native-fixture --target $(X86_TARGET) --release
 
 build-process-fixtures:
 	mkdir -p .artifacts/process
@@ -103,17 +104,17 @@ check: check-name check-instance-terminology check-security-inventory check-secu
 	cargo clippy -p ginux-instance --all-targets -- -D warnings
 	cargo clippy -p ginux-devices --all-targets -- -D warnings
 	cargo clippy -p ginux-fs-policy --all-targets -- -D warnings
-	cargo clippy -p ginux-init --bin ginux --target $(X86_TARGET) --release -- -D warnings
+	RUSTFLAGS='$(FREESTANDING_RUSTFLAGS)' cargo clippy -p ginux-init --bin ginux --target $(X86_TARGET) --release -- -D warnings
 	cargo clippy -p ginux-kernel-views --all-targets -- -D warnings
 	cargo clippy -p ginux-process --all-targets -- -D warnings
-	cargo clippy -p managed-payload --bin managed-payload --target $(X86_TARGET) --release -- -D warnings
-	cargo clippy -p baseline-runner --bin baseline-runner --target $(X86_TARGET) --release -- -D warnings
+	RUSTFLAGS='$(FREESTANDING_RUSTFLAGS)' cargo clippy -p managed-payload --bin managed-payload --target $(X86_TARGET) --release -- -D warnings
+	RUSTFLAGS='$(FREESTANDING_RUSTFLAGS)' cargo clippy -p baseline-runner --bin baseline-runner --target $(X86_TARGET) --release -- -D warnings
 	cargo clippy -p ginux-runtime --all-targets -- -D warnings
 	cargo clippy -p ginux-vfs --all-targets -- -D warnings
 	cargo clippy -p ginux-vfs-index --all-targets -- -D warnings
 	cargo clippy -p security-fuzzer --all-targets -- -D warnings
-	cargo clippy -p runtime-fixture --bin runtime-fixture --target $(X86_TARGET) --release -- -D warnings
-	cargo clippy -p process-native-fixture --bin process-native-fixture --target $(X86_TARGET) --release -- -D warnings
+	RUSTFLAGS='$(FREESTANDING_RUSTFLAGS)' cargo clippy -p runtime-fixture --bin runtime-fixture --target $(X86_TARGET) --release -- -D warnings
+	RUSTFLAGS='$(FREESTANDING_RUSTFLAGS)' cargo clippy -p process-native-fixture --bin process-native-fixture --target $(X86_TARGET) --release -- -D warnings
 	cargo run -q -p ginux-fs-policy --bin fs-policy-doc -- --check docs/fs-operation-inventory.md
 
 fs-policy-doc:
