@@ -1194,4 +1194,28 @@ mod tests {
             vfs.close(separate).unwrap();
         }
     }
+
+    #[test]
+    fn input_path_length_boundary_is_exact() {
+        let bytes = index_bytes();
+        let index = Index::new(&bytes).unwrap();
+        let mut ok = [b'a'; MAX_PATH];
+        ok[0] = b'/';
+        assert_eq!(index.resolve(&ok), Err(VfsError::NotFound));
+        let mut over = [b'a'; MAX_PATH + 1];
+        over[0] = b'/';
+        assert_eq!(index.resolve(&over), Err(VfsError::InvalidPath));
+    }
+
+    #[test]
+    fn record_path_length_boundary_is_exact() {
+        let mut buf = [0u8; HEADER_SIZE + RECORD_SIZE];
+        encode_header(1, (&mut buf[..HEADER_SIZE]).try_into().unwrap());
+        let rec = &mut buf[HEADER_SIZE..];
+        rec[0..2].copy_from_slice(&((MAX_PATH + 1) as u16).to_le_bytes());
+        rec[2] = 1;
+        rec[40] = b'/';
+        assert_eq!(Index::new(&buf).err(), Some(VfsError::InvalidIndex));
+    }
+
 }
