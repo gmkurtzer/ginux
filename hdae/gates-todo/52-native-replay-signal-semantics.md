@@ -111,6 +111,12 @@ to workload signal handlers or making the real operation uninterruptible.
   fixed-size receiver read did not always drain the faster host's queued TCP
   data. The fixture now bounds the receive buffer and drains nonblocking in ten
   bounded rounds; all ten focused cases passed again in Rocky.
+- Exact-head CI at `6d4574b3` passed both blocking-send cases but showed the
+  TCP-based partial-sendmmsg case could still free one byte between replay
+  stages on a native-speed host, allowing the second message to complete. That
+  case now uses a full connected Unix-stream peer that cannot drain on its own;
+  x86-64 syntax checks and all ten Rocky cases pass with the timing-independent
+  transport.
 
 ## Decisions and limitations
 
@@ -133,6 +139,10 @@ to workload signal handlers or making the real operation uninterruptible.
   about queued TCP volume. Repeated bounded nonblocking drain rounds preserve
   the behavior under test while removing host-speed dependence; corrected
   exact-head CI remains required.
+- The failed `6d4574b3` integration run showed TCP acknowledgements still made
+  partial-send progress timing-dependent. A connected Unix stream preserves
+  the same sendmmsg replay path while keeping the peer buffer full until the
+  signal interrupts the second message.
 - Pull request [#338](https://github.com/gmkurtzer/ginux/pull/338) is open from
   the dedicated Gate 52 branch at implementation commit `a9f39e83`.
 - Issue #316 records the delivered fix and remaining review checkpoint in

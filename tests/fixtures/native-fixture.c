@@ -1270,7 +1270,7 @@ long native_fixture_main(const word *stack)
          * zero-length stream message completes even when the send buffer is
          * full; a signal interrupts the second blocking message, so Linux
          * requires the completed count rather than EINTR. */
-        struct address { unsigned short family, port; unsigned address; char zero[8]; };
+        struct local_address { unsigned short family; char path[108]; };
         struct iovec { void *base; word length; };
         struct message {
             void *name; unsigned name_length, name_padding;
@@ -1279,7 +1279,7 @@ long native_fixture_main(const word *stack)
             unsigned flags, flags_padding;
         };
         struct multimessage { struct message message; unsigned length, padding; };
-        static struct address allowed = {2, 0xa546, 0x0100007f, {0}}; /* 18085 */
+        static struct local_address allowed = {1, "/tmp/sendmmsg-partial.sock"};
         static char fill[4096], payload = 'b';
         int send_buffer = 1024;
         struct iovec iov[2] = {{&payload, 0}, {&payload, 1}};
@@ -1287,8 +1287,8 @@ long native_fixture_main(const word *stack)
         struct { word handler, flags, restorer, mask; } action = {
             (word)replay_signal_handler, 0x04000004 /* SA_RESTORER | SA_SIGINFO */,
             (word)sigchld_restorer, 0};
-        long listener = call3(41, 2, 1 /* SOCK_STREAM */, 0);
-        long sender = call3(41, 2, 1, 0);
+        long listener = call3(41, 1 /* AF_UNIX */, 1 /* SOCK_STREAM */, 0);
+        long sender = call3(41, 1, 1, 0);
         if (listener < 0 || sender < 0
             || call5(54, sender, 1 /* SOL_SOCKET */, 7 /* SO_SNDBUF */,
                      (word)&send_buffer, sizeof send_buffer) < 0

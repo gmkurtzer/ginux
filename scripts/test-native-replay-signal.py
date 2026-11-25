@@ -44,8 +44,8 @@ sys_read = ["/"]
 """
 NETWORK = '''[contract.network]
 default = "deny"
-inbound = ["udp:18081", "tcp:18083", "tcp:18084", "tcp:18085"]
-outbound = ["udp:18081", "tcp:18083", "tcp:18084", "tcp:18085"]
+inbound = ["udp:18081", "tcp:18083", "tcp:18084"]
+outbound = ["udp:18081", "tcp:18083", "tcp:18084"]
 
 [network]
 backend = "shared"'''
@@ -142,8 +142,10 @@ def run(binary, fixture, scenario, stage):
         rights_server = None
         rights_server_pid = None
         rights_fds = []
-        if scenario == "rights":
+        if scenario in ("rights", "sendmmsg-partial"):
             (root / "tmp").mkdir()
+            (root / "tmp").chmod(0o777)
+        if scenario == "rights":
             regular = work / "regular"
             regular.write_bytes(b"regular")
             rights_path = root / "tmp/inbound-rights.sock"

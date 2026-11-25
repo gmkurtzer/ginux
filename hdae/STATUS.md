@@ -29,6 +29,10 @@
   timed out in `SA_RESTART`: one 64-KiB read did not always drain the faster
   host's queued TCP data. The fixture now performs ten bounded nonblocking
   drain rounds with a bounded receive buffer; all ten focused cases pass again.
+- CI at `6d4574b3` passed the blocking-send cases but showed TCP could free one
+  byte before the second sendmmsg replay. The partial-progress fixture now uses
+  a connected full Unix-stream peer, which cannot drain without a reader; local
+  x86-64 syntax checks and all ten Rocky cases pass with that transport.
 - Signed implementation commit `a9f39e83` is pushed and delivered in open pull
   request https://github.com/gmkurtzer/ginux/pull/338.
 - Reciprocal summaries are posted on issue #316 and pull request #338 without
