@@ -1,4 +1,4 @@
-use ginux_fs_policy::{ABI_REFERENCE, OPERATIONS};
+use ginux_fs_policy::{operation_executor, operation_family, ABI_REFERENCE, OPERATIONS};
 use std::fmt::Write;
 use std::fs;
 use std::path::Path;
@@ -43,18 +43,20 @@ fn render() -> String {
     )
     .unwrap();
     writeln!(output, "ABI reference: {ABI_REFERENCE}.\n").unwrap();
-    writeln!(output, "This inventory assigns every filesystem-capable x86-64 operation admitted by the current Ginux catalog to one implementation owner or explicit denial. `legacy` executors remain subject to the existing contract and confinement checks; an inventory row is not a compatibility claim.\n").unwrap();
-    writeln!(output, "| ABI | Operation | Owner | Arguments | Flags | Required authority | Current executor | Unsupported |\n|---:|---|---|---|---|---|---|---:|").unwrap();
+    writeln!(output, "This inventory assigns every filesystem-capable x86-64 operation admitted by the current Ginux catalog to one ordered family, implementation owner, and accountable route. Filesystem-lane operations continue only against the tracee kernel's pinned root/cwd/open-file objects; `accountable-external` operations use the named Ginux owner; unsupported operations fail with the recorded errno. An inventory row is not a compatibility claim.\n").unwrap();
+    writeln!(output, "| ABI | Operation | Family | Owner | Arguments | Flags | Required authority | Accountable route | Detail | Unsupported |\n|---:|---|---|---|---|---|---|---|---|---:|").unwrap();
     for operation in OPERATIONS {
         writeln!(
             output,
-            "| {} | `{}` | {} | `{}` | {} | {} | {} | `errno {}` |",
+            "| {} | `{}` | {} | {} | `{}` | {} | {} | {} | {} | `errno {}` |",
             operation.syscall,
             operation.name,
+            operation_family(operation).name(),
             operation.owner.name(),
             operation.arguments,
             operation.flags,
             operation.authority,
+            operation_executor(operation).name(),
             operation.executor,
             operation.unsupported_errno,
         )

@@ -8437,6 +8437,9 @@ fn supervise_native(
         let descriptor_authority_denied = ginux_fs_policy::operation(syscall)
             .is_some_and(|operation| operation.owner == ginux_fs_policy::Owner::DescriptorCore)
             && ginux_fs_policy::descriptor_kernel_route(&call).is_err();
+        let explicit_filesystem_denial = ginux_fs_policy::operation(syscall)
+            .filter(|operation| operation.owner == ginux_fs_policy::Owner::ExplicitDeny)
+            .map(|operation| operation.unsupported_errno);
         let implementation_decision = if local_policy_denied
             || descriptor_authority_denied
             || matches!(contract_action, ContractAction::Deny(_))
@@ -8444,6 +8447,11 @@ fn supervise_native(
             NativeDecision::Contract(ginux_core::Decision {
                 syscall,
                 action: Action::Deny(EPERM as i32),
+            })
+        } else if let Some(errno) = explicit_filesystem_denial {
+            NativeDecision::Contract(ginux_core::Decision {
+                syscall,
+                action: Action::Deny(errno),
             })
         } else if mode == 3 {
             if fs_hooks::claims(syscall) {

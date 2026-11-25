@@ -44,14 +44,22 @@
   parent components and distinguishes follow from entry operations. Fresh
   `make check` and a second isolated Rocky `test-systemd` matrix pass after
   this final path-family widening.
+- Special interfaces now have explicit accountable routes, and the generated
+  inventory distinguishes virtual mount state, host-global `EPERM`, and
+  unsupported `ENOSYS` behavior. Named FS-T01 through FS-T09 tests and the six
+  focused Make targets are present; T01 through T09 and the required mutation
+  test pass in focused/component runs.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Open decisions or limitations: none. Gate 53 is a final human security
-  checkpoint and may not merge or close issue #290 without explicit acceptance.
-- Exact next action: commit the two-path/resolver checkpoint, then complete
-  special-interface denials and FS-T01 through FS-T09 fault/race/mutation
-  evidence before full clean verification.
+- Open decisions or limitations: FS-015 is not yet closed because the native
+  kernel continuation still consumes caller pathname memory after policy has
+  inspected it. Gate 53 is a final human security checkpoint and may not merge
+  or close issue #290 without explicit acceptance.
+- Exact next action: reuse the existing staged native replay mechanism to copy
+  each continued pathname into a bounded supervisor-owned read-only mapping,
+  run policy and the host syscall against that same snapshot, and add a
+  deterministic concurrent-mutation regression before full clean verification.
 
 ## Prior checkpoint
 

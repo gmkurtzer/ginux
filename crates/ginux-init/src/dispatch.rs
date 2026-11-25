@@ -54,6 +54,14 @@ pub fn decide_native(context: &CallContext) -> NativeDecision {
             action: Action::Deny(errno),
         });
     }
+    if let Some(operation) = ginux_fs_policy::operation(syscall) {
+        if operation.owner == ginux_fs_policy::Owner::ExplicitDeny {
+            return NativeDecision::Contract(Decision {
+                syscall,
+                action: Action::Deny(operation.unsupported_errno),
+            });
+        }
+    }
     // Neither caller traces children, so a host fork would leave the child
     // running unsupervised.
     if syscall == SYS_FORK {

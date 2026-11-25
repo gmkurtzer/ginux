@@ -281,6 +281,19 @@ pub enum OperationFamily {
     Special,
 }
 
+impl OperationFamily {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Observation => "observation",
+            Self::SafeOpen => "safe-open",
+            Self::DescriptorIo => "descriptor-io",
+            Self::SinglePathMutation => "single-path",
+            Self::TwoPathMutation => "two-path",
+            Self::Special => "special",
+        }
+    }
+}
+
 /// The executor selected by the filesystem authority boundary.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Executor {
@@ -292,6 +305,16 @@ pub enum Executor {
     AccountableExternal,
     /// The interface is unsupported and must fail before a host effect.
     ExplicitDeny,
+}
+
+impl Executor {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::ConfinedKernel => "confined-kernel",
+            Self::AccountableExternal => "accountable-external",
+            Self::ExplicitDeny => "explicit-deny",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -336,6 +359,21 @@ macro_rules! op {
             authority: $authority,
             executor: $executor,
             unsupported_errno: ENOSYS,
+        }
+    };
+}
+
+macro_rules! op_errno {
+    ($number:literal, $name:literal, $owner:ident, $arguments:literal, $flags:literal, $authority:literal, $executor:literal, $errno:literal) => {
+        Operation {
+            syscall: $number,
+            name: $name,
+            owner: Owner::$owner,
+            arguments: $arguments,
+            flags: $flags,
+            authority: $authority,
+            executor: $executor,
+            unsupported_errno: $errno,
         }
     };
 }
@@ -812,14 +850,15 @@ pub static OPERATIONS: &[Operation] = &[
         "instance root authority",
         "explicit denial"
     ),
-    op!(
+    op_errno!(
         162,
         "sync",
         ExplicitDeny,
         "none",
         "none",
         "host-global filesystem authority",
-        "explicit denial"
+        "explicit denial",
+        1
     ),
     op!(
         163,
@@ -833,20 +872,20 @@ pub static OPERATIONS: &[Operation] = &[
     op!(
         165,
         "mount",
-        ExplicitDeny,
+        VirtualKernel,
         "source,target,type,flags,data",
         "mount flags",
         "mount capability",
-        "explicit denial"
+        "virtual mount view"
     ),
     op!(
         166,
         "umount2",
-        ExplicitDeny,
+        VirtualKernel,
         "target,flags",
         "unmount flags",
         "mount capability",
-        "explicit denial"
+        "virtual mount view"
     ),
     op!(
         167,
@@ -1388,14 +1427,15 @@ pub static OPERATIONS: &[Operation] = &[
         "opaque handle authority",
         "explicit denial"
     ),
-    op!(
+    op_errno!(
         306,
         "syncfs",
         ExplicitDeny,
         "fd",
         "none",
         "host-global filesystem authority",
-        "explicit denial"
+        "explicit denial",
+        1
     ),
     op!(
         313,
@@ -1964,7 +2004,14 @@ mod tests {
             assert!(!operation.flags.is_empty());
             assert!(!operation.authority.is_empty());
             assert!(!operation.executor.is_empty());
-            assert_eq!(operation.unsupported_errno, ENOSYS);
+            assert_eq!(
+                operation.unsupported_errno,
+                if matches!(operation.syscall, 162 | 306) {
+                    1
+                } else {
+                    ENOSYS
+                }
+            );
             assert!(!OPERATIONS[..index]
                 .iter()
                 .any(|other| other.syscall == operation.syscall));
@@ -1995,12 +2042,18 @@ mod tests {
             );
         }
         for syscall in [
-            155, 161, 162, 165, 179, 206, 209, 300, 304, 313, 425, 426, 427, 428, 438, 442, 444,
-            445, 446, 457, 458,
+            155, 161, 162, 179, 206, 209, 300, 304, 313, 425, 426, 427, 428, 438, 442, 444, 445,
+            446, 457, 458,
         ] {
             assert_eq!(
                 operation(syscall).map(|entry| entry.owner),
                 Some(Owner::ExplicitDeny)
+            );
+        }
+        for syscall in [165, 166] {
+            assert_eq!(
+                operation(syscall).map(|entry| entry.owner),
+                Some(Owner::VirtualKernel)
             );
         }
     }

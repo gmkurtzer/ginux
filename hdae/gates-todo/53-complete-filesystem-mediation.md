@@ -92,13 +92,21 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
       parent component, root-level `..` remains at root, path bytes remain
       bytes, and no-follow entry operations authorize the entry rather than
       accidentally following its target.
+- [x] Classified special filesystem interfaces by their actual accountable
+      route: the synthetic mount view remains virtual, host-global sync is
+      explicitly `EPERM`, and unsupported asynchronous, opaque-handle,
+      namespace, import, and host-global interfaces fail before host effect.
+- [x] Added named FS-T01 through FS-T09 policy suites and required security
+      mutation coverage, plus stable Make targets for the race, mutation,
+      descriptor, special-interface, indirect-I/O, and fault families.
 
 ## Remaining work
 
 - [ ] Complete operation-by-operation support/flag/errno documentation and
       final FS-001 through FS-019 traceability.
-- [ ] Extend deterministic resolver/race/mutation evidence across every later
-      path family; the shared confined-kernel route is implemented.
+- [ ] Make every continued pathname syscall execute from a bounded immutable
+      supervisor snapshot rather than caller memory, then extend deterministic
+      resolver/race/mutation evidence across that native replay route.
 - [ ] Complete procfs/magic-link, device/mount/alias, process lifecycle,
       teardown, cancellation, failure-commit, and resource-bound coverage.
 - [ ] Run all nine mandatory suites, required security mutations, full project
@@ -233,6 +241,12 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
   filesystem entry and replacing lexical pre-normalization with ordered
   symlink/component resolution. Cold/warm/repeat writable-overlay boots,
   shutdown, immutable-base, and failure cleanup remained green.
+- Special-interface and named-suite checkpoint: generated inventory plus
+  `make check` passed; `make test-fs-races test-fs-mutations
+  test-fs-descriptors test-fs-special test-fs-indirect-io test-fs-faults`
+  passed, and focused FS-T01, FS-T08, FS-T09, and required security-mutation
+  tests passed. These tests do not yet close FS-015's native pathname snapshot
+  requirement.
 
 ## Decisions and limitations
 
