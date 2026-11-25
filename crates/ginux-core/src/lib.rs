@@ -949,4 +949,14 @@ mod tests {
         assert_eq!(balanced_identity_result(SYS_GETUID), Some(0));
         assert_eq!(balanced_identity_result(999), None);
     }
+
+    #[test]
+    fn balanced_surface_maps_random_and_lifecycle() {
+        assert_eq!(balanced_surface(318), BalancedSurface::Random);
+        assert_eq!(balanced_surface(SYS_EXIT), BalancedSurface::Lifecycle);
+        assert_eq!(balanced_surface(SYS_EXIT_GROUP), BalancedSurface::Lifecycle);
+        assert_eq!(balanced_surface(1), BalancedSurface::Console);
+        assert_eq!(balanced_surface(9), BalancedSurface::Memory);
+        assert_eq!(balanced_surface(999), BalancedSurface::Denied);
+    }
 }
