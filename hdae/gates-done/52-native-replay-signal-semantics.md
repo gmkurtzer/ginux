@@ -171,7 +171,7 @@ to workload signal handlers or making the real operation uninterruptible.
 
 ## Review policy and outcome
 
-Gate 52 is technically passed at code-bearing commit `db6e8d0d`. This remains a
-human security and observable-semantics checkpoint: passage authorizes
-pull-request delivery, not merge, issue closure, or gate closure. It remains in
-`gates-todo` pending explicit human acceptance.
+Gate 52 passed at code-bearing commit `db6e8d0d` and the human explicitly
+accepted the checkpoint on 2026-11-25. The gate is closed and moved to
+`gates-done`; pull request #338 may now be integrated, followed by fresh
+post-integration CI and closure of issue #316 with the verified result.

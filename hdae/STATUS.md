@@ -8,8 +8,8 @@
   2026-11-25: block only across private stage transitions, restore the caller
   mask for the real operation, then block private cleanup and return signal and
   restart handling to the kernel with the caller's original state.
-- Gate 52 is active on `hdae/native-replay-signal-semantics` from current
-  `main` at `1a72568c`.
+- Gate 52 was explicitly accepted by the human on 2026-11-25 and is closed in
+  `hdae/gates-done/52-native-replay-signal-semantics.md`.
 - Scope covers staged clone3, shared-network send/sendmmsg, and inbound
   SCM_RIGHTS cleanup plus deterministic handler-context and restart coverage.
 - The implementation now blocks workload signals only across private replay
@@ -25,8 +25,8 @@
   regression matrix.
 - CI at `1f52c201` passed `static-and-unit` and found a fast-host fixture race:
   consecutive blocking TCP cases reused port 18083. The cases now use isolated
-  ports 18083 through 18085, and all ten passed again in Rocky; corrected
-  exact-head integration CI remains pending.
+  ports 18083 through 18085, and all ten passed again in Rocky before the
+  subsequent exact-head run.
 - CI at `47f3dc2a` then passed static/unit and the preexisting native matrix but
   timed out in `SA_RESTART`: one 64-KiB read did not always drain the faster
   host's queued TCP data. The fixture now performs ten bounded nonblocking
@@ -42,9 +42,9 @@
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Exact next action: wait for explicit human review of technically passed Gate
-  52 and pull request 338. Do not merge, close issue #316, or move the gate to
-  `gates-done` without that acceptance.
+- Exact next action: integrate pull request #338 at its exact accepted head,
+  require fresh post-integration CI, then close issue #316 with the verified
+  result.
 
 ## Prior checkpoint
 
