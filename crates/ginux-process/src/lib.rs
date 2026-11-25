@@ -2119,4 +2119,19 @@ mod tests {
         assert_eq!(pipes.pipe_ends(id), 0);
         assert_eq!(pipes.active_pipes(), 0);
     }
+
+    #[test]
+    fn child_status_word_encodes_exit_and_signal() {
+        assert_eq!(ChildStatus::Exited(0).word(), 0);
+        assert_eq!(ChildStatus::Exited(1).word(), 1 << 8);
+        assert_eq!(ChildStatus::Exited(255).word(), 255 << 8);
+        // Masking boundaries: & 0xff must truncate out-of-range i32 values
+        assert_eq!(ChildStatus::Exited(256).word(), 0);
+        assert_eq!(ChildStatus::Exited(-1).word(), 255 << 8);
+        assert_eq!(ChildStatus::Signaled(9).word(), 9);
+        assert_eq!(ChildStatus::Signaled(127).word(), 127);
+        // Masking boundaries: & 0x7f must clear the high bit of u8
+        assert_eq!(ChildStatus::Signaled(128).word(), 0);
+        assert_eq!(ChildStatus::Signaled(255).word(), 127);
+    }
 }
