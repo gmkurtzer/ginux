@@ -1759,6 +1759,23 @@ pub const fn filesystem_lane_owns(syscall: u64) -> bool {
     )
 }
 
+/// Bit set for each syscall argument that the native filesystem lane must
+/// replace with one supervisor-owned immutable C-string snapshot. `getcwd`
+/// is the only filesystem-lane call without an input pathname.
+pub const fn path_snapshot_arguments(syscall: u64) -> u8 {
+    match syscall {
+        2 | 4 | 6 | 21 | 76 | 80 | 83 | 84 | 85 | 87 | 89 | 90 | 92 | 94 | 132 | 133 | 137
+        | 194 | 195 => 1 << 0,
+        82 | 86 | 88 | 188 | 189 | 191 | 192 | 197 | 198 => (1 << 0) | (1 << 1),
+        257 | 258 | 259 | 260 | 261 | 262 | 263 | 267 | 268 | 269 | 280 | 332 | 437 | 439 | 452 => {
+            1 << 1
+        }
+        264 | 265 | 316 => (1 << 1) | (1 << 3),
+        266 => (1 << 0) | (1 << 2),
+        _ => 0,
+    }
+}
+
 pub const fn operation_family(operation: &Operation) -> OperationFamily {
     match operation.owner {
         Owner::DescriptorCore => OperationFamily::DescriptorIo,
@@ -2306,5 +2323,27 @@ mod tests {
             inode: 9
         }
         .is_available());
+    }
+
+    #[test]
+    fn every_filesystem_path_shape_has_an_immutable_snapshot_plan() {
+        for operation in OPERATIONS
+            .iter()
+            .filter(|operation| operation.owner == Owner::FilesystemLane)
+        {
+            assert_eq!(
+                operation.syscall == 79,
+                path_snapshot_arguments(operation.syscall) == 0,
+                "syscall {}",
+                operation.syscall
+            );
+        }
+        for syscall in [82, 86, 88, 188, 189, 191, 192, 197, 198, 264, 265, 266, 316] {
+            assert_eq!(
+                path_snapshot_arguments(syscall).count_ones(),
+                2,
+                "syscall {syscall}"
+            );
+        }
     }
 }

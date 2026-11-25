@@ -99,14 +99,18 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
 - [x] Added named FS-T01 through FS-T09 policy suites and required security
       mutation coverage, plus stable Make targets for the race, mutation,
       descriptor, special-interface, indirect-I/O, and fault families.
+- [x] Made every filesystem-lane input pathname a bounded, single-copy
+      supervisor snapshot replayed from a protected read-only tracee mapping;
+      policy and the host syscall now consume the same bytes, and map mutation
+      attempts fail closed across task sharing and lifecycle cleanup.
 
 ## Remaining work
 
 - [ ] Complete operation-by-operation support/flag/errno documentation and
       final FS-001 through FS-019 traceability.
-- [ ] Make every continued pathname syscall execute from a bounded immutable
-      supervisor snapshot rather than caller memory, then extend deterministic
-      resolver/race/mutation evidence across that native replay route.
+- [ ] Replace pre-effect pathname re-resolution with pinned parent/object
+      execution so concurrent namespace rename or symlink exchange cannot
+      change the object selected after policy authorization.
 - [ ] Complete procfs/magic-link, device/mount/alias, process lifecycle,
       teardown, cancellation, failure-commit, and resource-bound coverage.
 - [ ] Run all nine mandatory suites, required security mutations, full project
@@ -247,6 +251,11 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
   passed, and focused FS-T01, FS-T08, FS-T09, and required security-mutation
   tests passed. These tests do not yet close FS-015's native pathname snapshot
   requirement.
+- Immutable-path checkpoint: `make check` and the snapshot-plan unit test
+  passed. Fresh isolated Rocky 10 x86-64 `test-native-vfs` and the complete
+  `test-systemd` cold/warm/repeat, offline, controlled-shutdown,
+  immutable-base DNF-failure, and startup-failure matrix passed with every
+  filesystem-lane path replayed from the protected snapshot mapping.
 
 ## Decisions and limitations
 
@@ -265,6 +274,11 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
 - Explicit denial is the supported outcome for capabilities outside the
   accepted contract. Covering FS-001 through FS-019 does not imply implementing
   host mounts, arbitrary volumes, opaque handles, or `io_uring`.
+- Source review after immutable replay found that the current policy resolver
+  and kernel continuation are still two namespace-resolution moments. A peer
+  task can exchange an intermediate symlink or entry between them. Closing
+  FS-006 and FS-007 therefore requires pinned parent/object execution rather
+  than describing chroot/cwd confinement alone as object stability.
 - This is a substantial security checkpoint. Technical passage does not
   authorize merge, issue closure, or movement to `gates-done`.
 

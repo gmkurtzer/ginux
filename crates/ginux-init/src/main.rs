@@ -23,6 +23,7 @@ mod fs_hooks;
 mod launch;
 mod native_clone;
 mod native_network;
+mod native_path;
 mod process_hooks;
 mod supervisor;
 
@@ -3391,6 +3392,7 @@ struct NativeSupervisorTask {
     host_pid: usize,
     clone_call: native_clone::Pending,
     network_call: native_network::Pending,
+    path_call: native_path::Pending,
     replay_signal_mask: NativeReplaySignalMask,
     lifetime_pidfd: isize,
     virtual_id: TaskId,
@@ -5939,6 +5941,8 @@ fn supervise_native(
     let mut tasks: [Option<NativeSupervisorTask>; 128] = [None; 128];
     let mut network_buffers: [native_network::Buffer; 128] =
         core::array::from_fn(|_| native_network::Buffer::empty());
+    let mut path_buffers: [native_path::Buffer; 128] =
+        core::array::from_fn(|_| native_path::Buffer::empty());
     let mut retired_credentials = [EMPTY_RETIRED_CREDENTIAL; 128];
     let mut next_retired_credential = 0usize;
     let mut virtual_kernel_fds = [EMPTY_VIRTUAL_KERNEL_FD; NATIVE_VIRTUAL_KERNEL_FD_LIMIT];
@@ -5973,6 +5977,7 @@ fn supervise_native(
         host_pid: pid,
         clone_call: native_clone::Pending::empty(),
         network_call: native_network::Pending::empty(),
+        path_call: native_path::Pending::empty(),
         replay_signal_mask: EMPTY_REPLAY_SIGNAL_MASK,
         lifetime_pidfd: -1,
         virtual_id: root_virtual,
@@ -6102,6 +6107,13 @@ fn supervise_native(
                     instance,
                     pid,
                     b"native clone interrupted during private setup",
+                );
+            }
+            if task.path_call.phase != native_path::Phase::Idle {
+                native_fail(
+                    instance,
+                    pid,
+                    b"native path interrupted during private setup",
                 );
             }
             let exit_status = if status & 0x7f == 0 {
@@ -6291,6 +6303,7 @@ fn supervise_native(
                     native_clone::Pending::empty()
                 },
                 network_call: native_network::Pending::empty(),
+                path_call: native_path::Pending::empty(),
                 replay_signal_mask: EMPTY_REPLAY_SIGNAL_MASK,
                 lifetime_pidfd,
                 virtual_id: child_virtual,
@@ -6758,6 +6771,27 @@ fn supervise_native(
             }
             continue;
         }
+        if seccomp_entry
+            && matches!(
+                task.path_call.phase,
+                native_path::Phase::Call | native_path::Phase::Unmap
+            )
+        {
+            if !task.path_call.matches_entry(&registers) {
+                native_fail(instance, pid, b"native path replay mismatch");
+            }
+            if task.path_call.phase == native_path::Phase::Unmap {
+                task.awaiting_exit = true;
+                tasks[task_index] = Some(task);
+                if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
+                    native_fail(instance, pid, b"native path cleanup resume failed");
+                }
+                continue;
+            }
+            if !native_replay_signal_enter_call(host_pid, &mut task.replay_signal_mask) {
+                native_fail(instance, pid, b"native path call mask restore failed");
+            }
+        }
         if seccomp_entry && task.close_range_split.stage == NativeCloseRangeStage::Upper {
             // The upper part of a close_range that spans the protected
             // descriptors (see NativeCloseRangeSplit). The caller's entry
@@ -6844,6 +6878,60 @@ fn supervise_native(
                 );
             }
             continue;
+        }
+
+        if !seccomp_entry && task.awaiting_exit && task.path_call.phase != native_path::Phase::Idle
+        {
+            use native_path::Phase;
+            match task.path_call.phase {
+                Phase::Map => {
+                    task.path_call
+                        .mapped(host_pid, &path_buffers[task_index], &mut registers)
+                        .unwrap_or_else(|_| {
+                            native_fail(instance, pid, b"native path snapshot write failed")
+                        });
+                    task.awaiting_exit = false;
+                    tasks[task_index] = Some(task);
+                    if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                        || ptrace(PTRACE_CONT, host_pid, 0, 0) < 0
+                    {
+                        native_fail(instance, pid, b"native path snapshot resume failed");
+                    }
+                    continue;
+                }
+                Phase::Call => {
+                    if !native_replay_signal_enter_private(host_pid, &mut task.replay_signal_mask) {
+                        native_fail(instance, pid, b"native path cleanup mask failed");
+                    }
+                    let result = if task.override_exit {
+                        task.override_result
+                    } else {
+                        registers.rax as i64
+                    };
+                    task.path_call.unmap(&mut registers, result);
+                    task.awaiting_exit = false;
+                    task.override_exit = false;
+                    tasks[task_index] = Some(task);
+                    if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                        || ptrace(PTRACE_CONT, host_pid, 0, 0) < 0
+                    {
+                        native_fail(instance, pid, b"native path cleanup start failed");
+                    }
+                    continue;
+                }
+                Phase::Unmap => {
+                    if registers.rax as i64 != 0 {
+                        native_fail(instance, pid, b"native path snapshot cleanup failed");
+                    }
+                    let _reissued = task.path_call.restore(&mut registers);
+                    if !native_replay_signal_finish(host_pid, &mut task.replay_signal_mask) {
+                        native_fail(instance, pid, b"native path mask restore failed");
+                    }
+                    task.override_exit = true;
+                    task.override_result = registers.rax as i64;
+                }
+                Phase::Idle => {}
+            }
         }
 
         let mut network_reissued = false;
@@ -7631,6 +7719,50 @@ fn supervise_native(
             native_fail(instance, pid, b"unexpected native syscall-exit stop");
         }
 
+        if seccomp_entry
+            && mode == 3
+            && task.path_call.phase == native_path::Phase::Idle
+            && native_path::has_snapshot(registers.orig_rax)
+        {
+            match native_path::Pending::snapshot(
+                host_pid,
+                task_index,
+                &registers,
+                &mut path_buffers[task_index],
+            ) {
+                Ok(snapshot) => {
+                    task.path_call = snapshot;
+                    if !native_replay_signal_begin(host_pid, &mut task.replay_signal_mask) {
+                        native_fail(instance, pid, b"native path mask block failed");
+                    }
+                    task.path_call.map(&mut registers);
+                    task.awaiting_exit = true;
+                    tasks[task_index] = Some(task);
+                    if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                        || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+                    {
+                        native_fail(instance, pid, b"native path snapshot setup failed");
+                    }
+                    continue;
+                }
+                Err(error) => {
+                    sequence += 1;
+                    task.syscall = registers.orig_rax;
+                    registers.orig_rax = u64::MAX;
+                    task.awaiting_exit = true;
+                    task.override_exit = true;
+                    task.override_result = error;
+                    line(b"emulate surface=immutable-filesystem-path result=invalid");
+                    tasks[task_index] = Some(task);
+                    if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                        || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+                    {
+                        native_fail(instance, pid, b"native path snapshot denial failed");
+                    }
+                    continue;
+                }
+            }
+        }
         sequence += 1;
         let syscall = entry_syscall.unwrap_or_else(|| {
             native_fail(instance, pid, b"native syscall entry missing seccomp event")
@@ -8326,8 +8458,10 @@ fn supervise_native(
         let clone_memory_denied = mode == 3 && native_clone::changes_snapshot(syscall, &registers);
         let network_memory_denied =
             mode == 3 && native_network::changes_snapshot(syscall, &registers);
+        let path_memory_denied = mode == 3 && native_path::changes_snapshot(syscall, &registers);
         let local_policy_denied = clone_memory_denied
             || network_memory_denied
+            || path_memory_denied
             || path_policy_denied
             || setid_policy_denied
             || device_node_policy_denied;
@@ -8337,6 +8471,8 @@ fn supervise_native(
                 b"clone-arguments"
             } else if network_memory_denied {
                 b"network-arguments"
+            } else if path_memory_denied {
+                b"filesystem-path-snapshot"
             } else if path_policy_denied {
                 b"filesystem-write"
             } else if setid_policy_denied {

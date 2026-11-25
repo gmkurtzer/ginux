@@ -49,17 +49,25 @@
   unsupported `ENOSYS` behavior. Named FS-T01 through FS-T09 tests and the six
   focused Make targets are present; T01 through T09 and the required mutation
   test pass in focused/component runs.
+- Every filesystem-lane pathname is now copied once into a bounded
+  supervisor-owned buffer, replayed from a per-task read-only mapping, and
+  protected across map/call/unmap plus signal and task-death cleanup. `make
+  check`, its snapshot-plan unit test, isolated `test-native-vfs`, and the full
+  isolated `test-systemd` matrix pass with replay active.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Open decisions or limitations: FS-015 is not yet closed because the native
-  kernel continuation still consumes caller pathname memory after policy has
-  inspected it. Gate 53 is a final human security checkpoint and may not merge
-  or close issue #290 without explicit acceptance.
-- Exact next action: reuse the existing staged native replay mechanism to copy
-  each continued pathname into a bounded supervisor-owned read-only mapping,
-  run policy and the host syscall against that same snapshot, and add a
-  deterministic concurrent-mutation regression before full clean verification.
+- Open decisions or limitations: FS-015's caller-memory race is closed, but
+  FS-006/FS-007 remain open because policy path resolution and host-kernel
+  execution still resolve namespace state at separate times. A concurrent
+  rename or symlink exchange can change the selected object. Gate 53 is a final
+  human security checkpoint and may not merge or close issue #290 without
+  explicit acceptance.
+- Exact next action: obtain human direction on replacing the accepted
+  confined-kernel continuation with a staged pinned-parent/object broker for
+  supported path operations. This is a material filesystem-executor
+  architecture change; after approval, implement it family-by-family and run
+  deterministic exchange barriers before full clean verification.
 
 ## Prior checkpoint
 
