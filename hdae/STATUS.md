@@ -2,6 +2,34 @@
 
 ## Current checkpoint
 
+### Gate 53 complete filesystem mediation
+
+- On 2026-11-25 the human approved one comprehensive gate covering every
+  FS-001 through FS-019 requirement in issue #290, not only the observation
+  family.
+- Gate 53 is active on `hdae/filesystem-mediation-complete` from current
+  `main` at `e545062b`.
+- Gate 31's immutable context, inventory, typed authority, route interlocks,
+  and independent oracle are the accepted foundation; the new gate must reuse
+  them while enabling every supported filesystem operation family.
+- Scope includes all nine mandatory suites FS-T01 through FS-T09, deterministic
+  races, fault injection, security mutations, every advertised confined native
+  route, exact unsupported behavior, and final documentation/security review.
+- Interfaces outside the accepted instance contract may remain unsupported
+  only through explicit, tested denial; blanket denial of supported filesystem
+  behavior cannot pass.
+- Baseline main workflow run 45708975262 is green. Gate 53 implementation
+  evidence is not run.
+- Active skill: `hdae-development`
+- Skill path: `.agents/skills/hdae-development/SKILL.md`
+- Reload after context shift: required
+- Open decisions or limitations: none. Gate 53 is a final human security
+  checkpoint and may not merge or close issue #290 without explicit acceptance.
+- Exact next action: commit and push the approved gate record, then hand the
+  branch to the focused implementation task.
+
+## Prior checkpoint
+
 ### Gate 52 native replay signal semantics
 
 - The human approved the three-phase signal design for issue #316 on
@@ -35,18 +63,14 @@
   byte before the second sendmmsg replay. The partial-progress fixture now uses
   a connected full Unix-stream peer, which cannot drain without a reader; local
   x86-64 syntax checks and all ten Rocky cases pass with that transport.
-- Signed implementation commit `a9f39e83` is pushed and delivered in open pull
-  request https://github.com/gmkurtzer/ginux/pull/338.
-- Reciprocal summaries are posted on issue #316 and pull request #338 without
-  closing or merging either item.
+- Pull request https://github.com/gmkurtzer/ginux/pull/338 merged into `main` as
+  `0d668ffd`; fresh integrated-main workflow run 45708975262 passed.
+- Issue #316 is closed with the verified result and Gate 52 is in
+  `gates-done`.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Exact next action: integrate pull request #338 at its exact accepted head,
-  require fresh post-integration CI, then close issue #316 with the verified
-  result.
-
-## Prior checkpoint
+- Exact next action: none; Gate 52 is closed.
 
 ### Gate 51 HDAE gate-ledger reconciliation
 
