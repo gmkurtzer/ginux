@@ -959,4 +959,14 @@ mod tests {
         assert_eq!(balanced_surface(9), BalancedSurface::Memory);
         assert_eq!(balanced_surface(999), BalancedSurface::Denied);
     }
+
+    #[test]
+    fn prctl_admission_pins_option_and_arg_bounds() {
+        // option must be 0, arg1 <= 15
+        assert!(balanced_arguments_allowed(302, 0, 0, 0));
+        assert!(balanced_arguments_allowed(302, 0, 15, 0));
+        assert!(!balanced_arguments_allowed(302, 0, 16, 0));
+        assert!(!balanced_arguments_allowed(302, 1, 0, 0));
+        assert!(!balanced_arguments_allowed(302, 0, 100, 0));
+    }
 }
