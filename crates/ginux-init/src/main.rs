@@ -5848,10 +5848,16 @@ fn supervise_native(
         root_object,
         Rights::LOOKUP.union(Rights::READ),
     );
-    let cwd_capability = Capability::unavailable(
+    // The tracee kernel fs context owns cwd.  Ginux never reconstructs it
+    // from a host pathname; chdir/fchdir and CLONE_FS operate on that same
+    // same-instance kernel object under continuous supervision.
+    let cwd_capability = Capability::new(
         CapabilityKind::WorkingDirectory,
         instance_token,
         instance_start_ns.max(1),
+        1,
+        root_object,
+        Rights::LOOKUP,
     );
 
     let mut status = 0i32;
@@ -8395,7 +8401,7 @@ fn supervise_native(
                 root: root_capability,
                 cwd: cwd_capability,
                 descriptor_table: descriptor_capability,
-                cwd_generation: 0,
+                cwd_generation: 1,
                 descriptor_generation: table_generation,
             },
             ContractAuthorization::from(contract_action),
@@ -8413,6 +8419,9 @@ fn supervise_native(
                             lane: Lane::Filesystem,
                             result,
                         },
+                        fs_hooks::Claim::Continue => {
+                            NativeDecision::Contract(decide_systemd(syscall, shared_network))
+                        }
                         fs_hooks::Claim::Unclaimed => {
                             NativeDecision::Contract(decide_systemd(syscall, shared_network))
                         }

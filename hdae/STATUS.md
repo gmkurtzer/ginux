@@ -18,15 +18,20 @@
 - Interfaces outside the accepted instance contract may remain unsupported
   only through explicit, tested denial; blanket denial of supported filesystem
   behavior cannot pass.
-- Baseline main workflow run 45708975262 is green. Gate 53 implementation
-  evidence is not run.
+- Baseline main workflow run 45708975262 is green. The inventory now records
+  ordered operation families and one accountable executor per entry. The
+  confined path executor is the tracee kernel's already-pinned chroot/cwd/open
+  object state, so the supervisor never reopens an authorized pathname.
+- The observation/directory-state family is enabled through the complete
+  contract, capability, generation, and confinement guard. Fresh `make check`
+  and an isolated Rocky 10 x86-64 `test-native-vfs` run pass.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
 - Open decisions or limitations: none. Gate 53 is a final human security
   checkpoint and may not merge or close issue #290 without explicit acceptance.
-- Exact next action: commit and push the approved gate record, then hand the
-  branch to the focused implementation task.
+- Exact next action: commit the observation-family checkpoint, then enable and
+  verify the safe-open family without widening descriptor or mutation routes.
 
 ## Prior checkpoint
 

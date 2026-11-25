@@ -251,6 +251,39 @@ pub enum Owner {
     ExplicitDeny,
 }
 
+/// Ordered Gate 53 operation families.  The order is security-significant:
+/// tests may enable a family only after every earlier family has retained its
+/// positive and negative evidence.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum OperationFamily {
+    Observation,
+    SafeOpen,
+    DescriptorIo,
+    SinglePathMutation,
+    TwoPathMutation,
+    Special,
+}
+
+/// The executor selected by the filesystem authority boundary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Executor {
+    /// Continue the tracee syscall.  The Linux kernel resolves it against the
+    /// tracee's already-pinned chroot/cwd/open-file objects; the supervisor
+    /// never converts the authorized request back into a host pathname.
+    ConfinedKernel,
+    /// The operation belongs to another explicit Ginux authority owner.
+    AccountableExternal,
+    /// The interface is unsupported and must fail before a host effect.
+    ExplicitDeny,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Route {
+    pub operation: &'static Operation,
+    pub family: OperationFamily,
+    pub executor: Executor,
+}
+
 impl Owner {
     pub const fn name(self) -> &'static str {
         match self {
@@ -1634,6 +1667,86 @@ pub fn operation(syscall: u64) -> Option<&'static Operation> {
         .find(|operation| operation.syscall == syscall)
 }
 
+/// Const lane classifier used by the freestanding dispatch table.  The unit
+/// test below pins it to `OPERATIONS`, so this list cannot drift silently.
+pub const fn filesystem_lane_owns(syscall: u64) -> bool {
+    matches!(
+        syscall,
+        2 | 4
+            | 6
+            | 21
+            | 76
+            | 79
+            | 80
+            | 82..=90
+            | 92
+            | 94
+            | 132
+            | 133
+            | 137
+            | 188
+            | 189
+            | 191
+            | 192
+            | 194
+            | 195
+            | 197
+            | 198
+            | 257..=269
+            | 280
+            | 316
+            | 332
+            | 437
+            | 439
+            | 452
+    )
+}
+
+pub const fn operation_family(operation: &Operation) -> OperationFamily {
+    match operation.owner {
+        Owner::DescriptorCore => OperationFamily::DescriptorIo,
+        Owner::ProcessLane | Owner::VirtualKernel | Owner::ExplicitDeny => OperationFamily::Special,
+        Owner::FilesystemLane => match operation.syscall {
+            // Two-path calls are kept separate even when one form is an
+            // older ABI spelling.  Every endpoint and replacement object is
+            // independently resolved by the same kernel operation.
+            82 | 86 | 264 | 265 | 266 | 316 => OperationFamily::TwoPathMutation,
+            // Opening returns descriptor authority.  `creat` is an open
+            // spelling, not a generic single-path mutation.
+            2 | 85 | 257 | 437 => OperationFamily::SafeOpen,
+            // Read-only namespace and metadata observation.
+            4 | 6 | 21 | 79 | 89 | 137 | 191 | 192 | 194 | 195 | 262 | 267 | 332 | 439 => {
+                OperationFamily::Observation
+            }
+            _ => OperationFamily::SinglePathMutation,
+        },
+    }
+}
+
+pub const fn operation_executor(operation: &Operation) -> Executor {
+    match operation.owner {
+        Owner::FilesystemLane => Executor::ConfinedKernel,
+        Owner::ExplicitDeny => Executor::ExplicitDeny,
+        Owner::DescriptorCore | Owner::ProcessLane | Owner::VirtualKernel => {
+            Executor::AccountableExternal
+        }
+    }
+}
+
+/// Return the one accountable route for any pinned filesystem-capable ABI
+/// entry.  Unknown ABI values and unknown syscalls never acquire a route.
+pub fn accountable_route(context: &CallContext) -> Result<Route, i32> {
+    if context.abi != X86_64_AUDIT_ARCH {
+        return Err(ENOSYS);
+    }
+    let operation = operation(context.syscall).ok_or(ENOSYS)?;
+    Ok(Route {
+        operation,
+        family: operation_family(operation),
+        executor: operation_executor(operation),
+    })
+}
+
 /// Fail-closed inventory lookup for the filesystem lane. Unknown ABI entries
 /// cannot acquire a default owner or host executor.
 pub fn filesystem_operation(context: &CallContext) -> Result<&'static Operation, i32> {
@@ -1643,6 +1756,23 @@ pub fn filesystem_operation(context: &CallContext) -> Result<&'static Operation,
     operation(context.syscall)
         .filter(|operation| operation.owner == Owner::FilesystemLane)
         .ok_or(ENOSYS)
+}
+
+/// Validate a filesystem-lane continuation.  The tracee's root/cwd/file
+/// objects are already held by the kernel, so a successful result authorizes
+/// that exact syscall continuation; it never authorizes a supervisor reopen.
+pub fn confined_kernel_route(
+    context: &CallContext,
+    confinement_permits: bool,
+) -> Result<Route, i32> {
+    if !filesystem_hook_authorized(context, confinement_permits) {
+        return Err(ENOSYS);
+    }
+    let route = accountable_route(context)?;
+    if route.executor != Executor::ConfinedKernel {
+        return Err(ENOSYS);
+    }
+    Ok(route)
 }
 
 /// Shared fail-closed guard for every future filesystem hook. Inventory
@@ -1810,6 +1940,14 @@ mod tests {
             assert_eq!(
                 operation(syscall).map(|entry| entry.owner),
                 Some(Owner::FilesystemLane)
+            );
+        }
+        for operation in OPERATIONS {
+            assert_eq!(
+                filesystem_lane_owns(operation.syscall),
+                operation.owner == Owner::FilesystemLane,
+                "const filesystem owner drift for {}",
+                operation.name
             );
         }
         for syscall in [

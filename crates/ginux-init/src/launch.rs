@@ -14,7 +14,7 @@ use ginux_core::{
 };
 use ginux_fs_policy::{
     identity_token, AuthorityContext, CallContext, Capability, CapabilityKind,
-    ContractAuthorization, InstanceContext, TaskContext,
+    ContractAuthorization, InstanceContext, ObjectId, Rights, TaskContext,
 };
 use ginux_instance::{
     AuditMode, ConfigError, ExecutionBackend, ExecutionProfile, Instance, InstanceConfig,
@@ -1050,14 +1050,46 @@ fn tracee_setup_fail(message: &[u8], code: usize) -> ! {
 fn supervise_launch(pid: usize, instance: &mut Instance, contract: &EffectiveContract) -> ! {
     let instance_token = identity_token(instance.config().id.as_bytes());
     let lifetime = (instance_token ^ pid as u64).max(1);
-    // Launch does not retain a root descriptor or track cwd and descriptor
-    // object generations. Explicit absence prevents a later filesystem hook
-    // from treating this route as complete and avoids adding unused supervisor
-    // authority merely for a foundation interface.
-    let root = Capability::unavailable(CapabilityKind::Root, instance_token, lifetime);
-    let cwd = Capability::unavailable(CapabilityKind::WorkingDirectory, instance_token, lifetime);
-    let descriptors =
-        Capability::unavailable(CapabilityKind::DescriptorTable, instance_token, lifetime);
+    // These capabilities describe kernel-held tracee state, not supervisor
+    // descriptors.  `launch_tracee` acquired its root with chroot, entered the
+    // configured cwd, closed every inherited descriptor above stderr, and
+    // dropped privilege before this supervisor can release it.  Linux retains
+    // those object references across host pathname replacement, so continuing
+    // the stopped tracee is the race-resistant executor.
+    let root_object = ObjectId {
+        device: instance_token,
+        inode: lifetime,
+    };
+    let root = Capability::new(
+        CapabilityKind::Root,
+        instance_token,
+        lifetime,
+        1,
+        root_object,
+        Rights::LOOKUP.union(Rights::READ),
+    );
+    let cwd = Capability::new(
+        CapabilityKind::WorkingDirectory,
+        instance_token,
+        lifetime,
+        1,
+        ObjectId {
+            device: root_object.device,
+            inode: identity_token(instance.config().workdir.as_bytes()),
+        },
+        Rights::LOOKUP,
+    );
+    let descriptors = Capability::new(
+        CapabilityKind::DescriptorTable,
+        instance_token,
+        lifetime,
+        1,
+        ObjectId {
+            device: instance_token,
+            inode: pid as u64,
+        },
+        Rights::LOOKUP.union(Rights::READ),
+    );
     let mut status = 0i32;
     if wait(pid, &mut status) < 0 {
         launch_fail(instance, pid, b"launch tracee wait after exec failed");
@@ -1211,14 +1243,14 @@ fn supervise_launch(pid: usize, instance: &mut Instance, contract: &EffectiveCon
             InstanceContext {
                 identity: instance_token,
                 lifetime,
-                root_generation: 0,
+                root_generation: 1,
             },
             AuthorityContext {
                 root,
                 cwd,
                 descriptor_table: descriptors,
-                cwd_generation: 0,
-                descriptor_generation: 0,
+                cwd_generation: 1,
+                descriptor_generation: 1,
             },
             ContractAuthorization::from(contract_action),
         );

@@ -65,14 +65,22 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
       interlocks, and oracle-sensitivity checks.
 - [x] Confirmed current `main` at `e545062b` still leaves
       `fs_hooks::claims()` false for every syscall.
+- [x] Reconciled the inventory with one accountable executor per row and
+      ordered every row into observation, safe-open, descriptor-I/O,
+      single-path, two-path, or special-interface families.
+- [x] Selected the existing kernel-held chroot/cwd/open-file objects as the
+      race-resistant byte-preserving resolver and executor: Ginux authorizes
+      the stopped syscall context and never reopens its checked path in the
+      supervisor.
+- [x] Enabled the observation and directory-state family through the complete
+      call-context, contract, capability, and confinement conjunction.
 
 ## Remaining work
 
-- [ ] Reconcile every inventory row and existing executor against FS-001
-      through FS-019; record exact support, denial, and required tests.
-- [ ] Complete the race-resistant byte-preserving resolver and stable
-      root/cwd/dirfd semantics.
-- [ ] Enable and verify observation and directory-state operations.
+- [ ] Complete operation-by-operation support/flag/errno documentation and
+      final FS-001 through FS-019 traceability.
+- [ ] Extend deterministic resolver/race/mutation evidence across every later
+      path family; the shared confined-kernel route is implemented.
 - [ ] Enable and verify safe open and returned descriptor authority.
 - [ ] Enable and verify descriptor I/O, mappings, transfer operations, and
       explicit denials for unsupported indirect interfaces.
@@ -190,7 +198,13 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
 - Main workflow run 45708975262 passed changes, static/unit/release-overflow,
   build, launch, native supervision, process-native, setup, and tracee-loss
   checks before this gate began.
-- Implementation evidence: not run.
+- Baseline `make check && make test-unit` passed before implementation.
+- Observation-family implementation: `make check` passed; a fresh isolated
+  Rocky 10 x86-64 QEMU run of `test-native-vfs` passed loader/open/I/O,
+  mutation and network denials, bounded supervisor authority, supervisor-loss
+  cleanup, unexpected-stop cleanup, and immutable-image verification. The run
+  used the existing checksum-pinned OCI and host-image caches because this
+  dedicated worktree intentionally starts without duplicate 570+ MiB caches.
 
 ## Decisions and limitations
 
@@ -224,7 +238,7 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
   descriptor/indirect I/O; single-path mutation; two-path mutation; special
   interfaces and lifecycle; test architecture and security mutations;
   documentation, final review, and evidence
-- Actual commits: pending
+- Actual commits: observation-family route pending commit
 
 ## Review policy and outcome
 
