@@ -4,7 +4,7 @@ set -eu
 instance=gate11-benchmark
 native_command=/var/tmp/gate11-sysbench-command.sh
 directory=/var/lib/ginux/instances/$instance
-helper=/usr/local/libexec/ginux-instance-helper
+helper=/usr/libexec/ginux/ginux-helper
 base_config=/var/tmp/instance-gate11-benchmark.toml
 result=${GINUX_BENCH_RESULT:-/var/tmp/gate11-results.tsv}
 raw_dir=${GINUX_BENCH_RAW_DIR:-/var/tmp/gate11-raw}
