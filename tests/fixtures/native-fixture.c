@@ -165,7 +165,7 @@ static long replay_signal_blocking_send(int restart)
                                0x0100007f, {0}}; /* 18083 or 18084 */
     static char fill[4096], payload = 'r', drained[65536];
     int send_buffer = 1024, status = 0;
-    struct { word seconds, nanoseconds; } pause = {0, 200000000};
+    struct { word seconds, nanoseconds; } pause = {0, 50000000};
     struct { word handler, flags, restorer, mask; } action = {
         (word)replay_signal_handler,
         0x04000004 | (restart ? 0x10000000 : 0) /* SA_RESTORER | SA_SIGINFO | SA_RESTART */,
@@ -174,6 +174,8 @@ static long replay_signal_blocking_send(int restart)
     long sender = call3(41, 2, 1, 0);
     if (listener < 0 || sender < 0
         || call5(54, sender, 1 /* SOL_SOCKET */, 7 /* SO_SNDBUF */,
+                 (word)&send_buffer, sizeof send_buffer) < 0
+        || call5(54, listener, 1 /* SOL_SOCKET */, 8 /* SO_RCVBUF */,
                  (word)&send_buffer, sizeof send_buffer) < 0
         || call3(49, listener, (word)&loopback, sizeof loopback) < 0
         || call3(50, listener, 1, 0) < 0
@@ -194,8 +196,11 @@ static long replay_signal_blocking_send(int restart)
         return -103;
     long child = call3(57, 0, 0, 0);
     if (child == 0) {
-        call3(35, (word)&pause, 0, 0);
-        call6(45, receiver, (word)drained, sizeof drained, 0, 0, 0);
+        call3(72, receiver, 4 /* F_SETFL */, 0x800 /* O_NONBLOCK */);
+        for (int round = 0; round < 10; ++round) {
+            call3(35, (word)&pause, 0, 0);
+            while (call6(45, receiver, (word)drained, sizeof drained, 0, 0, 0) > 0) {}
+        }
         call3(231, 0, 0, 0);
     }
     if (child < 0) return -104;

@@ -106,6 +106,11 @@ to workload signal handlers or making the real operation uninterruptible.
   fixture race: consecutive blocking TCP scenarios reused port 18083 and the
   second bind returned `EADDRINUSE`. The three cases now use distinct allowed
   ports; the complete ten-case Rocky matrix passed again after that correction.
+- Exact-head CI at `47f3dc2a` passed `static-and-unit` and every native test
+  before the new matrix, then timed out in the `SA_RESTART` case because one
+  fixed-size receiver read did not always drain the faster host's queued TCP
+  data. The fixture now bounds the receive buffer and drains nonblocking in ten
+  bounded rounds; all ten focused cases passed again in Rocky.
 
 ## Decisions and limitations
 
@@ -124,6 +129,10 @@ to workload signal handlers or making the real operation uninterruptible.
 - The failed `1f52c201` integration run was a deterministic fixture-port
   collision, not a replay implementation failure; fresh exact-head CI is still
   required after the isolated-port correction.
+- The failed `47f3dc2a` integration run exposed a second fixture assumption
+  about queued TCP volume. Repeated bounded nonblocking drain rounds preserve
+  the behavior under test while removing host-speed dependence; corrected
+  exact-head CI remains required.
 - Pull request [#338](https://github.com/gmkurtzer/ginux/pull/338) is open from
   the dedicated Gate 52 branch at implementation commit `a9f39e83`.
 - Issue #316 records the delivered fix and remaining review checkpoint in

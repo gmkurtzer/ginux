@@ -25,6 +25,10 @@
   consecutive blocking TCP cases reused port 18083. The cases now use isolated
   ports 18083 through 18085, and all ten passed again in Rocky; corrected
   exact-head integration CI remains pending.
+- CI at `47f3dc2a` then passed static/unit and the preexisting native matrix but
+  timed out in `SA_RESTART`: one 64-KiB read did not always drain the faster
+  host's queued TCP data. The fixture now performs ten bounded nonblocking
+  drain rounds with a bounded receive buffer; all ten focused cases pass again.
 - Signed implementation commit `a9f39e83` is pushed and delivered in open pull
   request https://github.com/gmkurtzer/ginux/pull/338.
 - Reciprocal summaries are posted on issue #316 and pull request #338 without
