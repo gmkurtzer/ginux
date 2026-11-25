@@ -26,6 +26,7 @@ run_example() {
     ./scripts/expect-gate19-native-login.exp \
         "$ROCKY_KEY" "$ROCKY_SSH_PORT" "$ROCKY_SSH_USER" \
         "$name" "$log" "$check" "$shutdown" >/dev/null
+    rocky_ssh "test \"\$(stat -c %a /run/ginux/instances/$name)\" = 711"
     grep -Fq "$boot" "$log"
     grep -Fq "GINUX_GATE19_BOOT_OK:$name" "$log"
     printf 'Gate 19 %s native boot: PASS\n' "$name"

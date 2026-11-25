@@ -38,9 +38,14 @@ expect {
     eof { puts stderr "interactive runner exited before host readiness"; exit 149 }
 }
 expect {
-    -re {Ginux host install: installing controller, runtime, and image tools} {}
+    -re {Ginux host install: installing .*ginux-[^ ]+\.rpm} {}
     timeout { puts stderr "Ginux host installation progress was not reported"; exit 150 }
     eof { puts stderr "interactive runner exited during Ginux installation"; exit 151 }
+}
+expect {
+    -re {GINUX_HOST_INSTALL: PASS \(installed and verified RPM; host state preserved\)} {}
+    timeout { puts stderr "installed Ginux RPM was not verified"; exit 152 }
+    eof { puts stderr "interactive runner exited before RPM verification"; exit 153 }
 }
 expect {
     -re {GINUX_HOST: READY} {}
@@ -52,7 +57,7 @@ expect {
     timeout { puts stderr "Rocky host shell prompt timed out"; exit 72 }
     eof { puts stderr "Rocky host shell exited early"; exit 73 }
 }
-send -- "test -x /usr/local/bin/ginux && test -f /etc/ginux/examples/rocky10-systemd.toml && test -z \"\$(sudo find /var/lib/ginux/images -mindepth 1 -maxdepth 1 -print -quit)\" && test \"\$(ginux list | wc -l)\" -eq 1 && printf 'GINUX_HOST_EMPTY: PASS\\n'\r"
+send -- "test -x /usr/bin/ginux && test -f /etc/ginux/examples/rocky10-systemd.toml && test -z \"\$(sudo find /var/lib/ginux/cache/oci/blobs/sha256 -type f -print -quit)\" && test \"\$(ginux list | wc -l)\" -eq 1 && printf 'GINUX_HOST_EMPTY: PASS\\n'\r"
 expect {
     -re {GINUX_HOST_EMPTY: PASS} {}
     timeout { puts stderr "installed Ginux host was not empty"; exit 74 }
@@ -73,19 +78,14 @@ expect {
     eof { puts stderr "Rocky host shell exited before image acquisition"; exit 160 }
 }
 expect {
-    -re {  Cache: miss} {}
-    timeout { puts stderr "first instance creation did not report an OCI cache miss"; exit 159 }
+    -re {manifest: 100%} {}
+    timeout { puts stderr "first instance creation did not download the OCI manifest"; exit 159 }
     eof { puts stderr "Rocky host shell exited before image acquisition"; exit 160 }
 }
 expect {
-    -re {Layer 1/[0-9]+} {}
+    -re {layer 1/[0-9]+: +[0-9]+%} {}
     timeout { puts stderr "OCI layer download progress did not begin"; exit 161 }
     eof { puts stderr "Rocky host shell exited during layer acquisition"; exit 162 }
-}
-expect {
-    -re {  Verification: passed} {}
-    timeout { puts stderr "OCI layer download completion was not reported"; exit 163 }
-    eof { puts stderr "Rocky host shell exited during layer acquisition"; exit 164 }
 }
 expect {
     -re {Instance "rocky" imported.} {}
@@ -93,16 +93,16 @@ expect {
     eof { puts stderr "Rocky host shell exited during instance creation"; exit 77 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
-send -- "sudo sh -c 'for identity in /var/lib/ginux/images/*/identity; do grep -Fqx \"IMAGE_REF=docker.io/rockylinux/rockylinux@sha256:7a18ce2c9c1e0d8735f3e72685f9666150af25036e7f7b5ee4eede3754496f8c\" \"\$identity\" && test -s \"\${identity%/*}/rootfs.tar\" && exit 0; done; exit 1' && printf 'GINUX_CREATE_%s\\n' 'ACQUIRE: PASS'\r"
+send -- "test -n \"\$(sudo find /var/lib/ginux/cache/oci/blobs/sha256 -type f -print -quit)\" && sudo test -x /var/lib/ginux/instances/rocky/root/sbin/init && test -z \"\$(sudo find /var/lib/ginux -name rootfs.tar -print -quit)\" && printf 'GINUX_CREATE_%s\\n' 'ACQUIRE: PASS'\r"
 expect {
     -re {GINUX_CREATE_ACQUIRE: PASS} {}
     timeout { puts stderr "create-time image acquisition was not cached"; exit 129 }
     eof { puts stderr "Rocky host shell exited during acquisition check"; exit 130 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
-send -- "sudo unshare -n /usr/local/bin/ginux import cache-check /etc/ginux/examples/rocky10-systemd.toml\r"
+send -- "sudo unshare -n /usr/bin/ginux import cache-check /etc/ginux/examples/rocky10-systemd.toml\r"
 expect {
-    -re {  Cache: hit} {}
+    -re {manifest: cached} {}
     timeout { puts stderr "offline create did not report an OCI cache hit"; exit 131 }
     eof { puts stderr "Rocky host shell exited during offline cache check"; exit 132 }
 }
@@ -391,9 +391,9 @@ expect {
     eof { puts stderr "host session exited during detached status check"; exit 126 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
-send -- "runtime=\$(sudo awk '{print \$1}' /var/lib/ginux/instances/rocky/runtime.pid); tracee=\$(pgrep -P \"\$runtime\" | head -n 1); sudo awk '/^Uid:/{if (\$2 != 65534 || \$3 != 65534 || \$4 != 65534 || \$5 != 65534) exit 1} /^Gid:/{if (\$2 != 65534 || \$3 != 65534 || \$4 != 65534 || \$5 != 65534) exit 1} /^NoNewPrivs:/{if (\$2 != 1) exit 1; seen=1} END{exit !seen}' /proc/\$tracee/status && printf 'GINUX_HOST_BACKSTOP: PASS\\n'\r"
+send -- "helper=\$(sudo awk '{print \$1}' /run/ginux/instances/rocky/supervisor.pid); script=\$(pgrep -P \"\$helper\" -x script | head -n 1); runtime=\$(pgrep -P \"\$script\" -x ginux-runtime | head -n 1); tracee=\$(pgrep -P \"\$runtime\" | head -n 1); test -n \"\$tracee\" && sudo awk '/^Uid:/{if (\$2 != 65534 || \$3 != 65534 || \$4 != 65534 || \$5 != 65534) exit 1} /^Gid:/{if (\$2 != 65534 || \$3 != 65534 || \$4 != 65534 || \$5 != 65534) exit 1} /^NoNewPrivs:/{if (\$2 != 1) exit 1; seen=1} END{exit !seen}' /proc/\$tracee/status && printf 'GINUX_HOST_BACKSTOP: PASS\\n'\r"
 expect {
-    -re {GINUX_HOST_BACKSTOP: PASS} {}
+    -re {[\r\n]+GINUX_HOST_BACKSTOP: PASS} {}
     timeout { puts stderr "host UID/GID nobody or no-new-privileges backstop was absent"; exit 192 }
     eof { puts stderr "host session exited during host backstop check"; exit 193 }
 }
@@ -532,9 +532,9 @@ expect {
     eof { puts stderr "Rocky host shell exited during audit opt-in check"; exit 195 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
-send -- "runtime=\$(sudo awk '{print \$1}' /var/lib/ginux/instances/rocky/runtime.pid); args=\$(ps -o args= -p \"\$runtime\"); case \"\$args\" in *' systemd') exit 1;; esac; sudo grep -Fq 'init = \"/sbin/init\"' /var/lib/ginux/instances/rocky/config.toml && sudo grep -Fq 'args = \[\"--system\", \"--unit=multi-user.target\"\]' /var/lib/ginux/instances/rocky/config.toml && printf 'GINUX_RUNTIME_%s\\n' 'CONFIG: PASS'\r"
+send -- "runtime=\$(sudo awk '{print \$1}' /run/ginux/instances/rocky/supervisor.pid); args=\$(ps -o args= -p \"\$runtime\"); case \"\$args\" in *' systemd') exit 1;; esac; sudo grep -Fq 'init = \"/sbin/init\"' /var/lib/ginux/instances/rocky/config.toml && sudo grep -Fq 'args = \[\"--system\", \"--unit=multi-user.target\"\]' /var/lib/ginux/instances/rocky/config.toml && printf 'GINUX_RUNTIME_%s\\n' 'CONFIG: PASS'\r"
 expect {
-    -re {GINUX_RUNTIME_CONFIG: PASS} {}
+    -re {[\r\n]+GINUX_RUNTIME_CONFIG: PASS} {}
     timeout { puts stderr "runtime launch was not configuration-derived"; exit 137 }
     eof { puts stderr "Rocky host shell exited during runtime argument check"; exit 138 }
 }
@@ -546,7 +546,7 @@ expect {
     eof { puts stderr "Rocky host shell exited during detached stop"; exit 103 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
-send -- "sudo sh -c 'printf \"999999 1\\n\" > /var/lib/ginux/instances/rocky/supervisor.pid'; ginux list; ginux stop rocky\r"
+send -- "sudo install -d -m 711 /run/ginux/instances/rocky; sudo sh -c 'printf \"999999 1\\n\" > /run/ginux/instances/rocky/supervisor.pid'; ginux list; ginux stop rocky\r"
 expect {
     -re {rocky[[:space:]]+stopped} {}
     timeout { puts stderr "stale supervisor state was not reported stopped"; exit 104 }
@@ -578,9 +578,9 @@ expect {
     eof { puts stderr "second host exited before login"; exit 168 }
 }
 expect -re {\[ginux@ginux-rocky [^]]+\]\$ }
-send -- "test -n \"\$(sudo find /var/lib/ginux/images -mindepth 1 -maxdepth 1 -print -quit)\" && ginux status rocky | grep -Fq 'state: stopped' && sudo unshare -n /usr/local/bin/ginux import restart-cache /etc/ginux/examples/rocky10-systemd.toml\r"
+send -- "test -n \"\$(sudo find /var/lib/ginux/cache/oci/blobs/sha256 -type f -print -quit)\" && ginux status rocky | grep -Fq 'state: stopped' && sudo unshare -n /usr/bin/ginux import restart-cache /etc/ginux/examples/rocky10-systemd.toml\r"
 expect {
-    -re {  Cache: hit} {}
+    -re {manifest: cached} {}
     timeout { puts stderr "OCI cache or instance state did not persist across Rocky host sessions"; exit 169 }
     eof { puts stderr "second host exited during persistent state check"; exit 170 }
 }

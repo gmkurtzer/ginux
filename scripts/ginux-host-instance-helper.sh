@@ -122,7 +122,11 @@ record_supervisor() {
 record_runtime() {
     record_directory=$1
     record_pid=$2
-    install -d -m 700 "$record_directory"
+    # Keep the directory traverse-only for the separately authorized,
+    # unprivileged console transport.  Runtime identity files remain
+    # read-only and the console FIFOs remain inaccessible until chowned by
+    # authorize-attach.
+    install -d -m 711 "$record_directory"
     record_start=$(awk '{ print $22 }' "/proc/$record_pid/stat")
     printf '%s %s\n' "$record_pid" "$record_start" >"$record_directory/runtime.pid"
 }
@@ -812,7 +816,11 @@ start_instance() {
         printf 'WARNING: %s is starting with its contract unlocked for maintenance.\n' \
             "$name" >&2
     fi
-    install -d -m 700 "$runtime_directory"
+    # The unprivileged attach transport must traverse this directory after the
+    # privileged authorize-attach step has granted access to the two console
+    # FIFOs.  Traverse-only permission exposes neither directory listings nor
+    # writable lifecycle state; the FIFOs remain root-only until authorized.
+    install -d -m 711 "$runtime_directory"
     rm -f \
         "$runtime_directory/supervisor.pid" \
         "$runtime_directory/runtime.pid" \

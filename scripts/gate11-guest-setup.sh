@@ -18,10 +18,13 @@ fi
 test "$(rpm -q sysbench)" = "$sysbench_nevra"
 
 if test -d "$directory"; then
-    sudo /usr/local/libexec/ginux-instance-helper --protocol 1 stop "$instance" >/dev/null || true
+    sudo /usr/libexec/ginux/ginux-helper --protocol 1 stop "$instance" >/dev/null || true
     sudo rm -rf "$directory"
 fi
-if ! ginux import "$instance" "$config"; then
+bootstrap_config=/var/tmp/instance-gate11-bootstrap.toml
+sed -e 's|^init = .*|init = "/bin/true"|' \
+    -e 's|^args = .*|args = []|' "$config" >"$bootstrap_config"
+if ! ginux import "$instance" "$bootstrap_config"; then
     if test "$acquire" != on; then
         printf '%s\n' 'Gate 11 instance image is absent; run make bench-prepare first' >&2
     fi
@@ -42,6 +45,7 @@ if test -d /usr/share/sysbench; then
     sudo cp -a /usr/share/sysbench "$root/usr/share/"
 fi
 sudo chown -R 65534:65534 "$root/usr/bin/sysbench" "$root/usr/share/sysbench" 2>/dev/null || true
+sudo install -m 0644 "$config" "$directory/config.toml"
 
 host_hash=$(sha256sum /usr/bin/sysbench | awk '{ print $1 }')
 instance_hash=$(sudo sha256sum "$root/usr/bin/sysbench" | awk '{ print $1 }')
