@@ -4,37 +4,36 @@
 
 ### Gate 51 HDAE gate-ledger reconciliation
 
-- The human approved a complete gate-ledger reconciliation batch on 2026-11-24.
-- The authoritative audit runs from current `origin/main` on dedicated branch
-  `hdae/gate-ledger-reconciliation`; the primary checkout's older Gate 31
-  branch is not used as repository authority.
-- Initial state was 29 closed gates, 29 open gates, and one deferred gate.
-  Gate 11 is now deferred under its approved return condition, yielding 29
-  closed, 29 open, and two deferred records.
-- Twenty-seven open gates have merged implementations but stale or
-  acceptance-pending records. Gate 11 remains partial at its unchanged 4%
-  thread-performance threshold, Gate 43 is not implemented, and Gate 14 remains
-  intentionally deferred.
-- Every referenced gate pull request is merged and the final GitHub audit found
-  no open pull request. Merge state is delivery evidence, not automatic human
-  acceptance.
+- The human approved the reconciled Gate 51 checkpoint on 2026-11-24 after
+  pull request #333 merged as `f4b85186`.
+- The 27 technically delivered records reconciled by Gate 51 and Gate 51 itself
+  are closed under that consolidated acceptance. Gate 43 remains the only open
+  implementation gate. Gates 11 and 14 remain intentionally deferred under
+  their recorded return conditions.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Last evidence: the complete static, unit, aggregate, security, recovery,
-  contract, systemd, multi-instance, RPM, and allocator matrix passed against
-  `3d4ececf`; the final `origin/main` delta through `3185b79b` contains only PR
-  #332's device boundary unit test, and the full static/unit lane passed at that
-  final base. Ledger uniqueness, locked-history, forward, reverse, coverage,
-  and orphan checks also pass.
-- Open decisions or limitations: Gate 43 begins only after the consolidated
-  acceptance checkpoint; its performance effort has no reliable duration until
-  its stable harness and profiling baseline exist.
-- Delivery: pull request https://github.com/gmkurtzer/ginux/pull/333 contains
-  the signed reconciliation series against `main`.
-- Exact next action: stop for consolidated human review and acceptance of pull
-  request #333. Do not move records to `gates-done` or begin Gate 43 before
-  that acceptance.
+- Last evidence: post-acceptance verification passes `make check test-cli
+  test-unit test-bench-compare test-gate15-report`, aggregate `make test`,
+  `make test-security test-recovery test-contract test-systemd
+  test-multi-instance`, fresh RPM/allocator verification, the full 400-sample
+  dispatch matrix, and block, network, and systemd benchmarks. Five stale
+  harness or packaged-workflow assumptions were repaired in signed local
+  commits `d478e6ff`, `15b0bea7`, `10fd8080`, `eb5b54e5`, and `ac4f62c0`.
+- Performance status: selective CPU, memory, and mutex remain near native.
+  Selective thread-yield remains the known Gate 11 limitation at 0.8995x to
+  0.9387x native; paranoid thread-yield remains 0.0285x to 0.0360x native. The
+  guarded allocator remains the known Gate 43 baseline at 0.680x, 0.665x, and
+  0.573x native for 1, 2, and 4 threads. No new performance regression was
+  identified.
+- Open decisions or limitations: Gate 43 is unstarted and requires its own
+  explicit authorization. The post-acceptance corrective branch has not been
+  pushed or opened as a pull request.
+- Delivery: Gate 51 is merged through
+  https://github.com/gmkurtzer/ginux/pull/333. Corrective verification work is
+  local on `hdae/post-acceptance-verification-fixes`.
+- Exact next action: ask the human whether to push the corrective branch and
+  open its follow-up pull request. Do not begin Gate 43.
 
 ### Prior checkpoint: Gate 50 scoped freestanding Rust flags
 

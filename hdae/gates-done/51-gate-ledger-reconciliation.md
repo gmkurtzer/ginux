@@ -66,8 +66,9 @@ acceptance checkpoint before Gate 43 begins.
 
 ## Remaining work
 
-- [ ] Stop for consolidated human review and acceptance before moving accepted
-      records to `gates-done` or beginning Gate 43.
+- [x] Received consolidated human approval after pull request #333 merged, then
+      completed the requested post-acceptance full verification before closing
+      the reconciled records. Gate 43 was not started.
 
 ## Acceptance criteria
 
@@ -153,6 +154,28 @@ acceptance checkpoint before Gate 43 begins.
   state passed the aggregate and complete security/recovery matrices.
 - Pull request #333 contains the signed reconciliation series:
   https://github.com/gmkurtzer/ginux/pull/333
+- The human approved the consolidated checkpoint on 2026-11-24 after pull
+  request #333 merged as `f4b85186`.
+- Post-acceptance verification used a clean worktree at merged `origin/main`
+  plus only the corrective commits discovered by that verification. `make
+  check test-cli test-unit test-bench-compare test-gate15-report`, aggregate
+  `make test`, `make test-security test-recovery test-contract test-systemd
+  test-multi-instance`, fresh RPM and allocator verification, the full
+  400-sample dispatch matrix, and block, network, and systemd benchmarks pass.
+- Verification found and repaired five stale harness or packaged-workflow
+  assumptions: authorized console-directory traversal, Gate 9.75 and Gate 12.5
+  fixture state, packaged interactive paths and cache output, clean Gate 15
+  benchmark setup, and the systemd benchmark process-tree sampler. The fixes
+  are signed commits `d478e6ff`, `15b0bea7`, `10fd8080`, `eb5b54e5`, and
+  `ac4f62c0` on `hdae/post-acceptance-verification-fixes`; they are not pushed.
+- Fresh systemd measurement reports 13,608 ms boot-to-login, 34,428 KiB peak
+  traced-tree RSS, 25,744 KiB login-ready RSS, and 11 peak managed tasks.
+- Fresh Gate 15 selective CPU, memory, and mutex results remain near native.
+  Selective thread-yield remains the known Gate 11 limitation at 0.8995x to
+  0.9387x native; paranoid thread-yield remains the documented all-syscall
+  mediation cost at 0.0285x to 0.0360x native. The guarded allocator remains
+  the known Gate 43 baseline at 0.680x, 0.665x, and 0.573x native for 1, 2,
+  and 4 threads. These known limitations were not reclassified as regressions.
 
 ## Decisions and limitations
 
@@ -163,6 +186,8 @@ acceptance checkpoint before Gate 43 begins.
   rewriting history.
 - Gate 43 performance convergence is not predictable before its stable harness
   and profiling baseline exist, so it remains a separate execution gate.
+- Gate 43 remains open and unstarted. This post-acceptance verification does
+  not authorize its implementation.
 
 ## Delivery strategy
 
@@ -177,6 +202,7 @@ acceptance checkpoint before Gate 43 begins.
 
 ## Review policy and outcome
 
-Human checkpoint. The approved batch authorizes reconciliation and verification
-but not silent acceptance, movement into `gates-done`, direct merge, or Gate 43
-execution before the consolidated review.
+Accepted and closed at the consolidated human checkpoint on 2026-11-24. Pull
+request #333 is merged, the complete post-acceptance verification matrix passes,
+and the reconciled technically delivered records may move to `gates-done`.
+Gate 43 remains a separate, unstarted human checkpoint.
