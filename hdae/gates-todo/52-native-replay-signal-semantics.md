@@ -55,7 +55,7 @@ to workload signal handlers or making the real operation uninterruptible.
 - [x] Run `make check`, `make test-unit`, and the practical local suite.
 - [x] Commit and push the signed implementation and evidence.
 - [x] Add reciprocal issue/PR summaries.
-- [ ] Confirm the exact-head `static-and-unit` and `launch-integration` jobs.
+- [x] Confirm the exact-head `static-and-unit` and `launch-integration` jobs.
 
 ## Acceptance criteria
 
@@ -117,6 +117,11 @@ to workload signal handlers or making the real operation uninterruptible.
   case now uses a full connected Unix-stream peer that cannot drain on its own;
   x86-64 syntax checks and all ten Rocky cases pass with the timing-independent
   transport.
+- Exact-head code-bearing commit `db6e8d0d` passed workflow run
+  [45685303840](https://github.com/gmkurtzer/ginux/actions/runs/45685303840):
+  `changes`, `static-and-unit`, and `launch-integration` all passed. Integration
+  includes the complete native-supervision, process-native, gate-setup, and
+  tracee-loss regression matrix.
 
 ## Decisions and limitations
 
@@ -129,9 +134,9 @@ to workload signal handlers or making the real operation uninterruptible.
 - The macOS host cannot directly link this freestanding Linux binary with its
   default Apple linker; the authoritative build is `make build`, and native
   behavior was verified in the repository's Rocky x86-64 VM.
-- Exact-head pull-request CI remains required for the complete existing native
-  supervision matrix, including ordinary sendmmsg completion and surrounding
-  clone/network/close-range regressions.
+- Exact-head pull-request CI now covers the complete existing native
+  supervision matrix, including ordinary and interrupted-partial sendmmsg plus
+  surrounding clone/network/close-range regressions.
 - The failed `1f52c201` integration run was a deterministic fixture-port
   collision, not a replay implementation failure; fresh exact-head CI is still
   required after the isolated-port correction.
@@ -159,11 +164,14 @@ to workload signal handlers or making the real operation uninterruptible.
 - Planned commits: shared replay-mask implementation and regressions; HDAE
   evidence and delivery record.
 - Actual commits: `a9f39e83` implements the shared replay-mask behavior and
-  deterministic regressions; `893c15ce` records the initial HDAE evidence and
-  delivery; `8f133155` records reciprocal delivery links; the final test
-  refinement adds deterministic partial-sendmmsg interruption coverage.
+  initial regressions; `893c15ce` and `8f133155` record HDAE evidence and
+  reciprocal delivery; `1f52c201`, `47f3dc2a`, `6d4574b3`, and `db6e8d0d`
+  converge the deterministic partial-sendmmsg and blocking-restart fixtures
+  across Rocky TCG and native-speed CI.
 
 ## Review policy and outcome
 
-This is a human security and observable-semantics checkpoint. Technical passage
-authorizes pull-request delivery, not merge, issue closure, or gate closure.
+Gate 52 is technically passed at code-bearing commit `db6e8d0d`. This remains a
+human security and observable-semantics checkpoint: passage authorizes
+pull-request delivery, not merge, issue closure, or gate closure. It remains in
+`gates-todo` pending explicit human acceptance.

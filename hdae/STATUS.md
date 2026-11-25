@@ -19,8 +19,10 @@
   syntax and patch checks, and all ten focused native cases in a disposable
   Rocky 10 x86-64 QEMU host, including partial sendmmsg progress after the
   second replayed message is interrupted.
-- Remaining evidence is exact-head pull-request `static-and-unit` and
-  `launch-integration` CI, which runs the complete native-supervision matrix.
+- Exact-head code-bearing commit `db6e8d0d` passed workflow run 45685303840:
+  `changes`, `static-and-unit`, and `launch-integration` are green, including
+  the complete native-supervision, process-native, gate-setup, and tracee-loss
+  regression matrix.
 - CI at `1f52c201` passed `static-and-unit` and found a fast-host fixture race:
   consecutive blocking TCP cases reused port 18083. The cases now use isolated
   ports 18083 through 18085, and all ten passed again in Rocky; corrected
@@ -40,8 +42,9 @@
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Exact next action: push the reciprocal-link checkpoint and verify pull
-  request 338 exact-head CI.
+- Exact next action: wait for explicit human review of technically passed Gate
+  52 and pull request 338. Do not merge, close issue #316, or move the gate to
+  `gates-done` without that acceptance.
 
 ## Prior checkpoint
 
