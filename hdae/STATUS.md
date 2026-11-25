@@ -25,13 +25,17 @@
 - The observation/directory-state family is enabled through the complete
   contract, capability, generation, and confinement guard. Fresh `make check`
   and an isolated Rocky 10 x86-64 `test-native-vfs` run pass.
+- Safe open/openat is enabled through the same route. Unsupported safe-open
+  spellings retain explicit `ENOSYS`; a second `make check` and isolated Rocky
+  `test-native-vfs` run pass, including loader/open success, mutating-open
+  refusal, and immutable-image verification.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
 - Open decisions or limitations: none. Gate 53 is a final human security
   checkpoint and may not merge or close issue #290 without explicit acceptance.
-- Exact next action: commit the observation-family checkpoint, then enable and
-  verify the safe-open family without widening descriptor or mutation routes.
+- Exact next action: commit the safe-open checkpoint, then reconcile and
+  verify descriptor and indirect-I/O ownership without enabling path mutation.
 
 ## Prior checkpoint
 

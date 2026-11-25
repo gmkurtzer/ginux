@@ -11,9 +11,27 @@ use ginux_fs_policy::CallContext;
 pub const fn claims(syscall: u64) -> bool {
     matches!(
         syscall,
-        // Observation and directory-state family.  Later families are added
-        // only after this route keeps its positive and negative evidence.
-        4 | 6 | 21 | 79 | 89 | 137 | 191 | 192 | 194 | 195 | 262 | 267 | 332 | 439
+        // Observation/directory-state, then safe-open. Later families are
+        // added only after these routes keep their positive and negative
+        // evidence. Unsupported safe-open spellings stay owned and receive
+        // their inventory-defined ENOSYS from the existing core decision.
+        2 | 4
+            | 6
+            | 21
+            | 79
+            | 85
+            | 89
+            | 137
+            | 191
+            | 192
+            | 194
+            | 195
+            | 257
+            | 262
+            | 267
+            | 332
+            | 437
+            | 439
     )
 }
 
@@ -115,13 +133,13 @@ mod tests {
     }
 
     #[test]
-    fn observation_family_is_the_only_enabled_family() {
+    fn observation_and_safe_open_are_the_only_enabled_families() {
         for syscall in [
-            4, 6, 21, 79, 89, 137, 191, 192, 194, 195, 262, 267, 332, 439,
+            2, 4, 6, 21, 79, 85, 89, 137, 191, 192, 194, 195, 257, 262, 267, 332, 437, 439,
         ] {
-            assert!(claims(syscall), "observation syscall {syscall}");
+            assert!(claims(syscall), "enabled syscall {syscall}");
         }
-        for syscall in [2, 76, 82, 83, 85, 86, 257, 264, 316, 437, 452] {
+        for syscall in [76, 82, 83, 86, 264, 316, 452] {
             assert!(!claims(syscall), "later-family syscall {syscall}");
         }
     }

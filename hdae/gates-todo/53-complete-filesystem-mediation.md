@@ -74,6 +74,9 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
       supervisor.
 - [x] Enabled the observation and directory-state family through the complete
       call-context, contract, capability, and confinement conjunction.
+- [x] Enabled safe open/openat through the same kernel-held root/cwd route;
+      unsupported `creat` and `openat2` spellings retain explicit `ENOSYS`
+      through their accountable core decision instead of native fallback.
 
 ## Remaining work
 
@@ -81,7 +84,6 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
       final FS-001 through FS-019 traceability.
 - [ ] Extend deterministic resolver/race/mutation evidence across every later
       path family; the shared confined-kernel route is implemented.
-- [ ] Enable and verify safe open and returned descriptor authority.
 - [ ] Enable and verify descriptor I/O, mappings, transfer operations, and
       explicit denials for unsupported indirect interfaces.
 - [ ] Enable and verify single-path mutation with immutable-image and
@@ -205,6 +207,9 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
   cleanup, unexpected-stop cleanup, and immutable-image verification. The run
   used the existing checksum-pinned OCI and host-image caches because this
   dedicated worktree intentionally starts without duplicate 570+ MiB caches.
+- Safe-open checkpoint: `make check` and a second fresh isolated Rocky 10
+  x86-64 `test-native-vfs` run passed. The positive loader/open path, explicit
+  mutating-open denial, and immutable-root digest check all remained green.
 
 ## Decisions and limitations
 
@@ -238,7 +243,8 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
   descriptor/indirect I/O; single-path mutation; two-path mutation; special
   interfaces and lifecycle; test architecture and security mutations;
   documentation, final review, and evidence
-- Actual commits: observation-family route pending commit
+- Actual commits: `284825c5` observation-family route; safe-open checkpoint
+  pending commit
 
 ## Review policy and outcome
 

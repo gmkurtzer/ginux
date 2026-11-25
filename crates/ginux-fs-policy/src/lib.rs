@@ -1962,6 +1962,30 @@ mod tests {
     }
 
     #[test]
+    fn operation_families_follow_the_gate_order() {
+        for (syscall, expected) in [
+            (4, OperationFamily::Observation),
+            (2, OperationFamily::SafeOpen),
+            (0, OperationFamily::DescriptorIo),
+            (83, OperationFamily::SinglePathMutation),
+            (316, OperationFamily::TwoPathMutation),
+            (165, OperationFamily::Special),
+        ] {
+            let operation = operation(syscall).unwrap();
+            assert_eq!(operation_family(operation), expected);
+        }
+        for operation in OPERATIONS {
+            let context = CallContext {
+                syscall: operation.syscall,
+                ..path_admission_context()
+            };
+            let route = accountable_route(&context).unwrap();
+            assert_eq!(route.operation.syscall, operation.syscall);
+            assert_eq!(route.executor, operation_executor(operation));
+        }
+    }
+
+    #[test]
     fn identity_tokens_are_stable_and_separate_instances() {
         assert_eq!(identity_token(b"rocky"), identity_token(b"rocky"));
         assert_ne!(identity_token(b"rocky"), identity_token(b"peer"));
