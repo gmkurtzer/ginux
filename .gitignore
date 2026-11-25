@@ -1,0 +1,7 @@
+/build/
+/target/
+/output/
+/docs/paper/*.blg
+/docs/paper/*.log
+/docs/paper/*.pdf
+/.artifacts/

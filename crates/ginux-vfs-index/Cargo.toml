@@ -1,0 +1,12 @@
+[package]
+name = "ginux-vfs-index"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[[bin]]
+name = "ginux-vfs-index"
+path = "src/main.rs"
+
+[dependencies]
+ginux-vfs = { path = "../ginux-vfs" }

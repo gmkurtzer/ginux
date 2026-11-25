@@ -1,0 +1,45 @@
+# The order and whitespace differ from config/instance-gate4.toml.
+schema_version = 1
+
+[instance]
+environment = ["GINUX_GATE=4"]
+args = ["fixture-arg"]
+init = "/runtime-fixture"
+root = "rocky-10.2-x86_64"
+id = "gate4-demo"
+
+[execution]
+backend = "interpreter"
+profile = "security"
+
+[resources]
+memory_mib = 128
+vcpus = 1
+
+[devices]
+assignments = []
+
+[storage]
+assignments = []
+
+[contract]
+version = 1
+catalog = 2
+default = "deny"
+allow = []
+deny = []
+
+[contract.syscalls]
+control = "selective"
+default = "deny"
+allow = ["getpid", "getppid", "gettid", "write", "exit", "exit_group"]
+deny = []
+
+[failure]
+policy = "stop"
+
+[audit]
+enabled = true
+
+[network]
+backend = "none"

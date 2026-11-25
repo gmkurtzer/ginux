@@ -1,0 +1,44 @@
+schema_version = 1
+
+[instance]
+id = "gate11-benchmark"
+root = "docker.io/rockylinux/rockylinux@sha256:7a18ce2c9c1e0d8735f3e72685f9666150af25036e7f7b5ee4eede3754496f8c"
+init = "/usr/bin/sysbench"
+args = ["cpu", "--threads=1", "--time=1", "run"]
+environment = ["container=ginux"]
+
+[resources]
+vcpus = 1
+memory_mib = 1024
+
+[execution]
+profile = "balanced"
+backend = "ptrace-native"
+
+[contract]
+version = 1
+catalog = 2
+default = "deny"
+allow = ["*"]
+deny = ["device.mmio.direct", "device.dma.direct", "network.packet.raw"]
+
+[contract.syscalls]
+control = "selective"
+default = "deny"
+allow = ["*"]
+deny = []
+
+[storage]
+assignments = ["root-overlay"]
+
+[devices]
+assignments = ["console", "null", "zero", "random", "net0"]
+
+[network]
+backend = "shared"
+
+[audit]
+enabled = true
+
+[failure]
+policy = "stop"

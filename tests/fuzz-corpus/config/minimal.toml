@@ -1,0 +1,12 @@
+schema_version = 1
+
+[instance]
+id = "fuzz"
+root = "docker.io/rockylinux/rockylinux@sha256:7a18ce2c9c1e0d8735f3e72685f9666150af25036e7f7b5ee4eede3754496f8c"
+init = "/bin/true"
+args = []
+environment = []
+
+[resources]
+vcpus = 1
+memory_mib = 64

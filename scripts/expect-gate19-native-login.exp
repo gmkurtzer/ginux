@@ -1,0 +1,52 @@
+#!/usr/bin/expect -f
+
+if {$argc != 7} {
+    puts stderr "usage: expect-gate19-native-login.exp <key> <port> <user> <name> <log> <check> <shutdown>"
+    exit 64
+}
+
+set key [lindex $argv 0]
+set port [lindex $argv 1]
+set user [lindex $argv 2]
+set name [lindex $argv 3]
+set log [lindex $argv 4]
+set check [lindex $argv 5]
+set shutdown [lindex $argv 6]
+set timeout 240
+set send_slow {1 .005}
+
+log_file -noappend $log
+spawn ssh -tt -i $key -p $port -o BatchMode=yes -o ConnectTimeout=5 -o IdentitiesOnly=yes -o LogLevel=ERROR -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$user@127.0.0.1" "ginux start $name --attach"
+
+expect {
+    -re {login: } {}
+    timeout { puts stderr "$name: native login prompt timed out"; exit 70 }
+    eof { puts stderr "$name: init exited before login prompt"; exit 71 }
+}
+after 100
+send -s -- "root\r"
+expect {
+    -re {Password:} {}
+    timeout { puts stderr "$name: password prompt timed out"; exit 72 }
+    eof { puts stderr "$name: login exited before password prompt"; exit 73 }
+}
+send -s -- "ginux\r"
+expect {
+    -re {# $} {}
+    -re {root login on} { after 100 }
+    timeout { puts stderr "$name: authenticated shell prompt timed out"; exit 74 }
+    eof { puts stderr "$name: login exited before authenticated shell"; exit 75 }
+}
+send -s -- "$check\r"
+expect {
+    -re "GINUX_GATE19_BOOT_OK:$name" {}
+    timeout { puts stderr "$name: native boot check timed out"; exit 76 }
+    eof { puts stderr "$name: shell exited before boot check"; exit 77 }
+}
+expect -re {# $}
+send -s -- "$shutdown\r"
+set timeout 120
+expect {
+    eof {}
+    timeout { puts stderr "$name: controlled shutdown timed out"; exit 78 }
+}

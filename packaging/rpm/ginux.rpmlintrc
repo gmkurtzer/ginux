@@ -1,0 +1,3 @@
+# The freestanding no_std runtime is intentionally static: it enters the
+# instance root before launching its init and cannot depend on host libraries.
+addFilter(r"statically-linked-binary /usr/libexec/ginux/ginux-runtime$")

@@ -1,0 +1,14 @@
+[package]
+name = "ginux-cli"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[[bin]]
+name = "ginux-cli"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+ginux-contract = { path = "../ginux-contract" }
+ginux-instance = { path = "../ginux-instance" }

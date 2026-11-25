@@ -1,0 +1,9 @@
+Linux ginux-rocky 6.12.0-211.16.1.el10_2.0.1.x86_64 #1 SMP PREEMPT_DYNAMIC Sun May 24 12:24:17 UTC 2026 x86_64 GNU/Linux
+rustc 1.92.0 (ded5c06cf 2025-12-08) (Red Hat 1.92.0-2.el10_2)
+cargo 1.92.0 (344c4567c 2025-10-21) (Red Hat 1.92.0-2.el10_2)
+cc (GCC) 14.3.1 20251022 (Red Hat 14.3.1-4)
+jemalloc-5.3.0-10.el10_1.x86_64
+8e656da96765f0ccc5994be08b08f05a355912b92d59d8516922e1a99164fe08  /var/tmp/ginux-rpmbuild/CARGO_TARGET/release/libginux_allocator.so
+48e3630e15f88be7b7d0b66e614ce697589089319f184ade5ef0f363728b8fc9  /var/tmp/allocator-benchmark
+environment=Rocky Linux QEMU TCG
+source_commit=da24dff705a694b155aba5e26769b605a30d1329

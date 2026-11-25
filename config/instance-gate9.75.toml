@@ -1,0 +1,68 @@
+schema_version = 1
+
+[instance]
+id = "gate975-demo"
+root = "docker.io/rockylinux/rockylinux@sha256:7a18ce2c9c1e0d8735f3e72685f9666150af25036e7f7b5ee4eede3754496f8c"
+init = "/sbin/init"
+args = ["--system", "--unit=multi-user.target"]
+environment = ["container=ginux"]
+workdir = "/"
+
+[identity]
+hostname = "gate975-demo"
+
+[resources]
+vcpus = 2
+memory_mib = 1024
+
+[execution]
+profile = "balanced"
+backend = "ptrace-native"
+
+[contract]
+version = 1
+catalog = 2
+default = "deny"
+allow = ["*"]
+deny = ["device.mmio.direct", "device.dma.direct", "network.packet.raw", "ioctl.*"]
+
+[contract.syscalls]
+control = "selective"
+default = "deny"
+allow = ["*"]
+deny = []
+
+[contract.network]
+default = "deny"
+inbound = ["tcp:80"]
+outbound = ["tcp:443", "udp:53"]
+
+[storage]
+assignments = ["root-overlay"]
+
+[volumes]
+assignments = ["/srv/ginux-data:/data:ro"]
+
+[devices]
+assignments = ["console", "null", "zero", "random", "net0"]
+
+[network]
+backend = "shared"
+
+[access]
+uid = 0
+gid = 0
+
+[hooks]
+pre_boot = ["/usr/local/sbin/prepare-instance --safe"]
+timeout_seconds = 20
+failure = "stop"
+
+[lifecycle]
+stop_timeout_seconds = 30
+
+[audit]
+enabled = true
+
+[failure]
+policy = "stop"
