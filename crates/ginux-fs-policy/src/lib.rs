@@ -1981,4 +1981,29 @@ mod tests {
         assert!(!Rights::READ.contains(need));
         assert!(!Rights(0).contains(Rights::LOOKUP));
     }
+
+    #[test]
+    fn object_id_available_when_either_component_nonzero() {
+        assert!(!ObjectId::UNAVAILABLE.is_available());
+        assert!(!ObjectId {
+            device: 0,
+            inode: 0
+        }
+        .is_available());
+        assert!(ObjectId {
+            device: 7,
+            inode: 0
+        }
+        .is_available());
+        assert!(ObjectId {
+            device: 0,
+            inode: 7
+        }
+        .is_available());
+        assert!(ObjectId {
+            device: 7,
+            inode: 9
+        }
+        .is_available());
+    }
 }
