@@ -471,6 +471,7 @@ test-native-supervision:
 	python3 scripts/test-native-yield-broker.py $(GINUX) .artifacts/launch/native-fixture
 	python3 scripts/test-native-clone-snapshot.py $(GINUX) .artifacts/launch/native-fixture .artifacts/launch/native-clone-collision-fixture
 	python3 scripts/test-native-clone-restart.py $(GINUX) .artifacts/launch/native-fixture
+	python3 scripts/test-native-replay-signal.py $(GINUX) .artifacts/launch/native-fixture
 	python3 scripts/test-native-close-range-signal.py $(GINUX) .artifacts/launch/native-fixture
 	python3 scripts/test-native-close-range-gap.py $(GINUX) .artifacts/launch/native-fixture
 	python3 scripts/test-native-network-snapshot.py $(GINUX) .artifacts/launch/native-fixture

@@ -2,6 +2,52 @@
 
 ## Current checkpoint
 
+### Gate 52 native replay signal semantics
+
+- The human approved the three-phase signal design for issue #316 on
+  2026-11-25: block only across private stage transitions, restore the caller
+  mask for the real operation, then block private cleanup and return signal and
+  restart handling to the kernel with the caller's original state.
+- Gate 52 was explicitly accepted by the human on 2026-11-25 and is closed in
+  `hdae/gates-done/52-native-replay-signal-semantics.md`.
+- Scope covers staged clone3, shared-network send/sendmmsg, and inbound
+  SCM_RIGHTS cleanup plus deterministic handler-context and restart coverage.
+- The implementation now blocks workload signals only across private replay
+  transitions, restores the caller mask for the real operation, blocks again
+  for cleanup, and restores the complete caller frame before delivery.
+- Fresh evidence passes `make build`, `make check`, `make test-unit`, Python
+  syntax and patch checks, and all ten focused native cases in a disposable
+  Rocky 10 x86-64 QEMU host, including partial sendmmsg progress after the
+  second replayed message is interrupted.
+- Exact-head code-bearing commit `db6e8d0d` passed workflow run 45685303840:
+  `changes`, `static-and-unit`, and `launch-integration` are green, including
+  the complete native-supervision, process-native, gate-setup, and tracee-loss
+  regression matrix.
+- CI at `1f52c201` passed `static-and-unit` and found a fast-host fixture race:
+  consecutive blocking TCP cases reused port 18083. The cases now use isolated
+  ports 18083 through 18085, and all ten passed again in Rocky before the
+  subsequent exact-head run.
+- CI at `47f3dc2a` then passed static/unit and the preexisting native matrix but
+  timed out in `SA_RESTART`: one 64-KiB read did not always drain the faster
+  host's queued TCP data. The fixture now performs ten bounded nonblocking
+  drain rounds with a bounded receive buffer; all ten focused cases pass again.
+- CI at `6d4574b3` passed the blocking-send cases but showed TCP could free one
+  byte before the second sendmmsg replay. The partial-progress fixture now uses
+  a connected full Unix-stream peer, which cannot drain without a reader; local
+  x86-64 syntax checks and all ten Rocky cases pass with that transport.
+- Signed implementation commit `a9f39e83` is pushed and delivered in open pull
+  request https://github.com/gmkurtzer/ginux/pull/338.
+- Reciprocal summaries are posted on issue #316 and pull request #338 without
+  closing or merging either item.
+- Active skill: `hdae-development`
+- Skill path: `.agents/skills/hdae-development/SKILL.md`
+- Reload after context shift: required
+- Exact next action: integrate pull request #338 at its exact accepted head,
+  require fresh post-integration CI, then close issue #316 with the verified
+  result.
+
+## Prior checkpoint
+
 ### Gate 51 HDAE gate-ledger reconciliation
 
 - The human approved the reconciled Gate 51 checkpoint on 2026-11-24 after

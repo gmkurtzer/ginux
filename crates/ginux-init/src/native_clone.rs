@@ -153,22 +153,16 @@ impl Pending {
         regs.rax = syscall;
         regs.rip = self.rip - 2;
     }
-    /// Returns whether the caller's clone3 is reissued instead of returning.
+    /// Restore the caller's registers at the private cleanup exit. Returning a
+    /// restart code in the restored syscall frame lets the kernel deliver the
+    /// pending signal with the caller's ucontext and apply clone3's native
+    /// ERESTARTNOINTR behavior.
     pub fn restore(&mut self, regs: &mut UserRegs) -> bool {
         set_call(regs, 435, self.original);
         self.phase = Phase::Idle;
-        // A signal made the kernel abandon the replay (ERESTARTNOINTR, the
-        // only restart code clone3 returns). It was delivered before the
-        // cleanup stage ran, so the kernel will not restart the call itself:
-        // reissue the caller's clone3, which takes a fresh snapshot.
-        if self.result == -513 {
-            regs.rip = self.rip - 2;
-            regs.rax = 435;
-            return true;
-        }
         regs.rip = self.rip;
         regs.rax = self.result as u64;
-        false
+        self.result == -513
     }
 }
 

@@ -123,10 +123,93 @@ static void sigchld_handler(int signal)
 
 static volatile int restart_signals;
 
+void sigchld_restorer(void);
+
 static void restart_handler(int signal)
 {
     (void)signal;
     ++restart_signals;
+}
+
+/* What a SIGUSR1 handler saw in its ucontext: count, rip, rax, rdi, rsi.
+ * scripts/test-native-replay-signal.py reads it from the fixture's memory. */
+static volatile word replay_signal_context[5];
+
+static void replay_signal_handler(int signal, void *info, void *context)
+{
+    /* x86-64 ucontext: uc_flags, uc_link, uc_stack (24 bytes), then
+     * sigcontext r8..r15, rdi, rsi, rbp, rbx, rdx, rax, rcx, rsp, rip. */
+    const word *registers = (const word *)((const char *)context + 40);
+    (void)signal;
+    (void)info;
+    replay_signal_context[1] = registers[16];
+    replay_signal_context[2] = registers[13];
+    replay_signal_context[3] = registers[8];
+    replay_signal_context[4] = registers[9];
+    ++replay_signal_context[0];
+}
+
+static void print_replay_signal(word caller_rdi, word caller_rsi)
+{
+    print_result("GINUX_FIXTURE: replay-signal-handled=", replay_signal_context[0]);
+    print_result("GINUX_FIXTURE: replay-signal-handler-args-match=",
+                 replay_signal_context[0] == 0
+                     || (replay_signal_context[3] == caller_rdi
+                         && replay_signal_context[4] == caller_rsi));
+}
+
+static long replay_signal_blocking_send(int restart)
+{
+    struct address { unsigned short family, port; unsigned address; char zero[8]; };
+    struct address loopback = {2, restart ? 0xa446 : 0xa346,
+                               0x0100007f, {0}}; /* 18083 or 18084 */
+    static char fill[4096], payload = 'r', drained[65536];
+    int send_buffer = 1024, status = 0;
+    struct { word seconds, nanoseconds; } pause = {0, 50000000};
+    struct { word handler, flags, restorer, mask; } action = {
+        (word)replay_signal_handler,
+        0x04000004 | (restart ? 0x10000000 : 0) /* SA_RESTORER | SA_SIGINFO | SA_RESTART */,
+        (word)sigchld_restorer, 0};
+    long listener = call3(41, 2, 1 /* SOCK_STREAM */, 0);
+    long sender = call3(41, 2, 1, 0);
+    if (listener < 0 || sender < 0
+        || call5(54, sender, 1 /* SOL_SOCKET */, 7 /* SO_SNDBUF */,
+                 (word)&send_buffer, sizeof send_buffer) < 0
+        || call5(54, listener, 1 /* SOL_SOCKET */, 8 /* SO_RCVBUF */,
+                 (word)&send_buffer, sizeof send_buffer) < 0
+        || call3(49, listener, (word)&loopback, sizeof loopback) < 0
+        || call3(50, listener, 1, 0) < 0
+        || call3(42, sender, (word)&loopback, sizeof loopback) < 0)
+        return -100;
+    long receiver = call3(43, listener, 0, 0);
+    if (receiver < 0 || call3(72, sender, 4 /* F_SETFL */, 0x800 /* O_NONBLOCK */) < 0)
+        return -101;
+    long filled = 0;
+    for (int attempt = 0; attempt < 1024; ++attempt) {
+        long sent = call6(44, sender, (word)fill, sizeof fill, 0, 0, 0);
+        if (sent == -11) break;
+        if (sent <= 0) return -102;
+        filled += sent;
+    }
+    if (filled == 0 || call3(72, sender, 4 /* F_SETFL */, 0) < 0
+        || call4(13, 10, (word)&action, 0, 8) != 0)
+        return -103;
+    long child = call3(57, 0, 0, 0);
+    if (child == 0) {
+        call3(72, receiver, 4 /* F_SETFL */, 0x800 /* O_NONBLOCK */);
+        for (int round = 0; round < 10; ++round) {
+            call3(35, (word)&pause, 0, 0);
+            while (call6(45, receiver, (word)drained, sizeof drained, 0, 0, 0) > 0) {}
+        }
+        call3(231, 0, 0, 0);
+    }
+    if (child < 0) return -104;
+    print_result("GINUX_FIXTURE: replay-signal-ready=", 1);
+    long result = call6(44, sender, (word)&payload, 1, 0, 0, 0);
+    call4(61, child, (word)&status, 0, 0);
+    print_result("GINUX_FIXTURE: replay-signal-blocking-send=", result);
+    print_replay_signal(sender, (word)&payload);
+    return result;
 }
 
 static volatile int close_range_signals;
@@ -743,6 +826,43 @@ long native_fixture_main(const word *stack)
                      && call3(72, passed[0], 1 /* F_GETFD */, 0) == -9);
         return 0;
     }
+    case 'J': {
+        /* A signal queued while Ginux closes denied inbound SCM_RIGHTS must
+         * run only after every received fd is closed and recvmsg is restored. */
+        struct local_address { unsigned short family; char path[108]; };
+        struct iovec { void *base; word length; };
+        struct message {
+            void *name; unsigned name_length, name_padding;
+            struct iovec *iov; word iov_count;
+            void *control; word control_length;
+            unsigned flags, flags_padding;
+        };
+        static struct local_address server = {1, "/tmp/inbound-rights.sock"};
+        char payload = 0;
+        struct iovec iov = {&payload, 1};
+        word control[16] = {0};
+        struct message message = {0, 0, 0, &iov, 1,
+                                  control, sizeof control, 0, 0};
+        struct { word handler, flags, restorer, mask; } action = {
+            (word)replay_signal_handler, 0x04000004 /* SA_RESTORER | SA_SIGINFO */,
+            (word)sigchld_restorer, 0};
+        long receiver = call3(41, 1 /* AF_UNIX */, 1 /* SOCK_STREAM */, 0);
+        if (receiver < 0
+            || call3(42, receiver, (word)&server, sizeof server) < 0
+            || call4(13, 10, (word)&action, 0, 8) != 0
+            || call3(1, receiver, (word)"1", 1) != 1) return 94;
+        print_result("GINUX_FIXTURE: replay-signal-context=", (word)replay_signal_context);
+        print_result("GINUX_FIXTURE: replay-signal-ready=", 1);
+        long received = call3(47, receiver, (word)&message, 0);
+        int *passed = (int *)((char *)control + 16);
+        print_result("GINUX_FIXTURE: inbound-rights-signal-recvmsg=", received);
+        print_result("GINUX_FIXTURE: inbound-rights-signal-closed=",
+                     received == -1 && message.control_length >= 24
+                     && call3(72, passed[0], 1 /* F_GETFD */, 0) == -9
+                     && call3(72, passed[1], 1, 0) == -9);
+        print_replay_signal(receiver, (word)&message);
+        return 0;
+    }
     case 'U': {
         /* The outer regression mutates this message after Ginux snapshots it.
          * The host must still see the original pathname and payload. */
@@ -1103,6 +1223,109 @@ long native_fixture_main(const word *stack)
         int status = 0;
         print_result("GINUX_FIXTURE: restart-clone3=", pid > 0 ? 1 : pid);
         print_result("GINUX_FIXTURE: restart-child=", pid > 0 && call4(61, pid, (word)&status, 0, 0) == pid && status == 1792);
+        return 0;
+    }
+    case 'S': {
+        /* scripts/test-native-replay-signal.py queues a SIGUSR1 with a
+         * handler at a stage boundary of Ginux's private clone3 replay. */
+        struct { word flags, pidfd, child_tid, parent_tid, exit_signal, stack,
+            stack_size, tls, set_tid, set_tid_size, cgroup; } args = {0};
+        struct { word handler, flags, restorer, mask; } action = {
+            (word)replay_signal_handler, 0x04000004 /* SA_RESTORER | SA_SIGINFO */,
+            (word)sigchld_restorer, 0};
+        args.exit_signal = 17;
+        if (call4(13, 10, (word)&action, 0, 8) != 0) return 88;
+        print_result("GINUX_FIXTURE: replay-signal-context=", (word)replay_signal_context);
+        long pid = call3(435, (word)&args, sizeof args, 0);
+        if (pid == 0) return 7;
+        int status = 0;
+        print_result("GINUX_FIXTURE: replay-signal-clone3=", pid > 0 ? 1 : pid);
+        print_result("GINUX_FIXTURE: replay-signal-child=", pid > 0 && call4(61, pid, (word)&status, 0, 0) == pid && status == 1792);
+        print_replay_signal((word)&args, sizeof args);
+        return 0;
+    }
+    case 'V': {
+        /* As 'S', for the shared-network sendto snapshot replay. */
+        struct address { unsigned short family, port; unsigned address; char zero[8]; };
+        static struct address allowed = {2, 0xa146, 0x0100007f, {0}};
+        static char payload = 'x';
+        char received = 0;
+        struct { word handler, flags, restorer, mask; } action = {
+            (word)replay_signal_handler, 0x04000004 /* SA_RESTORER | SA_SIGINFO */,
+            (word)sigchld_restorer, 0};
+        long receiver = call3(41, 2, 2, 0), sender = call3(41, 2, 2, 0);
+        if (receiver < 0 || sender < 0 || call3(49, receiver, (word)&allowed, sizeof allowed) < 0)
+            return 90;
+        if (call4(13, 10, (word)&action, 0, 8) != 0) return 88;
+        print_result("GINUX_FIXTURE: replay-signal-context=", (word)replay_signal_context);
+        print_result("GINUX_FIXTURE: replay-signal-send=",
+                     call6(44, sender, (word)&payload, 1, 0, (word)&allowed, sizeof allowed));
+        print_result("GINUX_FIXTURE: replay-signal-recv=",
+                     call6(45, receiver, (word)&received, 1, 0, 0, 0) == 1 && received == 'x');
+        print_replay_signal(sender, (word)&payload);
+        return 0;
+    }
+    case 'O': {
+        /* Ginux replays sendmmsg as individual sendmsg calls. The first
+         * zero-length stream message completes even when the send buffer is
+         * full; a signal interrupts the second blocking message, so Linux
+         * requires the completed count rather than EINTR. */
+        struct local_address { unsigned short family; char path[108]; };
+        struct iovec { void *base; word length; };
+        struct message {
+            void *name; unsigned name_length, name_padding;
+            struct iovec *iov; word iov_count;
+            void *control; word control_length;
+            unsigned flags, flags_padding;
+        };
+        struct multimessage { struct message message; unsigned length, padding; };
+        static struct local_address allowed = {1, "/tmp/sendmmsg-partial.sock"};
+        static char fill[4096], payload = 'b';
+        int send_buffer = 1024;
+        struct iovec iov[2] = {{&payload, 0}, {&payload, 1}};
+        struct multimessage batch[2] = {0};
+        struct { word handler, flags, restorer, mask; } action = {
+            (word)replay_signal_handler, 0x04000004 /* SA_RESTORER | SA_SIGINFO */,
+            (word)sigchld_restorer, 0};
+        long listener = call3(41, 1 /* AF_UNIX */, 1 /* SOCK_STREAM */, 0);
+        long sender = call3(41, 1, 1, 0);
+        if (listener < 0 || sender < 0
+            || call5(54, sender, 1 /* SOL_SOCKET */, 7 /* SO_SNDBUF */,
+                     (word)&send_buffer, sizeof send_buffer) < 0
+            || call3(49, listener, (word)&allowed, sizeof allowed) < 0
+            || call3(50, listener, 1, 0) < 0
+            || call3(42, sender, (word)&allowed, sizeof allowed) < 0) return 95;
+        long receiver = call3(43, listener, 0, 0);
+        if (receiver < 0 || call3(72, sender, 4 /* F_SETFL */, 0x800 /* O_NONBLOCK */) < 0)
+            return 96;
+        long filled = 0;
+        for (int attempt = 0; attempt < 1024; ++attempt) {
+            long sent = call6(44, sender, (word)fill, sizeof fill, 0, 0, 0);
+            if (sent == -11) break;
+            if (sent <= 0) return 97;
+            filled += sent;
+        }
+        if (filled == 0 || call3(72, sender, 4 /* F_SETFL */, 0) < 0
+            || call4(13, 10, (word)&action, 0, 8) != 0) return 98;
+        for (int at = 0; at < 2; ++at) {
+            batch[at].message.iov = &iov[at];
+            batch[at].message.iov_count = 1;
+        }
+        print_result("GINUX_FIXTURE: replay-signal-context=", (word)replay_signal_context);
+        print_result("GINUX_FIXTURE: replay-signal-ready=", 1);
+        print_result("GINUX_FIXTURE: replay-signal-sendmmsg-partial=",
+                     call4(307, sender, (word)batch, 2, 0));
+        print_replay_signal(sender, (word)batch);
+        return 0;
+    }
+    case 'E': {
+        /* A handled signal without SA_RESTART interrupts a blocked send. */
+        replay_signal_blocking_send(0);
+        return 0;
+    }
+    case 'H': {
+        /* SA_RESTART restarts the blocked send after the handler returns. */
+        replay_signal_blocking_send(1);
         return 0;
     }
 #ifdef CLONE_SNAPSHOT_COLLISION
