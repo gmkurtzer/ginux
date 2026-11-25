@@ -994,4 +994,14 @@ mod tests {
         multi[40..44].copy_from_slice(&(-1i32).to_ne_bytes());
         assert_eq!(loopback_netlink_ack_index(&multi, &[7]), Ok(Some(0)));
     }
+
+    #[test]
+    fn prctl_admission_pins_option_and_arg_bounds() {
+        // option must be 0, arg1 <= 15
+        assert!(balanced_arguments_allowed(302, 0, 0, 0));
+        assert!(balanced_arguments_allowed(302, 0, 15, 0));
+        assert!(!balanced_arguments_allowed(302, 0, 16, 0));
+        assert!(!balanced_arguments_allowed(302, 1, 0, 0));
+        assert!(!balanced_arguments_allowed(302, 0, 100, 0));
+    }
 }
