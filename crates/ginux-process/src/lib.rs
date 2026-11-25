@@ -2100,4 +2100,23 @@ mod tests {
         let over = [7u32; MAX_GROUPS + 1];
         assert_eq!(cred.set_groups(&over), Err(ProcessError::GroupLimit));
     }
+
+    #[test]
+    fn pipe_release_frees_only_after_last_end() {
+        let mut pipes: PipeSpace<2, 8, 2> = PipeSpace::new();
+        let id = pipes.create_pipe(1, 6, 7, false).unwrap();
+        assert_eq!(pipes.pipe_ends(id), 2);
+        assert_eq!(pipes.active_pipes(), 1);
+        pipes.duplicate(1, 7, 8, false).unwrap();
+        assert_eq!(pipes.pipe_ends(id), 3);
+        pipes.close(1, 6).unwrap();
+        assert_eq!(pipes.pipe_ends(id), 2);
+        assert_eq!(pipes.active_pipes(), 1);
+        pipes.close(1, 7).unwrap();
+        assert_eq!(pipes.pipe_ends(id), 1);
+        assert_eq!(pipes.active_pipes(), 1);
+        pipes.close(1, 8).unwrap();
+        assert_eq!(pipes.pipe_ends(id), 0);
+        assert_eq!(pipes.active_pipes(), 0);
+    }
 }
