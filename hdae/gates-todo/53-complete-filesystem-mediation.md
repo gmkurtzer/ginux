@@ -81,6 +81,10 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
       instance/lifetime/table generation plus API-equivalent read, write,
       create, or metadata rights; writable shared mappings and two-descriptor
       transfers require both read and write authority.
+- [x] Enabled every single-path mutation spelling after observation, open, and
+      descriptor evidence; contract-write/immutable-image checks still run
+      before the confined kernel continuation, and symlink creation authorizes
+      only its destination because target text is not dereferenced at create.
 
 ## Remaining work
 
@@ -88,8 +92,6 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
       final FS-001 through FS-019 traceability.
 - [ ] Extend deterministic resolver/race/mutation evidence across every later
       path family; the shared confined-kernel route is implemented.
-- [ ] Enable and verify single-path mutation with immutable-image and
-      permission enforcement.
 - [ ] Enable and verify two-path mutation with independent authorization of
       every source, destination, parent, and replacement object.
 - [ ] Complete procfs/magic-link, device/mount/alias, process lifecycle,
@@ -217,6 +219,10 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
   third isolated Rocky 10 x86-64 `test-native-vfs` run passed real loader and
   file I/O plus cleanup and immutable-image checks with the descriptor guard
   active.
+- Single-path checkpoint: `make check` passed, then the isolated Rocky 10
+  x86-64 `test-systemd` matrix passed cold, warm, and repeat writable-overlay
+  boots, offline operation, controlled poweroff, immutable-base DNF failure,
+  and diagnosed startup-failure cleanup.
 
 ## Decisions and limitations
 
@@ -251,7 +257,8 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
   interfaces and lifecycle; test architecture and security mutations;
   documentation, final review, and evidence
 - Actual commits: `284825c5` observation-family route; safe-open checkpoint
-  `931c701a`; descriptor/indirect-I/O checkpoint pending commit
+  `931c701a`; descriptor/indirect-I/O checkpoint `9504a1f0`; single-path
+  checkpoint pending commit
 
 ## Review policy and outcome
 

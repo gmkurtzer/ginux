@@ -11,27 +11,39 @@ use ginux_fs_policy::CallContext;
 pub const fn claims(syscall: u64) -> bool {
     matches!(
         syscall,
-        // Observation/directory-state, then safe-open. Later families are
-        // added only after these routes keep their positive and negative
-        // evidence. Unsupported safe-open spellings stay owned and receive
-        // their inventory-defined ENOSYS from the existing core decision.
+        // Observation/directory-state, safe-open, and single-path mutation.
+        // Two-path mutation remains disabled until every endpoint combination
+        // has independent evidence. Unsupported spellings stay owned and
+        // receive their inventory-defined ENOSYS from the core decision.
         2 | 4
             | 6
             | 21
+            | 76
             | 79
-            | 85
-            | 89
+            | 80
+            | 83..=85
+            | 87..=90
+            | 92
+            | 94
+            | 132
+            | 133
             | 137
+            | 188
+            | 189
             | 191
             | 192
             | 194
             | 195
-            | 257
-            | 262
-            | 267
+            | 197
+            | 198
+            | 257..=263
+            | 266
+            | 267..=269
+            | 280
             | 332
             | 437
             | 439
+            | 452
     )
 }
 
@@ -133,13 +145,15 @@ mod tests {
     }
 
     #[test]
-    fn observation_and_safe_open_are_the_only_enabled_families() {
+    fn families_are_enabled_only_through_single_path_mutation() {
         for syscall in [
-            2, 4, 6, 21, 79, 85, 89, 137, 191, 192, 194, 195, 257, 262, 267, 332, 437, 439,
+            2, 4, 6, 21, 76, 79, 80, 83, 84, 85, 87, 88, 89, 90, 92, 94, 132, 133, 137, 188, 189,
+            191, 192, 194, 195, 197, 198, 257, 258, 259, 260, 261, 262, 263, 267, 266, 268, 269,
+            280, 332, 437, 439, 452,
         ] {
             assert!(claims(syscall), "enabled syscall {syscall}");
         }
-        for syscall in [76, 82, 83, 86, 264, 316, 452] {
+        for syscall in [82, 86, 264, 265, 316] {
             assert!(!claims(syscall), "later-family syscall {syscall}");
         }
     }

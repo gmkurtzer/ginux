@@ -1727,7 +1727,7 @@ pub const fn operation_family(operation: &Operation) -> OperationFamily {
             // Two-path calls are kept separate even when one form is an
             // older ABI spelling.  Every endpoint and replacement object is
             // independently resolved by the same kernel operation.
-            82 | 86 | 264 | 265 | 266 | 316 => OperationFamily::TwoPathMutation,
+            82 | 86 | 264 | 265 | 316 => OperationFamily::TwoPathMutation,
             // Opening returns descriptor authority.  `creat` is an open
             // spelling, not a generic single-path mutation.
             2 | 85 | 257 | 437 => OperationFamily::SafeOpen,

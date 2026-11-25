@@ -34,13 +34,18 @@
   shared mappings and two-descriptor transfers require read plus write.
   `make check`, `make test-unit`, and a third isolated Rocky
   `test-native-vfs` run pass with this guard active.
+- Every single-path mutation spelling is now owned after the earlier families.
+  Contract-write and immutable-image checks still precede the confined kernel
+  continuation. Fresh `make check` and the isolated Rocky 10 x86-64
+  `test-systemd` cold/warm/repeat, offline, controlled-shutdown, immutable-base
+  DNF-failure, and startup-failure matrix pass.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
 - Open decisions or limitations: none. Gate 53 is a final human security
   checkpoint and may not merge or close issue #290 without explicit acceptance.
-- Exact next action: commit the descriptor checkpoint, then enable and verify
-  single-path mutations with immutable-image and contract-write enforcement.
+- Exact next action: commit the single-path checkpoint, then enable and verify
+  two-path mutations with independent source/destination authorization.
 
 ## Prior checkpoint
 
