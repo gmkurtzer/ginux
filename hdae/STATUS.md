@@ -2,6 +2,34 @@
 
 ## Current checkpoint
 
+### Gate 52 native replay signal semantics
+
+- The human approved the three-phase signal design for issue #316 on
+  2026-11-25: block only across private stage transitions, restore the caller
+  mask for the real operation, then block private cleanup and return signal and
+  restart handling to the kernel with the caller's original state.
+- Gate 52 is active on `hdae/native-replay-signal-semantics` from current
+  `main` at `1a72568c`.
+- Scope covers staged clone3, shared-network send/sendmmsg, and inbound
+  SCM_RIGHTS cleanup plus deterministic handler-context and restart coverage.
+- The implementation now blocks workload signals only across private replay
+  transitions, restores the caller mask for the real operation, blocks again
+  for cleanup, and restores the complete caller frame before delivery.
+- Fresh evidence passes `make build`, `make check`, `make test-unit`, Python
+  syntax and patch checks, and all nine focused native cases in a disposable
+  Rocky 10 x86-64 QEMU host.
+- Remaining evidence is exact-head pull-request `static-and-unit` and
+  `launch-integration` CI, which runs the complete native-supervision matrix.
+- Signed implementation commit `a9f39e83` is pushed and delivered in open pull
+  request https://github.com/gmkurtzer/ginux/pull/338.
+- Active skill: `hdae-development`
+- Skill path: `.agents/skills/hdae-development/SKILL.md`
+- Reload after context shift: required
+- Exact next action: commit and push the Gate 52 evidence record, add reciprocal
+  issue/PR summaries, and verify pull request 338 exact-head CI.
+
+## Prior checkpoint
+
 ### Gate 51 HDAE gate-ledger reconciliation
 
 - The human approved the reconciled Gate 51 checkpoint on 2026-11-24 after
