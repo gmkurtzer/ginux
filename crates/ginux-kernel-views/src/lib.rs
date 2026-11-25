@@ -544,6 +544,42 @@ mod tests {
     }
 
     #[test]
+    fn sysfs_leaves_are_bound_to_device_kind() {
+        let mut registry: DeviceRegistry<6, 2> = DeviceRegistry::new();
+        registry
+            .assign(7, 100, DeviceName::new(b"vda").unwrap(), DeviceKind::Block)
+            .unwrap();
+        registry
+            .assign(
+                7,
+                101,
+                DeviceName::new(b"net0").unwrap(),
+                DeviceKind::Network,
+            )
+            .unwrap();
+        let placeholder = DeviceView {
+            name: DeviceName::new(b"none").unwrap(),
+            kind: DeviceKind::Null,
+            major: 0,
+            minor: 0,
+        };
+        let mut projected = [placeholder; 4];
+        let count = registry.views(7, &mut projected);
+        let sysfs = SysFs::new(&projected[..count], 1);
+        let mut output = [0u8; 64];
+        assert_eq!(
+            sysfs.read(b"/sys/class/net/net0/dev", &mut output),
+            Err(ViewError::NotFound)
+        );
+        assert_eq!(
+            sysfs.read(b"/sys/class/block/vda/type", &mut output),
+            Err(ViewError::NotFound)
+        );
+        assert!(sysfs.read(b"/sys/class/block/vda/dev", &mut output).is_ok());
+        assert!(sysfs.read(b"/sys/class/net/net0/type", &mut output).is_ok());
+    }
+
+    #[test]
     fn sysfs_projects_only_assigned_virtual_devices() {
         let mut registry: DeviceRegistry<6, 2> = DeviceRegistry::new();
         registry
