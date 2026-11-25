@@ -11,7 +11,11 @@ peak_processes=0
 peak_cpu=0
 
 sample_tree() {
-    root=$(rocky_ssh 'pgrep -o -x ginux || true' | tr -d '[:space:]')
+    # The benchmark invokes the helper's foreground run-runtime command rather
+    # than the detached lifecycle supervisor, so runtime.pid is its stable
+    # process-tree root.  The helper records it before hooks and execs the
+    # runtime in place, preserving the identity for the complete measurement.
+    root=$(rocky_ssh "sudo sed -n '1s/ .*//p' /run/ginux/instances/gate9/runtime.pid 2>/dev/null || true" | tr -d '[:space:]')
     case $root in
         ''|*[!0-9]*) return 1 ;;
     esac
