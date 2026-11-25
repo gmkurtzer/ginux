@@ -8406,40 +8406,48 @@ fn supervise_native(
             },
             ContractAuthorization::from(contract_action),
         );
-        let implementation_decision =
-            if local_policy_denied || matches!(contract_action, ContractAction::Deny(_)) {
+        let descriptor_authority_denied = ginux_fs_policy::operation(syscall)
+            .is_some_and(|operation| operation.owner == ginux_fs_policy::Owner::DescriptorCore)
+            && ginux_fs_policy::descriptor_kernel_route(&call).is_err();
+        let implementation_decision = if local_policy_denied
+            || descriptor_authority_denied
+            || matches!(contract_action, ContractAction::Deny(_))
+        {
+            NativeDecision::Contract(ginux_core::Decision {
+                syscall,
+                action: Action::Deny(EPERM as i32),
+            })
+        } else if mode == 3 {
+            if fs_hooks::claims(syscall) {
+                match fs_hooks::claim(&call, !local_policy_denied) {
+                    fs_hooks::Claim::Denied(result) => NativeDecision::Hooked {
+                        lane: Lane::Filesystem,
+                        result,
+                    },
+                    fs_hooks::Claim::Continue => {
+                        NativeDecision::Contract(decide_systemd(syscall, shared_network))
+                    }
+                    fs_hooks::Claim::Unclaimed => {
+                        NativeDecision::Contract(decide_systemd(syscall, shared_network))
+                    }
+                }
+            } else if let Some(result) =
+                process_hooks::claim(syscall, registers.rdi, registers.rsi, registers.rdx)
+            {
                 NativeDecision::Contract(ginux_core::Decision {
                     syscall,
-                    action: Action::Deny(EPERM as i32),
+                    action: Action::Deny((-result) as i32),
                 })
-            } else if mode == 3 {
-                if fs_hooks::claims(syscall) {
-                    match fs_hooks::claim(&call, !local_policy_denied) {
-                        fs_hooks::Claim::Denied(result) => NativeDecision::Hooked {
-                            lane: Lane::Filesystem,
-                            result,
-                        },
-                        fs_hooks::Claim::Continue => {
-                            NativeDecision::Contract(decide_systemd(syscall, shared_network))
-                        }
-                        fs_hooks::Claim::Unclaimed => {
-                            NativeDecision::Contract(decide_systemd(syscall, shared_network))
-                        }
-                    }
-                } else if let Some(result) =
-                    process_hooks::claim(syscall, registers.rdi, registers.rsi, registers.rdx)
-                {
-                    NativeDecision::Contract(ginux_core::Decision {
-                        syscall,
-                        action: Action::Deny((-result) as i32),
-                    })
-                } else {
-                    NativeDecision::Contract(decide_systemd(syscall, shared_network))
-                }
             } else {
-                decide_native(&call)
-            };
-        if !local_policy_denied && !matches!(contract_action, ContractAction::Deny(_)) {
+                NativeDecision::Contract(decide_systemd(syscall, shared_network))
+            }
+        } else {
+            decide_native(&call)
+        };
+        if !local_policy_denied
+            && !descriptor_authority_denied
+            && !matches!(contract_action, ContractAction::Deny(_))
+        {
             if let NativeDecision::Hooked { lane, result } = implementation_decision {
                 let lane_name: &[u8] = match lane {
                     Lane::Process => b"process",
@@ -8465,7 +8473,7 @@ fn supervise_native(
                 continue;
             }
         }
-        let decision = if local_policy_denied {
+        let decision = if local_policy_denied || descriptor_authority_denied {
             ginux_core::Decision {
                 syscall,
                 action: Action::Deny(EPERM as i32),

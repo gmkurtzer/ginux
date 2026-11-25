@@ -77,6 +77,10 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
 - [x] Enabled safe open/openat through the same kernel-held root/cwd route;
       unsupported `creat` and `openat2` spellings retain explicit `ENOSYS`
       through their accountable core decision instead of native fallback.
+- [x] Made descriptor and indirect-I/O routes require a current
+      instance/lifetime/table generation plus API-equivalent read, write,
+      create, or metadata rights; writable shared mappings and two-descriptor
+      transfers require both read and write authority.
 
 ## Remaining work
 
@@ -84,8 +88,6 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
       final FS-001 through FS-019 traceability.
 - [ ] Extend deterministic resolver/race/mutation evidence across every later
       path family; the shared confined-kernel route is implemented.
-- [ ] Enable and verify descriptor I/O, mappings, transfer operations, and
-      explicit denials for unsupported indirect interfaces.
 - [ ] Enable and verify single-path mutation with immutable-image and
       permission enforcement.
 - [ ] Enable and verify two-path mutation with independent authorization of
@@ -210,6 +212,11 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
 - Safe-open checkpoint: `make check` and a second fresh isolated Rocky 10
   x86-64 `test-native-vfs` run passed. The positive loader/open path, explicit
   mutating-open denial, and immutable-root digest check all remained green.
+- Descriptor/indirect-I/O checkpoint: `make check` and `make test-unit` passed,
+  including current/stale generation and writable-mapping rights tests. A
+  third isolated Rocky 10 x86-64 `test-native-vfs` run passed real loader and
+  file I/O plus cleanup and immutable-image checks with the descriptor guard
+  active.
 
 ## Decisions and limitations
 
@@ -244,7 +251,7 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
   interfaces and lifecycle; test architecture and security mutations;
   documentation, final review, and evidence
 - Actual commits: `284825c5` observation-family route; safe-open checkpoint
-  pending commit
+  `931c701a`; descriptor/indirect-I/O checkpoint pending commit
 
 ## Review policy and outcome
 

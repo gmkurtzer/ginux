@@ -225,6 +225,23 @@ impl CallContext {
             )
             && self.contract.permits()
     }
+
+    pub fn complete_for_descriptor(self, required: Rights) -> bool {
+        self.abi == X86_64_AUDIT_ARCH
+            && self.task.host != 0
+            && self.task.virtual_id != 0
+            && self.task.generation != 0
+            && self.instance.identity != 0
+            && self.instance.lifetime != 0
+            && self.authority.descriptor_table.kind == CapabilityKind::DescriptorTable
+            && self.authority.descriptor_table.authorizes(
+                self.instance.identity,
+                self.instance.lifetime,
+                self.authority.descriptor_generation,
+                required,
+            )
+            && self.contract.permits()
+    }
 }
 
 pub const fn identity_token(bytes: &[u8]) -> u64 {
@@ -1775,6 +1792,33 @@ pub fn confined_kernel_route(
     Ok(route)
 }
 
+/// Rights required at the descriptor-table boundary. The kernel retains the
+/// per-open-file access mode and resolves the numeric descriptor atomically;
+/// this map prevents an alternate API family from bypassing the operation's
+/// table-level authority.
+pub const fn descriptor_required_rights(context: &CallContext) -> Rights {
+    match context.syscall {
+        1 | 18 | 20 | 74 | 75 | 77 | 91 | 93 | 190 | 199 | 296 | 328 => Rights::WRITE,
+        40 | 275 | 326 => Rights::READ.union(Rights::WRITE),
+        9 if context.arguments[2] & 2 != 0 && context.arguments[3] & 1 != 0 => {
+            Rights::READ.union(Rights::WRITE)
+        }
+        22 | 32 | 33 | 213 | 232 | 233 | 291 | 292 | 293 | 294 | 319 | 435 | 436 => Rights::CREATE,
+        5 | 8 | 16 | 72 | 73 | 138 | 221 | 451 => Rights::METADATA,
+        _ => Rights::READ,
+    }
+}
+
+pub fn descriptor_kernel_route(context: &CallContext) -> Result<Route, i32> {
+    let route = accountable_route(context)?;
+    if route.operation.owner != Owner::DescriptorCore
+        || !context.complete_for_descriptor(descriptor_required_rights(context))
+    {
+        return Err(ENOSYS);
+    }
+    Ok(route)
+}
+
 /// Shared fail-closed guard for every future filesystem hook. Inventory
 /// ownership, contract permission, capability completeness, and route-local
 /// confinement must all agree before a hook may perform or emulate an effect.
@@ -1983,6 +2027,48 @@ mod tests {
             assert_eq!(route.operation.syscall, operation.syscall);
             assert_eq!(route.executor, operation_executor(operation));
         }
+    }
+
+    #[test]
+    fn descriptor_routes_require_current_table_and_api_equivalent_rights() {
+        let mut context = path_admission_context();
+        context.syscall = 0;
+        context.authority.descriptor_table = Capability::new(
+            CapabilityKind::DescriptorTable,
+            context.instance.identity,
+            context.instance.lifetime,
+            context.authority.descriptor_generation,
+            ObjectId {
+                device: context.instance.identity,
+                inode: context.authority.descriptor_generation,
+            },
+            Rights::LOOKUP
+                .union(Rights::READ)
+                .union(Rights::WRITE)
+                .union(Rights::CREATE)
+                .union(Rights::METADATA),
+        );
+        assert!(descriptor_kernel_route(&context).is_ok());
+
+        context.syscall = 9;
+        context.arguments[2] = 2;
+        context.arguments[3] = 1;
+        assert_eq!(
+            descriptor_required_rights(&context),
+            Rights::READ.union(Rights::WRITE)
+        );
+        assert!(descriptor_kernel_route(&context).is_ok());
+
+        context.authority.descriptor_generation += 1;
+        assert!(descriptor_kernel_route(&context).is_err());
+
+        context = path_admission_context();
+        context.syscall = 425;
+        assert_eq!(
+            accountable_route(&context).unwrap().executor,
+            Executor::ExplicitDeny
+        );
+        assert!(descriptor_kernel_route(&context).is_err());
     }
 
     #[test]

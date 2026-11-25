@@ -95,7 +95,19 @@ pub fn decide_native(context: &CallContext) -> NativeDecision {
             },
             None => NativeDecision::Contract(decide_balanced(syscall)),
         },
-        Lane::Contract => NativeDecision::Contract(decide_balanced(syscall)),
+        Lane::Contract => {
+            if ginux_fs_policy::operation(syscall)
+                .is_some_and(|operation| operation.owner == ginux_fs_policy::Owner::DescriptorCore)
+                && ginux_fs_policy::descriptor_kernel_route(context).is_err()
+            {
+                NativeDecision::Contract(Decision {
+                    syscall,
+                    action: Action::Deny(1),
+                })
+            } else {
+                NativeDecision::Contract(decide_balanced(syscall))
+            }
+        }
     }
 }
 

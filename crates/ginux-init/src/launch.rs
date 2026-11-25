@@ -1088,7 +1088,11 @@ fn supervise_launch(pid: usize, instance: &mut Instance, contract: &EffectiveCon
             device: instance_token,
             inode: pid as u64,
         },
-        Rights::LOOKUP.union(Rights::READ),
+        Rights::LOOKUP
+            .union(Rights::READ)
+            .union(Rights::WRITE)
+            .union(Rights::CREATE)
+            .union(Rights::METADATA),
     );
     let mut status = 0i32;
     if wait(pid, &mut status) < 0 {

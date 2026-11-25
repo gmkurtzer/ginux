@@ -29,13 +29,18 @@
   spellings retain explicit `ENOSYS`; a second `make check` and isolated Rocky
   `test-native-vfs` run pass, including loader/open success, mutating-open
   refusal, and immutable-image verification.
+- Descriptor and indirect-I/O routes now require the current
+  instance/lifetime/table generation and API-equivalent rights. Writable
+  shared mappings and two-descriptor transfers require read plus write.
+  `make check`, `make test-unit`, and a third isolated Rocky
+  `test-native-vfs` run pass with this guard active.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
 - Open decisions or limitations: none. Gate 53 is a final human security
   checkpoint and may not merge or close issue #290 without explicit acceptance.
-- Exact next action: commit the safe-open checkpoint, then reconcile and
-  verify descriptor and indirect-I/O ownership without enabling path mutation.
+- Exact next action: commit the descriptor checkpoint, then enable and verify
+  single-path mutations with immutable-image and contract-write enforcement.
 
 ## Prior checkpoint
 
