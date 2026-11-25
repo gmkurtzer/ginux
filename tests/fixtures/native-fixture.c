@@ -161,7 +161,8 @@ static void print_replay_signal(word caller_rdi, word caller_rsi)
 static long replay_signal_blocking_send(int restart)
 {
     struct address { unsigned short family, port; unsigned address; char zero[8]; };
-    static struct address loopback = {2, 0xa346, 0x0100007f, {0}}; /* 18083 */
+    struct address loopback = {2, restart ? 0xa446 : 0xa346,
+                               0x0100007f, {0}}; /* 18083 or 18084 */
     static char fill[4096], payload = 'r', drained[65536];
     int send_buffer = 1024, status = 0;
     struct { word seconds, nanoseconds; } pause = {0, 200000000};
@@ -1273,7 +1274,7 @@ long native_fixture_main(const word *stack)
             unsigned flags, flags_padding;
         };
         struct multimessage { struct message message; unsigned length, padding; };
-        static struct address allowed = {2, 0xa346, 0x0100007f, {0}}; /* 18083 */
+        static struct address allowed = {2, 0xa546, 0x0100007f, {0}}; /* 18085 */
         static char fill[4096], payload = 'b';
         int send_buffer = 1024;
         struct iovec iov[2] = {{&payload, 0}, {&payload, 1}};

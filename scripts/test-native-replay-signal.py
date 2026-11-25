@@ -44,8 +44,8 @@ sys_read = ["/"]
 """
 NETWORK = '''[contract.network]
 default = "deny"
-inbound = ["udp:18081", "tcp:18083"]
-outbound = ["udp:18081", "tcp:18083"]
+inbound = ["udp:18081", "tcp:18083", "tcp:18084", "tcp:18085"]
+outbound = ["udp:18081", "tcp:18083", "tcp:18084", "tcp:18085"]
 
 [network]
 backend = "shared"'''

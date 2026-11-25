@@ -21,6 +21,10 @@
   second replayed message is interrupted.
 - Remaining evidence is exact-head pull-request `static-and-unit` and
   `launch-integration` CI, which runs the complete native-supervision matrix.
+- CI at `1f52c201` passed `static-and-unit` and found a fast-host fixture race:
+  consecutive blocking TCP cases reused port 18083. The cases now use isolated
+  ports 18083 through 18085, and all ten passed again in Rocky; corrected
+  exact-head integration CI remains pending.
 - Signed implementation commit `a9f39e83` is pushed and delivered in open pull
   request https://github.com/gmkurtzer/ginux/pull/338.
 - Reciprocal summaries are posted on issue #316 and pull request #338 without

@@ -102,6 +102,10 @@ to workload signal handlers or making the real operation uninterruptible.
   passed.
 - Python no-write compilation plus `git diff --check` -> the new harness parsed
   successfully and the patch has no whitespace errors.
+- Exact-head CI at `1f52c201` passed `static-and-unit` but exposed a fast-host
+  fixture race: consecutive blocking TCP scenarios reused port 18083 and the
+  second bind returned `EADDRINUSE`. The three cases now use distinct allowed
+  ports; the complete ten-case Rocky matrix passed again after that correction.
 
 ## Decisions and limitations
 
@@ -117,6 +121,9 @@ to workload signal handlers or making the real operation uninterruptible.
 - Exact-head pull-request CI remains required for the complete existing native
   supervision matrix, including ordinary sendmmsg completion and surrounding
   clone/network/close-range regressions.
+- The failed `1f52c201` integration run was a deterministic fixture-port
+  collision, not a replay implementation failure; fresh exact-head CI is still
+  required after the isolated-port correction.
 - Pull request [#338](https://github.com/gmkurtzer/ginux/pull/338) is open from
   the dedicated Gate 52 branch at implementation commit `a9f39e83`.
 - Issue #316 records the delivered fix and remaining review checkpoint in
