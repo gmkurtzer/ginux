@@ -768,4 +768,29 @@ mod tests {
             Err(DeviceError::OutOfRange)
         );
     }
+
+    #[test]
+    fn views_project_only_the_requesting_instance() {
+        let mut registry: DeviceRegistry<8, 8> = DeviceRegistry::new();
+        registry
+            .assign(1, 10, DeviceName::new(b"null").unwrap(), DeviceKind::Null)
+            .unwrap();
+        registry
+            .assign(2, 11, DeviceName::new(b"zero").unwrap(), DeviceKind::Zero)
+            .unwrap();
+        let pad = DeviceView {
+            name: DeviceName::new(b"unused").unwrap(),
+            kind: DeviceKind::Null,
+            major: 0,
+            minor: 0,
+        };
+        let mut out = [pad; 4];
+        assert_eq!(registry.views(1, &mut out), 1);
+        assert_eq!(out[0].name.as_bytes(), b"null");
+        assert_eq!(out[0].kind, DeviceKind::Null);
+        assert_eq!(registry.views(2, &mut out), 1);
+        assert_eq!(out[0].name.as_bytes(), b"zero");
+        assert_eq!(out[0].kind, DeviceKind::Zero);
+        assert_eq!(registry.views(99, &mut out), 0);
+    }
 }
