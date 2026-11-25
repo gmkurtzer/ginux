@@ -444,6 +444,27 @@ mod tests {
     }
 
     #[test]
+    fn procfs_task_paths_resolve_identity_exactly() {
+        assert_eq!(
+            parse_task_path(b"/proc/self/status", 7).unwrap(),
+            (7, &b"status"[..])
+        );
+        assert_eq!(
+            parse_task_path(b"/proc/123/status", 7).unwrap(),
+            (123, &b"status"[..])
+        );
+        assert_eq!(
+            parse_task_path(b"/proc/1/statm", 7).unwrap(),
+            (1, &b"statm"[..])
+        );
+        assert!(parse_task_path(b"/proc//status", 7).is_err());
+        assert!(parse_task_path(b"/proc/4294967296/status", 7).is_err());
+        assert!(parse_task_path(b"/proc/12x/status", 7).is_err());
+        assert!(parse_task_path(b"/proc/12", 7).is_err());
+        assert!(parse_task_path(b"/task/12/status", 7).is_err());
+    }
+
+    #[test]
     fn procfs_exposes_only_virtual_tasks_and_identity() {
         let (tasks, count) = fixture();
         let mounts = [
