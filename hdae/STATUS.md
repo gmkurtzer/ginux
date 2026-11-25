@@ -39,13 +39,19 @@
   continuation. Fresh `make check` and the isolated Rocky 10 x86-64
   `test-systemd` cold/warm/repeat, offline, controlled-shutdown, immutable-base
   DNF-failure, and startup-failure matrix pass.
+- The final rename/link family is enabled after independent source and
+  destination checks. Policy resolution now follows each symlink before later
+  parent components and distinguishes follow from entry operations. Fresh
+  `make check` and a second isolated Rocky `test-systemd` matrix pass after
+  this final path-family widening.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
 - Open decisions or limitations: none. Gate 53 is a final human security
   checkpoint and may not merge or close issue #290 without explicit acceptance.
-- Exact next action: commit the single-path checkpoint, then enable and verify
-  two-path mutations with independent source/destination authorization.
+- Exact next action: commit the two-path/resolver checkpoint, then complete
+  special-interface denials and FS-T01 through FS-T09 fault/race/mutation
+  evidence before full clean verification.
 
 ## Prior checkpoint
 

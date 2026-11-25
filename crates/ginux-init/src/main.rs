@@ -8148,14 +8148,24 @@ fn supervise_native(
                         host_pid,
                         AT_FDCWD as u64,
                         registers.rdi as usize,
+                        true,
                     )
                 }
-                76 | 83 | 84 | 85 | 87 | 90 | 133 => native_write_path_denied(
+                76 | 85 | 90 => native_write_path_denied(
                     instance.config(),
                     root_descriptor,
                     host_pid,
                     AT_FDCWD as u64,
                     registers.rdi as usize,
+                    true,
+                ),
+                83 | 84 | 87 | 133 => native_write_path_denied(
+                    instance.config(),
+                    root_descriptor,
+                    host_pid,
+                    AT_FDCWD as u64,
+                    registers.rdi as usize,
+                    false,
                 ),
                 82 | 86 => {
                     native_write_path_denied(
@@ -8164,12 +8174,14 @@ fn supervise_native(
                         host_pid,
                         AT_FDCWD as u64,
                         registers.rdi as usize,
+                        false,
                     ) || native_write_path_denied(
                         instance.config(),
                         root_descriptor,
                         host_pid,
                         AT_FDCWD as u64,
                         registers.rsi as usize,
+                        false,
                     )
                 }
                 88 => native_write_path_denied(
@@ -8178,6 +8190,7 @@ fn supervise_native(
                     host_pid,
                     AT_FDCWD as u64,
                     registers.rsi as usize,
+                    false,
                 ),
                 91 => {
                     if registers.rdi <= 2 {
@@ -8199,14 +8212,24 @@ fn supervise_native(
                         host_pid,
                         registers.rdi,
                         registers.rsi as usize,
+                        true,
                     )
                 }
-                258 | 259 | 263 | 268 | 452 => native_write_path_denied(
+                258 | 259 | 263 => native_write_path_denied(
                     instance.config(),
                     root_descriptor,
                     host_pid,
                     registers.rdi,
                     registers.rsi as usize,
+                    false,
+                ),
+                268 | 452 => native_write_path_denied(
+                    instance.config(),
+                    root_descriptor,
+                    host_pid,
+                    registers.rdi,
+                    registers.rsi as usize,
+                    syscall != 452 || registers.r10 & 0x100 == 0,
                 ),
                 264 | 316 => {
                     native_write_path_denied(
@@ -8215,12 +8238,14 @@ fn supervise_native(
                         host_pid,
                         registers.rdi,
                         registers.rsi as usize,
+                        false,
                     ) || native_write_path_denied(
                         instance.config(),
                         root_descriptor,
                         host_pid,
                         registers.rdx,
                         registers.r10 as usize,
+                        false,
                     )
                 }
                 265 => {
@@ -8230,12 +8255,14 @@ fn supervise_native(
                         host_pid,
                         registers.rdi,
                         registers.rsi as usize,
+                        registers.r8 & 0x400 != 0,
                     ) || native_write_path_denied(
                         instance.config(),
                         root_descriptor,
                         host_pid,
                         registers.rdx,
                         registers.r10 as usize,
+                        false,
                     )
                 }
                 266 => native_write_path_denied(
@@ -8244,6 +8271,7 @@ fn supervise_native(
                     host_pid,
                     registers.rsi,
                     registers.rdx as usize,
+                    false,
                 ),
                 _ => false,
             };
@@ -13175,151 +13203,157 @@ fn native_instance_path(
         }
     }
     native_buffer_append(&mut joined, &mut joined_len, &raw[..raw_len])?;
-
-    native_normalize_instance_path(&joined[..joined_len], output)
-}
-
-fn native_normalize_instance_path(input: &[u8], output: &mut [u8]) -> Option<usize> {
-    let mut length = 1usize;
-    if output.is_empty() {
+    if joined_len > output.len() {
         return None;
     }
-    output[0] = b'/';
-    for component in input.split(|byte| *byte == b'/') {
-        if component.is_empty() || component == b"." {
-            continue;
-        }
-        if component == b".." {
-            if length > 1 {
-                length -= 1;
-                while length > 1 && output[length - 1] != b'/' {
-                    length -= 1;
-                }
-            }
-            continue;
-        }
-        if length > 1 {
-            if length >= output.len() {
-                return None;
-            }
-            output[length] = b'/';
-            length += 1;
-        }
-        if length + component.len() >= output.len() {
-            return None;
-        }
-        output[length..length + component.len()].copy_from_slice(component);
-        length += component.len();
-    }
-    Some(length)
+    output[..joined_len].copy_from_slice(&joined[..joined_len]);
+    Some(joined_len)
 }
 
 fn native_resolve_instance_path(
     root_descriptor: usize,
     path: &[u8],
     output: &mut [u8],
+    follow_final: bool,
 ) -> Option<usize> {
     const SYS_NEWFSTATAT_HOST: usize = 262;
     const AT_SYMLINK_NOFOLLOW: usize = 0x100;
     const S_IFMT: u32 = 0o170000;
     const S_IFLNK: u32 = 0o120000;
-    const MAX_SYMLINKS: usize = 16;
+    const MAX_SYMLINKS: usize = 40;
+    const MAX_COMPONENTS: usize = 256;
 
     let mut pending = [0u8; 1024];
-    let mut pending_len = native_normalize_instance_path(path, &mut pending)?;
-    for _ in 0..MAX_SYMLINKS {
-        let mut current = [0u8; 512];
-        let mut current_len = 0usize;
-        let mut offset = 1usize;
-        let mut followed = false;
-        while offset < pending_len {
-            let component_end = pending[offset..pending_len]
-                .iter()
-                .position(|byte| *byte == b'/')
-                .map_or(pending_len, |position| offset + position);
-            let component = &pending[offset..component_end];
-            if current_len != 0 {
-                current[current_len] = b'/';
-                current_len += 1;
+    if path.len() > pending.len() {
+        return None;
+    }
+    pending[..path.len()].copy_from_slice(path);
+    let mut pending_len = path.len();
+    let mut pending_offset = 0usize;
+    let mut resolved = [0u8; 512];
+    let mut resolved_len = 1usize;
+    resolved[0] = b'/';
+    let mut links = 0usize;
+    let mut components = 0usize;
+
+    while pending_offset < pending_len {
+        while pending_offset < pending_len && pending[pending_offset] == b'/' {
+            pending_offset += 1;
+        }
+        if pending_offset == pending_len {
+            break;
+        }
+        let component_end = pending[pending_offset..pending_len]
+            .iter()
+            .position(|byte| *byte == b'/')
+            .map_or(pending_len, |position| pending_offset + position);
+        let component = &pending[pending_offset..component_end];
+        pending_offset = component_end;
+        components = components.checked_add(1)?;
+        if components > MAX_COMPONENTS {
+            return None;
+        }
+        if component == b"." {
+            continue;
+        }
+        if component == b".." {
+            if resolved_len > 1 {
+                resolved_len -= 1;
+                while resolved_len > 1 && resolved[resolved_len - 1] != b'/' {
+                    resolved_len -= 1;
+                }
             }
-            if current_len + component.len() + 1 > current.len() {
+            continue;
+        }
+
+        let has_later_component = pending[pending_offset..pending_len]
+            .split(|byte| *byte == b'/')
+            .any(|later| !later.is_empty() && later != b".");
+        if !follow_final && !has_later_component {
+            if resolved_len > 1 {
+                native_buffer_append(&mut resolved, &mut resolved_len, b"/")?;
+            }
+            native_buffer_append(&mut resolved, &mut resolved_len, component)?;
+            break;
+        }
+
+        let mut candidate = [0u8; 512];
+        let mut candidate_len = 0usize;
+        if resolved_len > 1 {
+            native_buffer_append(
+                &mut candidate,
+                &mut candidate_len,
+                &resolved[1..resolved_len],
+            )?;
+            native_buffer_append(&mut candidate, &mut candidate_len, b"/")?;
+        }
+        native_buffer_append(&mut candidate, &mut candidate_len, component)?;
+        if candidate_len >= candidate.len() {
+            return None;
+        }
+        candidate[candidate_len] = 0;
+
+        let mut stat = [0u8; 144];
+        let result = unsafe {
+            syscall4(
+                SYS_NEWFSTATAT_HOST,
+                root_descriptor,
+                candidate.as_ptr() as usize,
+                stat.as_mut_ptr() as usize,
+                AT_SYMLINK_NOFOLLOW,
+            )
+        };
+        let mode = if result < 0 {
+            0
+        } else {
+            u32::from_ne_bytes([stat[24], stat[25], stat[26], stat[27]])
+        };
+        if result >= 0 && mode & S_IFMT == S_IFLNK {
+            links = links.checked_add(1)?;
+            if links > MAX_SYMLINKS {
                 return None;
             }
-            current[current_len..current_len + component.len()].copy_from_slice(component);
-            current_len += component.len();
-            current[current_len] = 0;
-
-            let mut stat = [0u8; 144];
-            let result = unsafe {
+            let mut target = [0u8; 512];
+            let target_len = unsafe {
                 syscall4(
-                    SYS_NEWFSTATAT_HOST,
+                    ginux_core::SYS_READLINKAT as usize,
                     root_descriptor,
-                    current.as_ptr() as usize,
-                    stat.as_mut_ptr() as usize,
-                    AT_SYMLINK_NOFOLLOW,
+                    candidate.as_ptr() as usize,
+                    target.as_mut_ptr() as usize,
+                    target.len(),
                 )
             };
-            if result < 0 {
-                if pending_len > output.len() {
-                    return None;
-                }
-                output[..pending_len].copy_from_slice(&pending[..pending_len]);
-                return Some(pending_len);
-            }
-            let mode = u32::from_ne_bytes([stat[24], stat[25], stat[26], stat[27]]);
-            if mode & S_IFMT == S_IFLNK {
-                let mut target = [0u8; 512];
-                let target_len = unsafe {
-                    syscall4(
-                        ginux_core::SYS_READLINKAT as usize,
-                        root_descriptor,
-                        current.as_ptr() as usize,
-                        target.as_mut_ptr() as usize,
-                        target.len(),
-                    )
-                };
-                if target_len <= 0 {
-                    return None;
-                }
-                let target_len = target_len as usize;
-                let mut joined = [0u8; 1024];
-                let mut joined_len = 0usize;
-                if target[0] != b'/' {
-                    native_buffer_append(&mut joined, &mut joined_len, b"/")?;
-                    if let Some(separator) = current[..current_len]
-                        .iter()
-                        .rposition(|byte| *byte == b'/')
-                    {
-                        native_buffer_append(
-                            &mut joined,
-                            &mut joined_len,
-                            &current[..separator + 1],
-                        )?;
-                    }
-                }
-                native_buffer_append(&mut joined, &mut joined_len, &target[..target_len])?;
-                native_buffer_append(
-                    &mut joined,
-                    &mut joined_len,
-                    &pending[component_end..pending_len],
-                )?;
-                let mut next = [0u8; 1024];
-                pending_len = native_normalize_instance_path(&joined[..joined_len], &mut next)?;
-                pending[..pending_len].copy_from_slice(&next[..pending_len]);
-                followed = true;
-                break;
-            }
-            offset = component_end.saturating_add(1);
-        }
-        if !followed {
-            if pending_len > output.len() {
+            if target_len <= 0 {
                 return None;
             }
-            output[..pending_len].copy_from_slice(&pending[..pending_len]);
-            return Some(pending_len);
+            let target_len = target_len as usize;
+            let mut next = [0u8; 1024];
+            let mut next_len = 0usize;
+            native_buffer_append(&mut next, &mut next_len, &target[..target_len])?;
+            native_buffer_append(
+                &mut next,
+                &mut next_len,
+                &pending[pending_offset..pending_len],
+            )?;
+            pending = next;
+            pending_len = next_len;
+            pending_offset = 0;
+            if target[0] == b'/' {
+                resolved_len = 1;
+            }
+            continue;
         }
+
+        if resolved_len > 1 {
+            native_buffer_append(&mut resolved, &mut resolved_len, b"/")?;
+        }
+        native_buffer_append(&mut resolved, &mut resolved_len, component)?;
     }
-    None
+    if resolved_len > output.len() {
+        return None;
+    }
+    output[..resolved_len].copy_from_slice(&resolved[..resolved_len]);
+    Some(resolved_len)
 }
 
 fn native_write_path_denied(
@@ -13328,6 +13362,7 @@ fn native_write_path_denied(
     host_pid: usize,
     dirfd: u64,
     address: usize,
+    follow_final: bool,
 ) -> bool {
     if config.filesystem_write_deny.as_slice().is_empty() {
         return false;
@@ -13337,9 +13372,12 @@ fn native_write_path_denied(
         return true;
     };
     let mut resolved = [0u8; 512];
-    let Some(resolved_len) =
-        native_resolve_instance_path(root_descriptor, &path[..length], &mut resolved)
-    else {
+    let Some(resolved_len) = native_resolve_instance_path(
+        root_descriptor,
+        &path[..length],
+        &mut resolved,
+        follow_final,
+    ) else {
         return true;
     };
     let denied = config.filesystem_write_denied(&resolved[..resolved_len]);
@@ -13370,7 +13408,7 @@ fn native_setid_path_denied(
     };
     let mut resolved = [0u8; 512];
     let Some(resolved_len) =
-        native_resolve_instance_path(root_descriptor, &path[..length], &mut resolved)
+        native_resolve_instance_path(root_descriptor, &path[..length], &mut resolved, true)
     else {
         return true;
     };
@@ -13405,7 +13443,7 @@ fn native_device_create_denied(
     };
     let mut resolved = [0u8; 512];
     let Some(resolved_len) =
-        native_resolve_instance_path(root_descriptor, &path[..length], &mut resolved)
+        native_resolve_instance_path(root_descriptor, &path[..length], &mut resolved, false)
     else {
         return true;
     };

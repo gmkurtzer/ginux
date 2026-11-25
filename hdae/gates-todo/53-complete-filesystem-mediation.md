@@ -85,6 +85,13 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
       descriptor evidence; contract-write/immutable-image checks still run
       before the confined kernel continuation, and symlink creation authorizes
       only its destination because target text is not dereferenced at create.
+- [x] Enabled the final two-path rename/link family after independent source
+      and destination policy checks, with unsupported flag variants retaining
+      explicit denial.
+- [x] Repaired policy resolution so each symlink is resolved before a later
+      parent component, root-level `..` remains at root, path bytes remain
+      bytes, and no-follow entry operations authorize the entry rather than
+      accidentally following its target.
 
 ## Remaining work
 
@@ -92,8 +99,6 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
       final FS-001 through FS-019 traceability.
 - [ ] Extend deterministic resolver/race/mutation evidence across every later
       path family; the shared confined-kernel route is implemented.
-- [ ] Enable and verify two-path mutation with independent authorization of
-      every source, destination, parent, and replacement object.
 - [ ] Complete procfs/magic-link, device/mount/alias, process lifecycle,
       teardown, cancellation, failure-commit, and resource-bound coverage.
 - [ ] Run all nine mandatory suites, required security mutations, full project
@@ -223,6 +228,11 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
   x86-64 `test-systemd` matrix passed cold, warm, and repeat writable-overlay
   boots, offline operation, controlled poweroff, immutable-base DNF failure,
   and diagnosed startup-failure cleanup.
+- Two-path/resolver checkpoint: `make check` and a fresh isolated Rocky 10
+  x86-64 `test-systemd` matrix passed after enabling every inventory-owned
+  filesystem entry and replacing lexical pre-normalization with ordered
+  symlink/component resolution. Cold/warm/repeat writable-overlay boots,
+  shutdown, immutable-base, and failure cleanup remained green.
 
 ## Decisions and limitations
 
@@ -258,7 +268,7 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
   documentation, final review, and evidence
 - Actual commits: `284825c5` observation-family route; safe-open checkpoint
   `931c701a`; descriptor/indirect-I/O checkpoint `9504a1f0`; single-path
-  checkpoint pending commit
+  checkpoint `e74af025`; two-path/resolver checkpoint pending commit
 
 ## Review policy and outcome
 

@@ -9,42 +9,10 @@ use ginux_fs_policy::CallContext;
 
 /// Lane membership comes from the independently checked operation inventory.
 pub const fn claims(syscall: u64) -> bool {
-    matches!(
-        syscall,
-        // Observation/directory-state, safe-open, and single-path mutation.
-        // Two-path mutation remains disabled until every endpoint combination
-        // has independent evidence. Unsupported spellings stay owned and
-        // receive their inventory-defined ENOSYS from the core decision.
-        2 | 4
-            | 6
-            | 21
-            | 76
-            | 79
-            | 80
-            | 83..=85
-            | 87..=90
-            | 92
-            | 94
-            | 132
-            | 133
-            | 137
-            | 188
-            | 189
-            | 191
-            | 192
-            | 194
-            | 195
-            | 197
-            | 198
-            | 257..=263
-            | 266
-            | 267..=269
-            | 280
-            | 332
-            | 437
-            | 439
-            | 452
-    )
+    // Every earlier family has passed its widening checkpoint. Two-path calls
+    // use the same stopped-syscall continuation after both pathname policies
+    // have independently authorized their operands and parents.
+    ginux_fs_policy::filesystem_lane_owns(syscall)
 }
 
 /// Result of asking the filesystem lane to own an entry.
@@ -145,16 +113,14 @@ mod tests {
     }
 
     #[test]
-    fn families_are_enabled_only_through_single_path_mutation() {
-        for syscall in [
-            2, 4, 6, 21, 76, 79, 80, 83, 84, 85, 87, 88, 89, 90, 92, 94, 132, 133, 137, 188, 189,
-            191, 192, 194, 195, 197, 198, 257, 258, 259, 260, 261, 262, 263, 267, 266, 268, 269,
-            280, 332, 437, 439, 452,
-        ] {
-            assert!(claims(syscall), "enabled syscall {syscall}");
-        }
-        for syscall in [82, 86, 264, 265, 316] {
-            assert!(!claims(syscall), "later-family syscall {syscall}");
+    fn every_inventory_owned_filesystem_entry_is_enabled() {
+        for operation in ginux_fs_policy::OPERATIONS {
+            assert_eq!(
+                claims(operation.syscall),
+                operation.owner == ginux_fs_policy::Owner::FilesystemLane,
+                "claim drift for {}",
+                operation.name
+            );
         }
     }
 }
