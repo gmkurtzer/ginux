@@ -934,4 +934,19 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn balanced_identity_reports_virtual_parent_and_group() {
+        assert_eq!(
+            balanced_identity_result(SYS_GETPID),
+            Some(BALANCED_VIRTUAL_PID)
+        );
+        assert_eq!(balanced_identity_result(SYS_GETPPID), Some(1));
+        assert_eq!(
+            balanced_identity_result(SYS_GETPGRP),
+            Some(BALANCED_VIRTUAL_PID)
+        );
+        assert_eq!(balanced_identity_result(SYS_GETUID), Some(0));
+        assert_eq!(balanced_identity_result(999), None);
+    }
 }
