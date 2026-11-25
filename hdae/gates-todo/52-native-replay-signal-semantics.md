@@ -46,7 +46,8 @@ to workload signal handlers or making the real operation uninterruptible.
 - [x] Restored the complete caller syscall frame before queued signal delivery,
       including all six arguments after inbound descriptor cleanup.
 - [x] Added deterministic clone3, nonblocking send, blocking-send
-      `EINTR`/`SA_RESTART`, and SCM_RIGHTS cleanup regressions.
+      `EINTR`/`SA_RESTART`, partial-sendmmsg progress, and SCM_RIGHTS cleanup
+      regressions.
 
 ## Remaining work
 
@@ -92,8 +93,9 @@ to workload signal handlers or making the real operation uninterruptible.
   artifacts built successfully on macOS with the repository's `rust-lld`
   flags.
 - A fresh disposable Rocky 10 x86-64 QEMU host compiled the native fixture and
-  ran `scripts/test-native-replay-signal.py` as root -> all nine clone3, send,
-  `EINTR`, `SA_RESTART`, and inbound-rights transition cases passed.
+  ran `scripts/test-native-replay-signal.py` as root -> all ten clone3, send,
+  `EINTR`, `SA_RESTART`, partial-sendmmsg, and inbound-rights transition cases
+  passed.
 - `make check` -> formatting, strict clippy checks, architecture/name/security
   checks, and generated filesystem-policy documentation checks passed.
 - `make test-unit` -> the complete component unit and documentation-test suite
@@ -132,7 +134,8 @@ to workload signal handlers or making the real operation uninterruptible.
   evidence and delivery record.
 - Actual commits: `a9f39e83` implements the shared replay-mask behavior and
   deterministic regressions; `893c15ce` records the initial HDAE evidence and
-  delivery, followed by the reciprocal-link checkpoint update.
+  delivery; `8f133155` records reciprocal delivery links; the final test
+  refinement adds deterministic partial-sendmmsg interruption coverage.
 
 ## Review policy and outcome
 

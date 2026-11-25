@@ -16,8 +16,9 @@
   transitions, restores the caller mask for the real operation, blocks again
   for cleanup, and restores the complete caller frame before delivery.
 - Fresh evidence passes `make build`, `make check`, `make test-unit`, Python
-  syntax and patch checks, and all nine focused native cases in a disposable
-  Rocky 10 x86-64 QEMU host.
+  syntax and patch checks, and all ten focused native cases in a disposable
+  Rocky 10 x86-64 QEMU host, including partial sendmmsg progress after the
+  second replayed message is interrupted.
 - Remaining evidence is exact-head pull-request `static-and-unit` and
   `launch-integration` CI, which runs the complete native-supervision matrix.
 - Signed implementation commit `a9f39e83` is pushed and delivered in open pull

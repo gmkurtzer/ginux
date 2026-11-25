@@ -61,6 +61,11 @@ def sendto_replay(regs):
             and NETWORK_BASE <= regs.rsi < NETWORK_END)
 
 
+def sendmsg_replay(regs):
+    return (regs.orig_rax == 46 and regs.rax == 46
+            and NETWORK_BASE <= regs.rsi < NETWORK_END)
+
+
 def close_replay(regs):
     return regs.orig_rax == 3 and regs.rax == 3
 
@@ -78,6 +83,9 @@ SCENARIOS = {
     "send-restart": ("H-replay-signal-send-restart", 44, sendto_replay, True, True,
                      (b"GINUX_FIXTURE: replay-signal-ready=1\n",
                       b"GINUX_FIXTURE: replay-signal-blocking-send=1\n")),
+    "sendmmsg-partial": ("O-replay-signal-sendmmsg-partial", 46, sendmsg_replay, True, True,
+                         (b"GINUX_FIXTURE: replay-signal-ready=1\n",
+                          b"GINUX_FIXTURE: replay-signal-sendmmsg-partial=1\n")),
     "rights": ("J-inbound-rights-signal", 3, close_replay, True, True,
                (b"GINUX_FIXTURE: replay-signal-ready=1\n",
                 b"GINUX_FIXTURE: inbound-rights-signal-recvmsg=-1\n",
@@ -86,6 +94,7 @@ SCENARIOS = {
 STAGES = ("control", "into-call", "during-call")
 DEFAULT_CASES = ([f"{scenario}:{stage}" for scenario in ("clone3", "send") for stage in STAGES]
                  + ["send-eintr:during-call", "send-restart:during-call",
+                    "sendmmsg-partial:during-call",
                     "rights:cleanup"])
 
 
@@ -180,6 +189,7 @@ def run(binary, fixture, scenario, stage):
         caller = None
         staged = 0
         interrupted = False
+        signal_replay = 2 if scenario == "sendmmsg-partial" else 1
         handler_view = None
         complete = False
         status = None
@@ -226,13 +236,13 @@ def run(binary, fixture, scenario, stage):
                                 staged += 1
                         elif (stage in ("into-call", "cleanup")
                                 and regs.orig_rax == 101 and regs.rdi == 7
-                                and regs.rsi == caller and staged == 1 and not interrupted):
+                                and regs.rsi == caller and staged == signal_replay and not interrupted):
                             # PTRACE_CONT from the map stage's exit stop: the
                             # caller is rewound to the staged call.
                             os.kill(caller, signal.SIGUSR1)
                             interrupted = True
                         elif (stage == "during-call" and regs.orig_rax == 101 and regs.rdi == 24
-                                and regs.rsi == caller and staged == 1 and not interrupted):
+                                and regs.rsi == caller and staged == signal_replay and not interrupted):
                             # PTRACE_SYSCALL from the staged call's seccomp
                             # stop: the signal is pending when it ends.
                             call = Path(f"/proc/{caller}/syscall").read_text().split()

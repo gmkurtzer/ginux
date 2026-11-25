@@ -1259,6 +1259,59 @@ long native_fixture_main(const word *stack)
         print_replay_signal(sender, (word)&payload);
         return 0;
     }
+    case 'O': {
+        /* Ginux replays sendmmsg as individual sendmsg calls. The first
+         * zero-length stream message completes even when the send buffer is
+         * full; a signal interrupts the second blocking message, so Linux
+         * requires the completed count rather than EINTR. */
+        struct address { unsigned short family, port; unsigned address; char zero[8]; };
+        struct iovec { void *base; word length; };
+        struct message {
+            void *name; unsigned name_length, name_padding;
+            struct iovec *iov; word iov_count;
+            void *control; word control_length;
+            unsigned flags, flags_padding;
+        };
+        struct multimessage { struct message message; unsigned length, padding; };
+        static struct address allowed = {2, 0xa346, 0x0100007f, {0}}; /* 18083 */
+        static char fill[4096], payload = 'b';
+        int send_buffer = 1024;
+        struct iovec iov[2] = {{&payload, 0}, {&payload, 1}};
+        struct multimessage batch[2] = {0};
+        struct { word handler, flags, restorer, mask; } action = {
+            (word)replay_signal_handler, 0x04000004 /* SA_RESTORER | SA_SIGINFO */,
+            (word)sigchld_restorer, 0};
+        long listener = call3(41, 2, 1 /* SOCK_STREAM */, 0);
+        long sender = call3(41, 2, 1, 0);
+        if (listener < 0 || sender < 0
+            || call5(54, sender, 1 /* SOL_SOCKET */, 7 /* SO_SNDBUF */,
+                     (word)&send_buffer, sizeof send_buffer) < 0
+            || call3(49, listener, (word)&allowed, sizeof allowed) < 0
+            || call3(50, listener, 1, 0) < 0
+            || call3(42, sender, (word)&allowed, sizeof allowed) < 0) return 95;
+        long receiver = call3(43, listener, 0, 0);
+        if (receiver < 0 || call3(72, sender, 4 /* F_SETFL */, 0x800 /* O_NONBLOCK */) < 0)
+            return 96;
+        long filled = 0;
+        for (int attempt = 0; attempt < 1024; ++attempt) {
+            long sent = call6(44, sender, (word)fill, sizeof fill, 0, 0, 0);
+            if (sent == -11) break;
+            if (sent <= 0) return 97;
+            filled += sent;
+        }
+        if (filled == 0 || call3(72, sender, 4 /* F_SETFL */, 0) < 0
+            || call4(13, 10, (word)&action, 0, 8) != 0) return 98;
+        for (int at = 0; at < 2; ++at) {
+            batch[at].message.iov = &iov[at];
+            batch[at].message.iov_count = 1;
+        }
+        print_result("GINUX_FIXTURE: replay-signal-context=", (word)replay_signal_context);
+        print_result("GINUX_FIXTURE: replay-signal-ready=", 1);
+        print_result("GINUX_FIXTURE: replay-signal-sendmmsg-partial=",
+                     call4(307, sender, (word)batch, 2, 0));
+        print_replay_signal(sender, (word)batch);
+        return 0;
+    }
     case 'E': {
         /* A handled signal without SA_RESTART interrupts a blocked send. */
         replay_signal_blocking_send(0);
