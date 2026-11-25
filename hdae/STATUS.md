@@ -22,11 +22,13 @@
   `launch-integration` CI, which runs the complete native-supervision matrix.
 - Signed implementation commit `a9f39e83` is pushed and delivered in open pull
   request https://github.com/gmkurtzer/ginux/pull/338.
+- Reciprocal summaries are posted on issue #316 and pull request #338 without
+  closing or merging either item.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Exact next action: commit and push the Gate 52 evidence record, add reciprocal
-  issue/PR summaries, and verify pull request 338 exact-head CI.
+- Exact next action: push the reciprocal-link checkpoint and verify pull
+  request 338 exact-head CI.
 
 ## Prior checkpoint
 

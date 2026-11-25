@@ -53,7 +53,7 @@ to workload signal handlers or making the real operation uninterruptible.
 - [x] Run focused Linux/root native supervision tests.
 - [x] Run `make check`, `make test-unit`, and the practical local suite.
 - [x] Commit and push the signed implementation and evidence.
-- [ ] Add reciprocal issue/PR summaries.
+- [x] Add reciprocal issue/PR summaries.
 - [ ] Confirm the exact-head `static-and-unit` and `launch-integration` jobs.
 
 ## Acceptance criteria
@@ -117,6 +117,10 @@ to workload signal handlers or making the real operation uninterruptible.
   clone/network/close-range regressions.
 - Pull request [#338](https://github.com/gmkurtzer/ginux/pull/338) is open from
   the dedicated Gate 52 branch at implementation commit `a9f39e83`.
+- Issue #316 records the delivered fix and remaining review checkpoint in
+  [the reciprocal issue summary](https://github.com/gmkurtzer/ginux/issues/316#issuecomment-7171549513);
+  [the PR summary](https://github.com/gmkurtzer/ginux/pull/338#issuecomment-7171553719)
+  points back to the originating issue and the same evidence boundary.
 
 ## Delivery strategy
 
@@ -127,7 +131,8 @@ to workload signal handlers or making the real operation uninterruptible.
 - Planned commits: shared replay-mask implementation and regressions; HDAE
   evidence and delivery record.
 - Actual commits: `a9f39e83` implements the shared replay-mask behavior and
-  deterministic regressions; this evidence/delivery record follows separately.
+  deterministic regressions; `893c15ce` records the initial HDAE evidence and
+  delivery, followed by the reciprocal-link checkpoint update.
 
 ## Review policy and outcome
 
