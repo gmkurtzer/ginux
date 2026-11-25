@@ -1217,4 +1217,45 @@ mod tests {
         rec[40] = b'/';
         assert_eq!(Index::new(&buf).err(), Some(VfsError::InvalidIndex));
     }
+
+    #[test]
+    fn encode_record_rejects_invalid_paths_and_links() {
+        let mut out = [0u8; RECORD_SIZE];
+        let mut long = [b'a'; MAX_PATH + 1];
+        long[0] = b'/';
+        let e = Entry {
+            path: &long,
+            kind: NodeKind::File,
+            mode: 0o644,
+            uid: 0,
+            gid: 0,
+            size: 0,
+            data_offset: 0,
+            link: b"",
+        };
+        assert_eq!(encode_record(e, &mut out), Err(VfsError::InvalidPath));
+        let link = [b'a'; MAX_LINK + 1];
+        let e = Entry {
+            path: b"/x",
+            kind: NodeKind::Symlink,
+            mode: 0o777,
+            uid: 0,
+            gid: 0,
+            size: 0,
+            data_offset: 0,
+            link: &link,
+        };
+        assert_eq!(encode_record(e, &mut out), Err(VfsError::InvalidPath));
+        let e = Entry {
+            path: b"relative",
+            kind: NodeKind::File,
+            mode: 0o644,
+            uid: 0,
+            gid: 0,
+            size: 0,
+            data_offset: 0,
+            link: b"",
+        };
+        assert_eq!(encode_record(e, &mut out), Err(VfsError::InvalidPath));
+    }
 }
