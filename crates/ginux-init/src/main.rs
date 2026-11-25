@@ -3391,6 +3391,7 @@ struct NativeSupervisorTask {
     host_pid: usize,
     clone_call: native_clone::Pending,
     network_call: native_network::Pending,
+    replay_signal_mask: NativeReplaySignalMask,
     lifetime_pidfd: isize,
     virtual_id: TaskId,
     start_ticks: u64,
@@ -3449,6 +3450,84 @@ struct NativeScmRightsCleanup {
     count: usize,
     current: usize,
     rip: u64,
+    arguments: [u64; 6],
+}
+
+#[derive(Clone, Copy)]
+struct NativeReplaySignalMask {
+    caller: u64,
+    active: bool,
+    blocked: bool,
+}
+
+const EMPTY_REPLAY_SIGNAL_MASK: NativeReplaySignalMask = NativeReplaySignalMask {
+    caller: 0,
+    active: false,
+    blocked: false,
+};
+
+fn native_signal_mask_set(host_pid: usize, mask: u64) -> bool {
+    const PTRACE_SETSIGMASK: usize = 0x420b;
+    ptrace(
+        PTRACE_SETSIGMASK,
+        host_pid,
+        core::mem::size_of_val(&mask),
+        &mask as *const _ as usize,
+    ) >= 0
+}
+
+fn native_signal_mask_get_and_block(host_pid: usize, caller: &mut u64) -> bool {
+    const PTRACE_GETSIGMASK: usize = 0x420a;
+    if ptrace(
+        PTRACE_GETSIGMASK,
+        host_pid,
+        core::mem::size_of_val(caller),
+        caller as *mut _ as usize,
+    ) < 0
+    {
+        return false;
+    }
+    native_signal_mask_set(host_pid, u64::MAX)
+}
+
+fn native_replay_signal_begin(host_pid: usize, state: &mut NativeReplaySignalMask) -> bool {
+    if state.active {
+        return false;
+    }
+    let mut caller = 0;
+    if !native_signal_mask_get_and_block(host_pid, &mut caller) {
+        return false;
+    }
+    *state = NativeReplaySignalMask {
+        caller,
+        active: true,
+        blocked: true,
+    };
+    true
+}
+
+fn native_replay_signal_enter_call(host_pid: usize, state: &mut NativeReplaySignalMask) -> bool {
+    if !state.active || !state.blocked || !native_signal_mask_set(host_pid, state.caller) {
+        return false;
+    }
+    state.blocked = false;
+    true
+}
+
+fn native_replay_signal_enter_private(host_pid: usize, state: &mut NativeReplaySignalMask) -> bool {
+    if !state.active || state.blocked || !native_signal_mask_set(host_pid, u64::MAX) {
+        return false;
+    }
+    state.blocked = true;
+    true
+}
+
+fn native_replay_signal_finish(host_pid: usize, state: &mut NativeReplaySignalMask) -> bool {
+    if !state.active || !state.blocked || !native_signal_mask_set(host_pid, state.caller) {
+        return false;
+    }
+    *state = EMPTY_REPLAY_SIGNAL_MASK;
+    true
 }
 
 const EMPTY_SCM_RIGHTS_CLEANUP: NativeScmRightsCleanup = NativeScmRightsCleanup {
@@ -3457,6 +3536,7 @@ const EMPTY_SCM_RIGHTS_CLEANUP: NativeScmRightsCleanup = NativeScmRightsCleanup 
     count: 0,
     current: 0,
     rip: 0,
+    arguments: [0; 6],
 };
 
 #[derive(Clone, Copy)]
@@ -5887,6 +5967,7 @@ fn supervise_native(
         host_pid: pid,
         clone_call: native_clone::Pending::empty(),
         network_call: native_network::Pending::empty(),
+        replay_signal_mask: EMPTY_REPLAY_SIGNAL_MASK,
         lifetime_pidfd: -1,
         virtual_id: root_virtual,
         start_ticks: 0,
@@ -6204,6 +6285,7 @@ fn supervise_native(
                     native_clone::Pending::empty()
                 },
                 network_call: native_network::Pending::empty(),
+                replay_signal_mask: EMPTY_REPLAY_SIGNAL_MASK,
                 lifetime_pidfd,
                 virtual_id: child_virtual,
                 start_ticks: child_start_ticks,
@@ -6637,6 +6719,11 @@ fn supervise_native(
             if !task.clone_call.matches_entry(&registers) {
                 native_fail(instance, pid, b"native clone replay mismatch");
             }
+            if task.clone_call.phase == native_clone::Phase::Call
+                && !native_replay_signal_enter_call(host_pid, &mut task.replay_signal_mask)
+            {
+                native_fail(instance, pid, b"native clone call mask restore failed");
+            }
             task.awaiting_exit = true;
             tasks[task_index] = Some(task);
             if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
@@ -6652,6 +6739,11 @@ fn supervise_native(
         {
             if !task.network_call.matches_entry(&registers) {
                 native_fail(instance, pid, b"native network replay mismatch");
+            }
+            if task.network_call.phase == native_network::Phase::Call
+                && !native_replay_signal_enter_call(host_pid, &mut task.replay_signal_mask)
+            {
+                native_fail(instance, pid, b"native network call mask restore failed");
             }
             task.awaiting_exit = true;
             tasks[task_index] = Some(task);
@@ -6714,9 +6806,20 @@ fn supervise_native(
             registers.rip = cleanup.rip;
             registers.rax = (-EPERM) as u64;
             registers.orig_rax = task.syscall;
+            [
+                registers.rdi,
+                registers.rsi,
+                registers.rdx,
+                registers.r10,
+                registers.r8,
+                registers.r9,
+            ] = cleanup.arguments;
             task.scm_rights_cleanup = EMPTY_SCM_RIGHTS_CLEANUP;
             task.awaiting_exit = false;
             task.override_exit = false;
+            if !native_replay_signal_finish(host_pid, &mut task.replay_signal_mask) {
+                native_fail(instance, pid, b"native SCM_RIGHTS mask restore failed");
+            }
             if task.descriptor_barrier == usize::MAX
                 || descriptor_tables[task.descriptor_barrier].mutation_owner != task.host_pid
             {
@@ -6760,6 +6863,9 @@ fn supervise_native(
                     continue;
                 }
                 Phase::Call => {
+                    if !native_replay_signal_enter_private(host_pid, &mut task.replay_signal_mask) {
+                        native_fail(instance, pid, b"native network cleanup mask failed");
+                    }
                     task.network_call
                         .completed_call(host_pid, &mut registers)
                         .unwrap_or_else(|_| {
@@ -6781,6 +6887,9 @@ fn supervise_native(
                         native_fail(instance, pid, b"native network snapshot cleanup failed");
                     }
                     network_reissued = task.network_call.restore(&mut registers);
+                    if !native_replay_signal_finish(host_pid, &mut task.replay_signal_mask) {
+                        native_fail(instance, pid, b"native network mask restore failed");
+                    }
                     task.override_exit = true;
                     task.override_result = registers.rax as i64;
                 }
@@ -6813,6 +6922,9 @@ fn supervise_native(
                     } else {
                         registers.rax as i64
                     };
+                    if !native_replay_signal_enter_private(host_pid, &mut task.replay_signal_mask) {
+                        native_fail(instance, pid, b"native clone cleanup mask failed");
+                    }
                     task.clone_call.unmap(&mut registers, result);
                     task.awaiting_exit = false;
                     task.override_exit = false;
@@ -6831,6 +6943,9 @@ fn supervise_native(
                         native_fail(instance, pid, b"native clone snapshot cleanup failed");
                     }
                     reissued = task.clone_call.restore(&mut registers);
+                    if !native_replay_signal_finish(host_pid, &mut task.replay_signal_mask) {
+                        native_fail(instance, pid, b"native clone mask restore failed");
+                    }
                     task.override_exit = true;
                     task.override_result = registers.rax as i64;
                 }
@@ -7009,16 +7124,9 @@ fn supervise_native(
                 // The upper part returned. The caller's own signal mask
                 // comes back, and a signal blocked between the parts is
                 // delivered as the call returns.
-                const PTRACE_SETSIGMASK: usize = 0x420b;
                 let mask = task.close_range_split.mask;
                 task.close_range_split = NativeCloseRangeSplit::IDLE;
-                if ptrace(
-                    PTRACE_SETSIGMASK,
-                    host_pid,
-                    core::mem::size_of_val(&mask),
-                    &mask as *const _ as usize,
-                ) < 0
-                {
+                if !native_signal_mask_set(host_pid, mask) {
                     native_fail(instance, pid, b"native close range mask restore failed");
                 }
             }
@@ -7063,8 +7171,9 @@ fn supervise_native(
                 write_all(b" contract=");
                 write_all(contract.digest());
                 write_all(b" phase=exit result=");
-                // A reissued clone3 has its number back in RAX; record what
-                // the kernel returned for the abandoned attempt.
+                // A restart-coded staged call is restored into the caller's
+                // syscall frame so Linux applies its signal restart rules;
+                // audit the private call's result before that delivery.
                 write_i64(if reissued {
                     task.clone_call.result
                 } else {
@@ -7193,7 +7302,18 @@ fn supervise_native(
                             count: received.count,
                             current: 0,
                             rip: registers.rip,
+                            arguments: [
+                                registers.rdi,
+                                registers.rsi,
+                                registers.rdx,
+                                registers.r10,
+                                registers.r8,
+                                registers.r9,
+                            ],
                         };
+                        if !native_replay_signal_begin(host_pid, &mut task.replay_signal_mask) {
+                            native_fail(instance, pid, b"native SCM_RIGHTS mask block failed");
+                        }
                         write_all(b"GINUX_NETWORK_AUDIT: action=deny-scm-rights direction=receive descriptors=");
                         write_u64(received.count as u64);
                         write_all(b" result=-1\n");
@@ -7482,23 +7602,8 @@ fn supervise_native(
             if close_range_upper {
                 // Block every signal the kernel lets a tracer block until the
                 // upper part's exit stop, keeping the caller's mask.
-                const PTRACE_GETSIGMASK: usize = 0x420a;
-                const PTRACE_SETSIGMASK: usize = 0x420b;
                 let mut mask = 0u64;
-                let blocked = u64::MAX;
-                if ptrace(
-                    PTRACE_GETSIGMASK,
-                    host_pid,
-                    core::mem::size_of_val(&mask),
-                    &mut mask as *mut _ as usize,
-                ) < 0
-                    || ptrace(
-                        PTRACE_SETSIGMASK,
-                        host_pid,
-                        core::mem::size_of_val(&blocked),
-                        &blocked as *const _ as usize,
-                    ) < 0
-                {
+                if !native_signal_mask_get_and_block(host_pid, &mut mask) {
                     native_fail(instance, pid, b"native close range mask failed");
                 }
                 task.close_range_split.replay(&mut registers, mask);
@@ -7748,6 +7853,9 @@ fn supervise_native(
                 match (snapshot, error) {
                     (Ok(snapshot), None) => {
                         task.network_call = snapshot;
+                        if !native_replay_signal_begin(host_pid, &mut task.replay_signal_mask) {
+                            native_fail(instance, pid, b"native network mask block failed");
+                        }
                         task.network_call.map(&mut registers);
                         line(b"mediate surface=immutable-network-address result=pending");
                     }
@@ -7835,6 +7943,9 @@ fn supervise_native(
                         socket.netlink_count += 1;
                     }
                     task.network_call = snapshot;
+                    if !native_replay_signal_begin(host_pid, &mut task.replay_signal_mask) {
+                        native_fail(instance, pid, b"native netlink mask block failed");
+                    }
                     task.network_call.map(&mut registers);
                     line(b"mediate surface=validated-loopback-netlink result=pending");
                 }
@@ -7896,6 +8007,9 @@ fn supervise_native(
             match snapshot {
                 Ok(snapshot) => {
                     task.network_call = snapshot;
+                    if !native_replay_signal_begin(host_pid, &mut task.replay_signal_mask) {
+                        native_fail(instance, pid, b"native Unix-send mask block failed");
+                    }
                     task.network_call.map(&mut registers);
                     line(b"mediate surface=immutable-unix-send result=pending");
                 }
@@ -7992,6 +8106,9 @@ fn supervise_native(
             match (snapshot, error) {
                 (Ok(snapshot), None) => {
                     task.network_call = snapshot;
+                    if !native_replay_signal_begin(host_pid, &mut task.replay_signal_mask) {
+                        native_fail(instance, pid, b"native network mask block failed");
+                    }
                     task.network_call.map(&mut registers);
                     line(b"mediate surface=immutable-network-send result=pending");
                 }
@@ -10993,6 +11110,9 @@ fn supervise_native(
                 match snapshot {
                     Ok(snapshot) => {
                         task.clone_call = snapshot;
+                        if !native_replay_signal_begin(host_pid, &mut task.replay_signal_mask) {
+                            native_fail(instance, pid, b"native clone mask block failed");
+                        }
                         task.clone_call.map(&mut registers);
                         line(b"mediate surface=immutable-clone-arguments result=pending");
                     }
@@ -11302,6 +11422,9 @@ fn native_clone_start_child(task: &mut NativeSupervisorTask) -> Option<()> {
         return None;
     }
     let mut registers = unsafe { registers.assume_init() };
+    if !native_replay_signal_begin(task.host_pid, &mut task.replay_signal_mask) {
+        return None;
+    }
     task.clone_call.unmap(&mut registers, 0);
     if ptrace(
         PTRACE_SETREGS,

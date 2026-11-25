@@ -455,14 +455,9 @@ impl Pending {
     pub fn restore(&mut self, regs: &mut UserRegs) -> bool {
         set_call(regs, self.original_syscall, self.original);
         self.phase = Phase::Idle;
-        if matches!(self.result, -512 | -513 | -514 | -516) {
-            regs.rip = self.rip - 2;
-            regs.rax = self.original_syscall;
-            return true;
-        }
         regs.rip = self.rip;
         regs.rax = self.result as u64;
-        false
+        matches!(self.result, -512 | -513 | -514 | -516)
     }
 
     fn replay_current(&self, regs: &mut UserRegs) {
