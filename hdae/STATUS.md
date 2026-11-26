@@ -79,7 +79,13 @@
   test-native-supervision` attempted to run the FS-T08 Rust component test with
   Cargo absent from the privileged PATH. The component suite already belongs
   to unprivileged `make test-unit`; the repair keeps privileged execution
-  limited to the native integration scripts and awaits refreshed CI.
+  limited to the native integration scripts.
+- Refreshed CI then exposed a real composition regression: virtual-device open
+  saved the private immutable-path replay pointer as the caller's argument.
+  The repair now restores the original syscall arguments across that nested
+  mediation. Fresh disposable-clone `make check && make test-unit` passes; the
+  exact privileged integration case awaits refreshed pull-request CI because
+  local `sudo` requires an interactive password.
 
 ## Prior checkpoint
 

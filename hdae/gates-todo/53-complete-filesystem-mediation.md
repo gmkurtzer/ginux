@@ -263,6 +263,12 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
   unprivileged Cargo toolchain (`cargo: not found`). The component suite already
   runs through `make test-unit`; the privileged target now remains limited to
   native integration, preserving the intended privilege boundary.
+- Refreshed CI reached the native fixture and found that virtual-device open
+  restored the immutable snapshot's replay pointer instead of the caller's
+  original open arguments. Nested mediation now obtains those arguments from
+  the pending path snapshot. Fresh disposable-clone `make check && make
+  test-unit` passes; local execution of the exact privileged suite is blocked
+  only by the interactive `sudo` password and is delegated to refreshed CI.
 
 ## Decisions and limitations
 

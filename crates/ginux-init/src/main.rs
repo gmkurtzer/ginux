@@ -11101,7 +11101,7 @@ fn supervise_native(
                 task.pending_console_open = !null_device;
                 task.pending_console_cloexec = flags & O_CLOEXEC != 0;
                 line(b"mediate surface=virtual-device result=pending");
-                task.pending_device_arguments = Some([registers.rdi, registers.rsi, registers.rdx]);
+                task.pending_device_arguments = Some(task.path_call.caller_arguments(&registers));
                 // The open becomes a copy of the instance device descriptor.
                 // Of its flags only close-on-exec belongs to the new
                 // descriptor rather than to the device's shared open file,

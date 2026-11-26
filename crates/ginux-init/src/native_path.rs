@@ -160,6 +160,19 @@ impl Pending {
             }
     }
 
+    /// Return the arguments the caller supplied before pathname replay.
+    ///
+    /// Other mediation performed while the snapshotted call is running must
+    /// restore these values, not the private replay addresses.
+    pub fn caller_arguments(&self, regs: &UserRegs) -> [u64; 3] {
+        let args = if self.phase == Phase::Call {
+            self.original
+        } else {
+            arguments(regs)
+        };
+        [args[0], args[1], args[2]]
+    }
+
     pub fn unmap(&mut self, regs: &mut UserRegs, result: i64) {
         self.result = result;
         self.phase = Phase::Unmap;
