@@ -267,8 +267,9 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
   restored the immutable snapshot's replay pointer instead of the caller's
   original open arguments. Nested mediation now obtains those arguments from
   the pending path snapshot. Fresh disposable-clone `make check && make
-  test-unit` passes; local execution of the exact privileged suite is blocked
-  only by the interactive `sudo` password and is delegated to refreshed CI.
+  test-unit` passes. Exact-head workflow run 45867768467 at `9171f942` passes
+  `changes`, `static-and-unit`, and `launch-integration`, including the complete
+  privileged native-supervision suite.
 
 ## Decisions and limitations
 
@@ -312,7 +313,8 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
   `9504a1f0` descriptor/indirect-I/O; `e74af025` single-path mutation;
   `f120a51b` two-path/resolver; `440f1ae1` special interfaces and suites;
   `57cf8a57` immutable pathname replay; `aa64a297` partial-delivery direction;
-  pull-request record pending commit
+  `679dac2b` pull-request record; `ed5efd8b` privilege-boundary CI repair; and
+  `9171f942` caller-register preservation across nested mediation
 
 ## Review policy and outcome
 

@@ -83,9 +83,10 @@
 - Refreshed CI then exposed a real composition regression: virtual-device open
   saved the private immutable-path replay pointer as the caller's argument.
   The repair now restores the original syscall arguments across that nested
-  mediation. Fresh disposable-clone `make check && make test-unit` passes; the
-  exact privileged integration case awaits refreshed pull-request CI because
-  local `sudo` requires an interactive password.
+  mediation. Fresh disposable-clone `make check && make test-unit` passes.
+  Exact-head workflow run 45867768467 at `9171f942` is green for `changes`,
+  `static-and-unit`, and `launch-integration`, including the complete privileged
+  native-supervision case that local `sudo` could not run noninteractively.
 
 ## Prior checkpoint
 
