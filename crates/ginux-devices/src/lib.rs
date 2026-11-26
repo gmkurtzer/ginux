@@ -853,4 +853,37 @@ mod tests {
         assert_eq!(registry.views(1, &mut full), 4);
         assert_eq!(full[3].name.as_bytes(), b"dddd");
     }
+
+    #[test]
+    fn views_pin_major_minor_projection_and_output_cap() {
+        let mut registry: DeviceRegistry<8, 8> = DeviceRegistry::new();
+        registry
+            .assign(1, 10, DeviceName::new(b"zero").unwrap(), DeviceKind::Zero)
+            .unwrap();
+        registry
+            .assign(1, 11, DeviceName::new(b"rand").unwrap(), DeviceKind::Random)
+            .unwrap();
+        registry
+            .assign(2, 12, DeviceName::new(b"null").unwrap(), DeviceKind::Null)
+            .unwrap();
+        let pad = DeviceView {
+            name: DeviceName::new(b"pad").unwrap(),
+            kind: DeviceKind::Null,
+            major: 9,
+            minor: 9,
+        };
+        let mut out = [pad; 4];
+        assert_eq!(registry.views(1, &mut out), 2);
+        // fixed pseudo-device numbers
+        assert_eq!((out[0].major, out[0].minor), (1, 5));
+        assert_eq!((out[1].major, out[1].minor), (1, 8));
+        // untouched tail
+        assert_eq!((out[2].major, out[2].minor), (9, 9));
+        // output smaller than the instance's device count: capped
+        let mut small = [pad; 1];
+        assert_eq!(registry.views(1, &mut small), 1);
+        assert_eq!(small[0].name.as_bytes(), b"zero");
+        // empty output
+        assert_eq!(registry.views(1, &mut []), 0);
+    }
 }
