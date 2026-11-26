@@ -1258,4 +1258,31 @@ mod tests {
         };
         assert_eq!(encode_record(e, &mut out), Err(VfsError::InvalidPath));
     }
+
+    #[test]
+    fn index_header_rejects_bad_magic_version_and_record_size() {
+        let good = index_bytes();
+        assert!(Index::new(&good).is_ok());
+        // bad magic
+        let mut b = good.clone();
+        b[0] = b'X';
+        assert_eq!(Index::new(&b).err(), Some(VfsError::InvalidIndex));
+        // bad version
+        let mut v = good.clone();
+        v[8..12].copy_from_slice(&99u32.to_le_bytes());
+        assert_eq!(Index::new(&v).err(), Some(VfsError::InvalidIndex));
+        // bad record size
+        let mut r = good.clone();
+        r[12..16].copy_from_slice(&(RECORD_SIZE as u32 + 1).to_le_bytes());
+        assert_eq!(Index::new(&r).err(), Some(VfsError::InvalidIndex));
+        // truncated header
+        assert_eq!(
+            Index::new(&good[..HEADER_SIZE - 1]).err(),
+            Some(VfsError::InvalidIndex)
+        );
+        // count/length mismatch
+        let mut c = good.clone();
+        c[16..20].copy_from_slice(&99u32.to_le_bytes());
+        assert_eq!(Index::new(&c).err(), Some(VfsError::InvalidIndex));
+    }
 }
