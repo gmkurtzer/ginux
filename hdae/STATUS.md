@@ -68,6 +68,10 @@
   supported path operations. This is a material filesystem-executor
   architecture change; after approval, implement it family-by-family and run
   deterministic exchange barriers before full clean verification.
+- Delivery direction: on 2026-11-26 the human explicitly requested that the
+  current partial checkpoint be pushed and made into a pull request. Open it as
+  a draft against `main`, reference issue #290 without a closing keyword, state
+  the unresolved FS-006/FS-007 race, and keep the gate in `gates-todo`.
 
 ## Prior checkpoint
 

@@ -115,8 +115,9 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
       teardown, cancellation, failure-commit, and resource-bound coverage.
 - [ ] Run all nine mandatory suites, required security mutations, full project
       regressions, and exact-head CI.
-- [ ] Deliver the verified implementation in one dedicated pull request that
-      references issue #290, then stop for human security review.
+- [ ] Deliver the complete verified implementation in the existing dedicated
+      draft pull request that references issue #290, then stop for human
+      security review.
 
 ## Acceptance criteria
 
@@ -286,22 +287,26 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
 
 - Working branch: `hdae/filesystem-mediation-complete`
 - Intended base: `main`
-- Pull request: intended; must reference issue #290 and contain the complete
-  corrective implementation, tests, documentation, and gate evidence before
-  opening
+- Pull request: explicitly requested by the human on 2026-11-26 at the partial
+  checkpoint; open as a draft referencing issue #290 and state the unresolved
+  FS-006/FS-007 namespace race without claiming Gate 53 has passed
 - Planned commits: gate and traceability baseline; resolver and immutable
   snapshots; observation/directory family; safe open and descriptor authority;
   descriptor/indirect I/O; single-path mutation; two-path mutation; special
   interfaces and lifecycle; test architecture and security mutations;
   documentation, final review, and evidence
-- Actual commits: `284825c5` observation-family route; safe-open checkpoint
-  `931c701a`; descriptor/indirect-I/O checkpoint `9504a1f0`; single-path
-  checkpoint `e74af025`; two-path/resolver checkpoint pending commit
+- Actual commits: `284825c5` observation-family route; `931c701a` safe-open;
+  `9504a1f0` descriptor/indirect-I/O; `e74af025` single-path mutation;
+  `f120a51b` two-path/resolver; `440f1ae1` special interfaces and suites;
+  `57cf8a57` immutable pathname replay; delivery-state commit pending
 
 ## Review policy and outcome
 
-Human security checkpoint. The focused agent may implement, repair, verify,
-make signed commits, push the dedicated branch, and open or update the one
+Human security checkpoint. On 2026-11-26 the human explicitly directed the
+partial branch to be pushed and made into a pull request. Publish it as a draft
+with the unresolved executor-architecture decision visible; this delivery does
+not make the gate passed or accepted. The focused agent may implement, repair,
+verify, make signed commits, push the dedicated branch, and update the one
 referencing pull request. Stop after complete exact-head evidence for explicit
 human review. Do not merge the pull request, close issue #290, or move this gate
 to `gates-done` without explicit human acceptance.
