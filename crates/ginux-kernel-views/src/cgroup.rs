@@ -398,4 +398,22 @@ mod tests {
         assert_eq!(cgroups.remove(b"/instance.slice", 0), Err(ViewError::Busy));
         assert_eq!(cgroups.create(b"/../host", 0), Err(ViewError::InvalidPath));
     }
+
+    #[test]
+    fn group_path_validation_rejects_each_unsafe_shape() {
+        let mut cgroups: CgroupFs<8> = CgroupFs::new();
+        // trailing slash, double slash, dot-dot segment, bad charset, empty, too long
+        assert_eq!(cgroups.create(b"/a/", 0), Err(ViewError::InvalidPath));
+        assert_eq!(cgroups.create(b"/a//b", 0), Err(ViewError::InvalidPath));
+        assert_eq!(cgroups.create(b"/a/../b", 0), Err(ViewError::InvalidPath));
+        assert_eq!(cgroups.create(b"/a b", 0), Err(ViewError::InvalidPath));
+        assert_eq!(cgroups.create(b"/a;b", 0), Err(ViewError::InvalidPath));
+        assert_eq!(cgroups.create(b"", 0), Err(ViewError::InvalidPath));
+        assert_eq!(cgroups.create(b"a", 0), Err(ViewError::InvalidPath));
+        let mut p = [b'a'; 301];
+        p[0] = b'/';
+        assert_eq!(cgroups.create(&p, 0), Err(ViewError::InvalidPath));
+        // valid shapes still accepted (dot and dash and underscore allowed)
+        cgroups.create(b"/ok.slice-1_x", 0).unwrap();
+    }
 }
