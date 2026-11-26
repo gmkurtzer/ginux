@@ -673,6 +673,18 @@ mod tests {
     }
 
     #[test]
+    fn partition_offsets_map_to_absolute_backend_positions() {
+        let mut partition = Partition::new(block(), 16, 16, false).unwrap();
+        partition.write_at(2, b"abc").unwrap();
+        assert_eq!(&partition.backend.bytes[18..21], b"abc");
+        assert_eq!(&partition.backend.bytes[0..3], &[0, 0, 0]);
+        assert_eq!(&partition.backend.bytes[16..18], &[0, 0]);
+        let mut out = [0u8; 3];
+        partition.read_at(2, &mut out).unwrap();
+        assert_eq!(&out, b"abc");
+    }
+
+    #[test]
     fn block_partition_confines_reads_and_writes() {
         let mut partition = Partition::new(block(), 16, 16, false).unwrap();
         partition.write_at(0, b"inside").unwrap();
