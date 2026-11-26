@@ -1,3 +1,4 @@
+use ginux_fs_policy::namespace_commit::{lease_for, Barrier, Lease};
 use ginux_fs_policy::{
     accountable_route, confined_kernel_route, descriptor_kernel_route, descriptor_required_rights,
     filesystem_lane_owns, operation, operation_executor, operation_family, AuthorityContext,
@@ -102,6 +103,10 @@ fn fs_t01_namespace_walking_has_one_ordered_route() {
 
 #[test]
 fn fs_t02_deterministic_exchange_keeps_acquired_object() {
+    let mut barrier = Barrier::new();
+    assert!(barrier.acquire(0, 101, Lease::Read));
+    assert!(!barrier.acquire(1, 102, lease_for(82)));
+
     let root = fixture("race");
     let selected = root.join("selected");
     let replacement = root.join("replacement");
@@ -114,6 +119,9 @@ fn fs_t02_deterministic_exchange_keeps_acquired_object() {
     acquired.read_to_end(&mut bytes).unwrap();
     assert_eq!(bytes, b"authorized");
     assert_eq!(fs::read(&selected).unwrap(), b"outside-decoy");
+    assert!(barrier.release(0, 101, Lease::Read));
+    assert!(barrier.acquire(1, 102, lease_for(82)));
+    assert!(barrier.release(1, 102, Lease::Write));
     fs::remove_dir_all(root).unwrap();
 }
 

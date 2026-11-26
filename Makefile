@@ -500,5 +500,6 @@ test-native-supervision:
 	python3 scripts/test-native-replay-signal.py $(GINUX) .artifacts/launch/native-fixture
 	python3 scripts/test-native-close-range-signal.py $(GINUX) .artifacts/launch/native-fixture
 	python3 scripts/test-native-close-range-gap.py $(GINUX) .artifacts/launch/native-fixture
+	python3 scripts/test-native-fs-commit.py $(GINUX) .artifacts/launch/native-fixture
 	python3 scripts/test-native-network-snapshot.py $(GINUX) .artifacts/launch/native-fixture
 	python3 scripts/test-native-unix-send-snapshot.py $(GINUX) .artifacts/launch/native-fixture

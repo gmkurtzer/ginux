@@ -6066,23 +6066,10 @@ fn supervise_native(
                     )
             })
         };
-        // Once a namespace writer is waiting, admit it before later readers.
-        // This bounds adversarial reader pressure without serializing readers
-        // that were already admitted.
         let ready_deferred = deferred_stops
             .iter()
             .enumerate()
-            .position(|(slot, status)| {
-                tasks[slot].is_some_and(|candidate| {
-                    candidate.filesystem_wait == ginux_fs_policy::namespace_commit::Lease::Write
-                }) && deferred_ready(slot, status)
-            })
-            .or_else(|| {
-                deferred_stops
-                    .iter()
-                    .enumerate()
-                    .position(|(slot, status)| deferred_ready(slot, status))
-            });
+            .position(|(slot, status)| deferred_ready(slot, status));
         let waited = if let Some(slot) = ready_deferred {
             status = deferred_stops[slot];
             deferred_stops[slot] = 0;
@@ -6649,25 +6636,6 @@ fn supervise_native(
             continue;
         }
 
-        if entry_syscall.is_some_and(native_descriptor_barrier_syscall)
-            && entry_syscall.is_some_and(|syscall| {
-                ginux_fs_policy::namespace_commit::lease_for(syscall)
-                    == ginux_fs_policy::namespace_commit::Lease::None
-            })
-            && task.descriptor_barrier == usize::MAX
-        {
-            let table = task.descriptor_table;
-            if descriptor_tables[table].mutation_owner != 0 {
-                native_fail(
-                    instance,
-                    pid,
-                    b"native descriptor mutation barrier collision",
-                );
-            }
-            descriptor_tables[table].mutation_owner = task.host_pid;
-            task.descriptor_barrier = table;
-        }
-
         if task.initial_exec_pending && entry_syscall == Some(59) {
             let mut listener = -1isize;
             if !direct_yield {
@@ -6786,6 +6754,58 @@ fn supervise_native(
             }
             unsafe { registers.assume_init() }
         };
+
+        // A mode-3 pathname's first stop only snapshots its caller bytes. Its
+        // replay stop is the policy/commit boundary. Acquire namespace and
+        // descriptor protection there, before restoring the caller's signal
+        // mask for the real operation. A conflicting replay remains safely in
+        // its private blocked-mask phase while deferred.
+        let starts_path_snapshot = seccomp_entry
+            && mode == 3
+            && task.path_call.phase == native_path::Phase::Idle
+            && native_path::has_snapshot(registers.orig_rax);
+        if seccomp_entry && !starts_path_snapshot {
+            let syscall = registers.orig_rax;
+            let requested_filesystem_lease = if task.filesystem_wait.is_waiting() {
+                task.filesystem_wait
+            } else {
+                ginux_fs_policy::namespace_commit::lease_for(syscall)
+            };
+            if task.filesystem_lease == ginux_fs_policy::namespace_commit::Lease::None
+                && requested_filesystem_lease.is_waiting()
+            {
+                if !filesystem_barrier.acquire(
+                    task_index,
+                    task.host_pid,
+                    requested_filesystem_lease,
+                ) {
+                    if deferred_stops[task_index] != 0 {
+                        native_fail(instance, pid, b"native filesystem stop already deferred");
+                    }
+                    task.filesystem_wait = requested_filesystem_lease;
+                    deferred_stops[task_index] = status;
+                    tasks[task_index] = Some(task);
+                    continue;
+                }
+                task.filesystem_lease = requested_filesystem_lease;
+                task.filesystem_wait = ginux_fs_policy::namespace_commit::Lease::None;
+            }
+            // Namespace acquisition precedes descriptor-table acquisition.
+            // The reverse order can deadlock when a shared-table sibling owns
+            // the namespace generation and must reach its exit stop.
+            if native_descriptor_barrier_syscall(syscall) && task.descriptor_barrier == usize::MAX {
+                let table = task.descriptor_table;
+                if descriptor_tables[table].mutation_owner != 0 {
+                    native_fail(
+                        instance,
+                        pid,
+                        b"native descriptor mutation barrier collision",
+                    );
+                }
+                descriptor_tables[table].mutation_owner = task.host_pid;
+                task.descriptor_barrier = table;
+            }
+        }
 
         if seccomp_entry
             && matches!(
@@ -7835,57 +7855,6 @@ fn supervise_native(
             native_fail(instance, pid, b"native seccomp syscall identity mismatch");
         }
         task.syscall = syscall;
-        let requested_filesystem_lease = if task.filesystem_wait.is_waiting() {
-            task.filesystem_wait
-        } else {
-            ginux_fs_policy::namespace_commit::lease_for(syscall)
-        };
-        if task.filesystem_lease == ginux_fs_policy::namespace_commit::Lease::None
-            && requested_filesystem_lease.is_waiting()
-        {
-            let writer_waiting = requested_filesystem_lease
-                == ginux_fs_policy::namespace_commit::Lease::Read
-                && tasks.iter().enumerate().any(|(slot, candidate)| {
-                    slot != task_index
-                        && deferred_stops[slot] != 0
-                        && candidate.is_some_and(|candidate| {
-                            candidate.filesystem_wait
-                                == ginux_fs_policy::namespace_commit::Lease::Write
-                        })
-                });
-            if writer_waiting
-                || !filesystem_barrier.acquire(
-                    task_index,
-                    task.host_pid,
-                    requested_filesystem_lease,
-                )
-            {
-                if deferred_stops[task_index] != 0 {
-                    native_fail(instance, pid, b"native filesystem stop already deferred");
-                }
-                task.filesystem_wait = requested_filesystem_lease;
-                deferred_stops[task_index] = status;
-                tasks[task_index] = Some(task);
-                continue;
-            }
-            task.filesystem_lease = requested_filesystem_lease;
-            task.filesystem_wait = ginux_fs_policy::namespace_commit::Lease::None;
-        }
-        // Namespace acquisition precedes descriptor-table acquisition.  The
-        // reverse order can deadlock when a shared-table sibling owns the
-        // namespace generation and must reach its exit stop to release it.
-        if native_descriptor_barrier_syscall(syscall) && task.descriptor_barrier == usize::MAX {
-            let table = task.descriptor_table;
-            if descriptor_tables[table].mutation_owner != 0 {
-                native_fail(
-                    instance,
-                    pid,
-                    b"native descriptor mutation barrier collision",
-                );
-            }
-            descriptor_tables[table].mutation_owner = task.host_pid;
-            task.descriptor_barrier = table;
-        }
         let transfer_limit = if mode != 3 {
             match syscall {
                 0 | 17 => Some(1024 * 1024),

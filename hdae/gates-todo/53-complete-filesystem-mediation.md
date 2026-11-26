@@ -106,8 +106,9 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
 - [x] Added a per-instance namespace commit barrier. Read-only resolution and
       opens share a stable namespace generation, while namespace, metadata,
       cwd, and `fchdir` changes are exclusive from policy resolution through
-      syscall exit. Writer waiters have priority, ownership is host-task bound,
-      and task death releases only the dead task's lease.
+      syscall exit. Ownership is host-task bound, task death releases only the
+      dead task's lease, and later readers remain admissible so a blocking FIFO
+      open cannot deadlock its valid peer behind a waiting namespace writer.
 
 ## Remaining work
 
@@ -283,6 +284,15 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
   `make test-native-vfs` run passes loader/open/I/O, mutation and network
   denials, supervisor-loss and unexpected-stop cleanup, and immutable-image
   verification with the runtime barrier active.
+- The first real scheduled Rocky exchange run found that a deferred writer had
+  already restored its caller signal mask; reprocessing the same seccomp stop
+  then failed the immutable-path replay protocol. Lease acquisition now occurs
+  before replay-mask restoration, so a conflicting task remains wholly in the
+  private blocked-mask phase. The deterministic FIFO/rename test then passed:
+  a reader remained blocked in host `open`, the rename task stayed at one
+  persistent ptrace stop, a later FIFO peer acquired a concurrent read lease,
+  both opens completed, and only then did the directory rename commit and move
+  the exact FIFO object.
 
 ## Decisions and limitations
 
@@ -331,7 +341,8 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
   `f120a51b` two-path/resolver; `440f1ae1` special interfaces and suites;
   `57cf8a57` immutable pathname replay; `aa64a297` partial-delivery direction;
   `679dac2b` pull-request record; `ed5efd8b` privilege-boundary CI repair; and
-  `9171f942` caller-register preservation across nested mediation
+  `9171f942` caller-register preservation across nested mediation; and
+  `fb581c3a` namespace commit-barrier foundation
 
 ## Review policy and outcome
 

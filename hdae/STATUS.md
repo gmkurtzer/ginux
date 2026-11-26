@@ -74,6 +74,11 @@
   active. These checks establish compilation, state-machine behavior, and the
   ordinary native path, but do not replace the remaining scheduled exchange
   tests.
+- A new deterministic Rocky native test now pauses an admitted FIFO reader in
+  the host kernel, proves a conflicting directory rename remains at a stable
+  ptrace stop, admits a second reader needed for FIFO liveness, and proves the
+  rename moves the object only after both opens complete. Its first run exposed
+  and drove correction of replay-mask ordering; the corrected run passes.
 - Delivery direction: on 2026-11-26 the human explicitly requested that the
   current partial checkpoint be pushed and made into a pull request. Open it as
   a draft against `main`, reference issue #290 without a closing keyword, state
