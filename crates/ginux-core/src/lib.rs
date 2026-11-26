@@ -961,6 +961,41 @@ mod tests {
     }
 
     #[test]
+    fn netlink_ack_rejects_malformed_and_matches_sequence() {
+        // Valid ACK: len=20, kind=2, seq=42, ack=0
+        let mut msg = [0u8; 20];
+        msg[0..4].copy_from_slice(&20u32.to_ne_bytes());
+        msg[4..6].copy_from_slice(&2u16.to_ne_bytes());
+        msg[8..12].copy_from_slice(&42u32.to_ne_bytes());
+        msg[16..20].copy_from_slice(&0i32.to_ne_bytes());
+        assert_eq!(loopback_netlink_ack_index(&msg, &[40, 42]), Ok(Some(1)));
+        assert_eq!(loopback_netlink_ack_index(&msg, &[99]), Ok(None));
+        // Positive ack -> not matched
+        msg[16..20].copy_from_slice(&1i32.to_ne_bytes());
+        assert_eq!(loopback_netlink_ack_index(&msg, &[42]), Ok(None));
+        // Malformed: message_length < 16
+        let mut bad = [0u8; 20];
+        bad[0..4].copy_from_slice(&12u32.to_ne_bytes());
+        assert_eq!(loopback_netlink_ack_index(&bad, &[42]), Err(-22));
+        // Malformed: exceeds payload
+        bad[0..4].copy_from_slice(&100u32.to_ne_bytes());
+        assert_eq!(loopback_netlink_ack_index(&bad, &[42]), Err(-22));
+        // Too-short payload
+        assert_eq!(loopback_netlink_ack_index(&[0; 12], &[42]), Ok(None));
+        // Multi-message: non-ACK (kind=3) then ACK at aligned offset
+        let mut multi = [0u8; 44];
+        // First msg: len=21 (needs padding to 24), kind=3 (not ACK)
+        multi[0..4].copy_from_slice(&21u32.to_ne_bytes());
+        multi[4..6].copy_from_slice(&3u16.to_ne_bytes());
+        // Second msg at offset 24: len=20, kind=2, seq=7, ack=-1
+        multi[24..28].copy_from_slice(&20u32.to_ne_bytes());
+        multi[28..30].copy_from_slice(&2u16.to_ne_bytes());
+        multi[32..36].copy_from_slice(&7u32.to_ne_bytes());
+        multi[40..44].copy_from_slice(&(-1i32).to_ne_bytes());
+        assert_eq!(loopback_netlink_ack_index(&multi, &[7]), Ok(Some(0)));
+    }
+
+    #[test]
     fn prctl_admission_pins_option_and_arg_bounds() {
         // option must be 0, arg1 <= 15
         assert!(balanced_arguments_allowed(302, 0, 0, 0));
