@@ -103,14 +103,20 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
       supervisor snapshot replayed from a protected read-only tracee mapping;
       policy and the host syscall now consume the same bytes, and map mutation
       attempts fail closed across task sharing and lifecycle cleanup.
+- [x] Added a per-instance namespace commit barrier. Read-only resolution and
+      opens share a stable namespace generation, while namespace, metadata,
+      cwd, and `fchdir` changes are exclusive from policy resolution through
+      syscall exit. Writer waiters have priority, ownership is host-task bound,
+      and task death releases only the dead task's lease.
 
 ## Remaining work
 
 - [ ] Complete operation-by-operation support/flag/errno documentation and
       final FS-001 through FS-019 traceability.
-- [ ] Replace pre-effect pathname re-resolution with pinned parent/object
-      execution so concurrent namespace rename or symlink exchange cannot
-      change the object selected after policy authorization.
+- [ ] Complete deterministic native exchange tests proving the namespace
+      commit barrier covers ancestor, final-component, cwd-relative,
+      dirfd-relative, follow/no-follow, and both two-ended race windows without
+      deadlocking concurrent valid opens.
 - [ ] Complete procfs/magic-link, device/mount/alias, process lifecycle,
       teardown, cancellation, failure-commit, and resource-bound coverage.
 - [ ] Run all nine mandatory suites, required security mutations, full project
@@ -270,6 +276,13 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
   test-unit` passes. Exact-head workflow run 45867768467 at `9171f942` passes
   `changes`, `static-and-unit`, and `launch-integration`, including the complete
   privileged native-supervision suite.
+- Namespace commit-barrier checkpoint: fresh `make check` and `make test-unit`
+  pass, including read/read overlap, read/write and write/read exclusion,
+  task-identity-bound release, stale-slot refusal, and complete filesystem-lane
+  conflict classification. A fresh isolated Rocky 10 x86-64
+  `make test-native-vfs` run passes loader/open/I/O, mutation and network
+  denials, supervisor-loss and unexpected-stop cleanup, and immutable-image
+  verification with the runtime barrier active.
 
 ## Decisions and limitations
 
@@ -288,11 +301,15 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
 - Explicit denial is the supported outcome for capabilities outside the
   accepted contract. Covering FS-001 through FS-019 does not imply implementing
   host mounts, arbitrary volumes, opaque handles, or `io_uring`.
-- Source review after immutable replay found that the current policy resolver
-  and kernel continuation are still two namespace-resolution moments. A peer
-  task can exchange an intermediate symlink or entry between them. Closing
-  FS-006 and FS-007 therefore requires pinned parent/object execution rather
-  than describing chroot/cwd confinement alone as object stability.
+- Source review after immutable replay found that policy resolution and kernel
+  continuation were two namespace-resolution moments. On 2026-11-26 the human
+  directed Gate 53 to fully solve issue #290. The selected correction is a
+  conflict-aware per-instance namespace commit barrier: every operation that
+  can alter a policy-relevant component or filesystem context is excluded while
+  any authorized resolution is committing. Opens share the stable generation
+  so valid blocking FIFO peers remain possible. Pinned parent/object execution
+  remains the mandatory fallback for any operation whose deterministic native
+  test cannot prove race-resistant behavior under this barrier.
 - This is a substantial security checkpoint. Technical passage does not
   authorize merge, issue closure, or movement to `gates-done`.
 

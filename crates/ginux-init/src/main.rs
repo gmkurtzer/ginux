@@ -3393,6 +3393,8 @@ struct NativeSupervisorTask {
     clone_call: native_clone::Pending,
     network_call: native_network::Pending,
     path_call: native_path::Pending,
+    filesystem_lease: ginux_fs_policy::namespace_commit::Lease,
+    filesystem_wait: ginux_fs_policy::namespace_commit::Lease,
     replay_signal_mask: NativeReplaySignalMask,
     lifetime_pidfd: isize,
     virtual_id: TaskId,
@@ -3572,7 +3574,28 @@ const EMPTY_NATIVE_DESCRIPTOR_TABLE: NativeDescriptorTable = NativeDescriptorTab
 fn native_descriptor_barrier_syscall(syscall: u64) -> bool {
     matches!(
         syscall,
-        2 | 3 | 16 | 32 | 33 | 47 | 56 | 57 | 58 | 59 | 72 | 257 | 292 | 293 | 299 | 435 | 436
+        2 | 3
+            | 16
+            | 32
+            | 33
+            | 47
+            | 56
+            | 57
+            | 58
+            | 59
+            | 72
+            | 81
+            | 85
+            | 257..=269
+            | 280
+            | 292
+            | 293
+            | 299
+            | 316
+            | 332
+            | 435..=437
+            | 439
+            | 452
     )
 }
 
@@ -5973,11 +5996,14 @@ fn supervise_native(
     };
     let mut next_descriptor_generation = 2u64;
     let mut deferred_stops = [0i32; 128];
+    let mut filesystem_barrier = ginux_fs_policy::namespace_commit::Barrier::new();
     tasks[0] = Some(NativeSupervisorTask {
         host_pid: pid,
         clone_call: native_clone::Pending::empty(),
         network_call: native_network::Pending::empty(),
         path_call: native_path::Pending::empty(),
+        filesystem_lease: ginux_fs_policy::namespace_commit::Lease::None,
+        filesystem_wait: ginux_fs_policy::namespace_commit::Lease::None,
         replay_signal_mask: EMPTY_REPLAY_SIGNAL_MASK,
         lifetime_pidfd: -1,
         virtual_id: root_virtual,
@@ -6026,17 +6052,36 @@ fn supervise_native(
         limits: native_default_limits(),
     });
     loop {
+        let deferred_ready = |slot: usize, status: &i32| {
+            if *status == 0 {
+                return false;
+            }
+            tasks[slot].is_some_and(|candidate| {
+                let owner = descriptor_tables[candidate.descriptor_table].mutation_owner;
+                (owner == 0 || owner == candidate.host_pid)
+                    && filesystem_barrier.can_acquire(
+                        slot,
+                        candidate.host_pid,
+                        candidate.filesystem_wait,
+                    )
+            })
+        };
+        // Once a namespace writer is waiting, admit it before later readers.
+        // This bounds adversarial reader pressure without serializing readers
+        // that were already admitted.
         let ready_deferred = deferred_stops
             .iter()
             .enumerate()
             .position(|(slot, status)| {
-                if *status == 0 {
-                    return false;
-                }
                 tasks[slot].is_some_and(|candidate| {
-                    let owner = descriptor_tables[candidate.descriptor_table].mutation_owner;
-                    owner == 0 || owner == candidate.host_pid
-                })
+                    candidate.filesystem_wait == ginux_fs_policy::namespace_commit::Lease::Write
+                }) && deferred_ready(slot, status)
+            })
+            .or_else(|| {
+                deferred_stops
+                    .iter()
+                    .enumerate()
+                    .position(|(slot, status)| deferred_ready(slot, status))
             });
         let waited = if let Some(slot) = ready_deferred {
             status = deferred_stops[slot];
@@ -6116,6 +6161,13 @@ fn supervise_native(
                     b"native path interrupted during private setup",
                 );
             }
+            if task.filesystem_lease != ginux_fs_policy::namespace_commit::Lease::None
+                && !filesystem_barrier.release(task_index, task.host_pid, task.filesystem_lease)
+            {
+                native_fail(instance, pid, b"native filesystem barrier release failed");
+            }
+            task.filesystem_lease = ginux_fs_policy::namespace_commit::Lease::None;
+            task.filesystem_wait = ginux_fs_policy::namespace_commit::Lease::None;
             let exit_status = if status & 0x7f == 0 {
                 status >> 8
             } else {
@@ -6304,6 +6356,8 @@ fn supervise_native(
                 },
                 network_call: native_network::Pending::empty(),
                 path_call: native_path::Pending::empty(),
+                filesystem_lease: ginux_fs_policy::namespace_commit::Lease::None,
+                filesystem_wait: ginux_fs_policy::namespace_commit::Lease::None,
                 replay_signal_mask: EMPTY_REPLAY_SIGNAL_MASK,
                 lifetime_pidfd,
                 virtual_id: child_virtual,
@@ -6596,6 +6650,10 @@ fn supervise_native(
         }
 
         if entry_syscall.is_some_and(native_descriptor_barrier_syscall)
+            && entry_syscall.is_some_and(|syscall| {
+                ginux_fs_policy::namespace_commit::lease_for(syscall)
+                    == ginux_fs_policy::namespace_commit::Lease::None
+            })
             && task.descriptor_barrier == usize::MAX
         {
             let table = task.descriptor_table;
@@ -7678,6 +7736,12 @@ fn supervise_native(
                 }
                 task.descriptor_barrier = usize::MAX;
             }
+            if task.filesystem_lease != ginux_fs_policy::namespace_commit::Lease::None {
+                if !filesystem_barrier.release(task_index, task.host_pid, task.filesystem_lease) {
+                    native_fail(instance, pid, b"native filesystem barrier lost");
+                }
+                task.filesystem_lease = ginux_fs_policy::namespace_commit::Lease::None;
+            }
             if close_range_upper && task.descriptor_barrier == usize::MAX {
                 descriptor_tables[task.descriptor_table].mutation_owner = task.host_pid;
                 task.descriptor_barrier = task.descriptor_table;
@@ -7771,6 +7835,57 @@ fn supervise_native(
             native_fail(instance, pid, b"native seccomp syscall identity mismatch");
         }
         task.syscall = syscall;
+        let requested_filesystem_lease = if task.filesystem_wait.is_waiting() {
+            task.filesystem_wait
+        } else {
+            ginux_fs_policy::namespace_commit::lease_for(syscall)
+        };
+        if task.filesystem_lease == ginux_fs_policy::namespace_commit::Lease::None
+            && requested_filesystem_lease.is_waiting()
+        {
+            let writer_waiting = requested_filesystem_lease
+                == ginux_fs_policy::namespace_commit::Lease::Read
+                && tasks.iter().enumerate().any(|(slot, candidate)| {
+                    slot != task_index
+                        && deferred_stops[slot] != 0
+                        && candidate.is_some_and(|candidate| {
+                            candidate.filesystem_wait
+                                == ginux_fs_policy::namespace_commit::Lease::Write
+                        })
+                });
+            if writer_waiting
+                || !filesystem_barrier.acquire(
+                    task_index,
+                    task.host_pid,
+                    requested_filesystem_lease,
+                )
+            {
+                if deferred_stops[task_index] != 0 {
+                    native_fail(instance, pid, b"native filesystem stop already deferred");
+                }
+                task.filesystem_wait = requested_filesystem_lease;
+                deferred_stops[task_index] = status;
+                tasks[task_index] = Some(task);
+                continue;
+            }
+            task.filesystem_lease = requested_filesystem_lease;
+            task.filesystem_wait = ginux_fs_policy::namespace_commit::Lease::None;
+        }
+        // Namespace acquisition precedes descriptor-table acquisition.  The
+        // reverse order can deadlock when a shared-table sibling owns the
+        // namespace generation and must reach its exit stop to release it.
+        if native_descriptor_barrier_syscall(syscall) && task.descriptor_barrier == usize::MAX {
+            let table = task.descriptor_table;
+            if descriptor_tables[table].mutation_owner != 0 {
+                native_fail(
+                    instance,
+                    pid,
+                    b"native descriptor mutation barrier collision",
+                );
+            }
+            descriptor_tables[table].mutation_owner = task.host_pid;
+            task.descriptor_barrier = table;
+        }
         let transfer_limit = if mode != 3 {
             match syscall {
                 0 | 17 => Some(1024 * 1024),

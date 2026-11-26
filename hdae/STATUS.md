@@ -57,17 +57,23 @@
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Open decisions or limitations: FS-015's caller-memory race is closed, but
-  FS-006/FS-007 remain open because policy path resolution and host-kernel
-  execution still resolve namespace state at separate times. A concurrent
-  rename or symlink exchange can change the selected object. Gate 53 is a final
-  human security checkpoint and may not merge or close issue #290 without
-  explicit acceptance.
-- Exact next action: obtain human direction on replacing the accepted
-  confined-kernel continuation with a staged pinned-parent/object broker for
-  supported path operations. This is a material filesystem-executor
-  architecture change; after approval, implement it family-by-family and run
-  deterministic exchange barriers before full clean verification.
+- Open decisions or limitations: on 2026-11-26 the human directed Gate 53 to
+  fully solve issue #290 and complete its pull request. A conflict-aware
+  per-instance namespace commit barrier is now implemented as the primary
+  FS-006/FS-007 correction, with pinned parent/object execution retained as the
+  required fallback wherever deterministic native evidence cannot prove the
+  barrier sufficient. Native scheduled exchange coverage and the remaining
+  FS-001 through FS-019 closure matrix are not yet complete. Gate 53 remains a
+  final human security checkpoint and may not merge or close issue #290 before
+  that evidence and explicit acceptance.
+- Exact next action: add deterministic native exchange/liveness coverage for
+  the namespace commit barrier, repair any uncovered operation with pinned
+  execution, then complete the remaining Gate 53 matrix and exact-head CI.
+- Current local evidence: fresh `make check`, `make test-unit`, and an isolated
+  Rocky 10 x86-64 `make test-native-vfs` pass with the namespace commit barrier
+  active. These checks establish compilation, state-machine behavior, and the
+  ordinary native path, but do not replace the remaining scheduled exchange
+  tests.
 - Delivery direction: on 2026-11-26 the human explicitly requested that the
   current partial checkpoint be pushed and made into a pull request. Open it as
   a draft against `main`, reference issue #290 without a closing keyword, state

@@ -1,5 +1,7 @@
 #![no_std]
 
+pub mod namespace_commit;
+
 #[cfg(test)]
 mod x86_64_filesystem_abi;
 
