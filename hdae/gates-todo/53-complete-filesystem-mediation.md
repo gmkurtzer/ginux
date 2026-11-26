@@ -184,7 +184,7 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
 - `make check` -> format, strict lint, generated inventory, independent ABI-set
   equality, route ownership, and static security checks pass.
 - `make test-unit` -> all component, authority, resolver, snapshot, rights,
-  error, lifecycle, and documentation tests pass.
+  error, lifecycle, FS-T01 through FS-T09, and documentation tests pass.
 - `make test-native-vfs` -> FS-T01 namespace walking, supported loader/open/I/O,
   and exact-error compatibility pass on the supported x86-64 environment.
 - `make test-fs-races` -> FS-T02 deterministic exchanges at every resolution
@@ -199,8 +199,9 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
   async variants enforce rights equivalent to ordinary I/O.
 - `make test-fs-faults` -> FS-T07 injected acquisition, copy, resolution,
   commit, return, and cleanup failures preserve errors and leak no authority.
-- `sudo make test-native-supervision test-systemd` -> FS-T08 covers every
-  advertised confined native route, contract, and dispatch mode.
+- `sudo make test-native-supervision test-systemd` -> FS-T08 native integration
+  covers every advertised confined route, contract, and dispatch mode; its
+  component suite runs unprivileged through `make test-unit`.
 - `make test-recovery test-multi-instance` -> FS-T09 cancellation,
   supervisor loss, stop/recreate, stale completion, peer isolation, and normal
   persistence pass.
@@ -257,6 +258,11 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
   `test-systemd` cold/warm/repeat, offline, controlled-shutdown,
   immutable-base DNF-failure, and startup-failure matrix passed with every
   filesystem-lane path replayed from the protected snapshot mapping.
+- Draft PR #349 CI exposed that adding the FS-T08 Rust component test directly
+  to the privileged `test-native-supervision` target made `sudo make` lose the
+  unprivileged Cargo toolchain (`cargo: not found`). The component suite already
+  runs through `make test-unit`; the privileged target now remains limited to
+  native integration, preserving the intended privilege boundary.
 
 ## Decisions and limitations
 

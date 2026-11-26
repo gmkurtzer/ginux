@@ -75,6 +75,11 @@
 - Delivery: draft pull request https://github.com/gmkurtzer/ginux/pull/349 is
   open against `main` from `hdae/filesystem-mediation-complete`. It states the
   partial status and must not be merged or used to close issue #290.
+- Draft CI found one harness-only failure: `sudo make
+  test-native-supervision` attempted to run the FS-T08 Rust component test with
+  Cargo absent from the privileged PATH. The component suite already belongs
+  to unprivileged `make test-unit`; the repair keeps privileged execution
+  limited to the native integration scripts and awaits refreshed CI.
 
 ## Prior checkpoint
 
