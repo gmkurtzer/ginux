@@ -416,4 +416,29 @@ mod tests {
         // valid shapes still accepted (dot and dash and underscore allowed)
         cgroups.create(b"/ok.slice-1_x", 0).unwrap();
     }
+
+    #[test]
+    fn attach_moves_pid_between_groups_and_enforces_limits() {
+        let mut cgroups: CgroupFs<4> = CgroupFs::new();
+        cgroups.create(b"/a", 0).unwrap();
+        cgroups.create(b"/b", 0).unwrap();
+        // pid 0 is rejected
+        assert_eq!(cgroups.attach(b"/a", 0, 0), Err(ViewError::InvalidPath));
+        // non-root is rejected
+        assert_eq!(
+            cgroups.attach(b"/a", 7, 1000),
+            Err(ViewError::PermissionDenied)
+        );
+        cgroups.attach(b"/a", 7, 0).unwrap();
+        // moving the same pid to /b removes it from /a (single membership)
+        cgroups.attach(b"/b", 7, 0).unwrap();
+        let mut out = [0u8; 32];
+        let len = cgroups.read(b"/a/cgroup.procs", &mut out).unwrap();
+        assert_eq!(&out[..len], b"");
+        let len = cgroups.read(b"/b/cgroup.procs", &mut out).unwrap();
+        assert_eq!(&out[..len], b"7\n");
+        // pids_max boundary: cap /b at 1, second distinct pid must fail
+        cgroups.write(b"/b/pids.max", b"1\n", 0).unwrap();
+        assert_eq!(cgroups.attach(b"/b", 8, 0), Err(ViewError::LimitExceeded));
+    }
 }

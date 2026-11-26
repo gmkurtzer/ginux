@@ -691,4 +691,74 @@ mod tests {
             Err(ViewError::ReadOnly)
         );
     }
+
+    #[test]
+    fn sysfs_list_devices_truncates_to_output_capacity() {
+        let devices = [
+            DeviceView {
+                name: DeviceName::new(b"null").unwrap(),
+                kind: DeviceKind::Null,
+                major: 1,
+                minor: 3,
+            },
+            DeviceView {
+                name: DeviceName::new(b"zero").unwrap(),
+                kind: DeviceKind::Zero,
+                major: 1,
+                minor: 5,
+            },
+            DeviceView {
+                name: DeviceName::new(b"random").unwrap(),
+                kind: DeviceKind::Random,
+                major: 1,
+                minor: 8,
+            },
+        ];
+        let sys = SysFs::new(&devices, 2);
+        let pad = DeviceView {
+            name: DeviceName::new(b"pad").unwrap(),
+            kind: DeviceKind::Null,
+            major: 0,
+            minor: 0,
+        };
+        // smaller output: truncated, prefix preserved
+        let mut small = [pad; 2];
+        assert_eq!(sys.list_devices(&mut small), 2);
+        assert_eq!(small[0].name.as_bytes(), b"null");
+        assert_eq!(small[1].name.as_bytes(), b"zero");
+        // exact fit
+        let mut exact = [pad; 3];
+        assert_eq!(sys.list_devices(&mut exact), 3);
+        assert_eq!(exact[2].name.as_bytes(), b"random");
+        // larger output: untouched tail
+        let mut big = [pad; 4];
+        assert_eq!(sys.list_devices(&mut big), 3);
+        assert_eq!(big[3].name.as_bytes(), b"pad");
+        // empty output
+        assert_eq!(sys.list_devices(&mut []), 0);
+    }
+
+    #[test]
+    fn sysfs_cpu_online_pins_single_zero_and_range() {
+        let devices: [DeviceView; 0] = [];
+        let mut output = [0u8; 32];
+        // single cpu: "0\n" (no range suffix)
+        let one = SysFs::new(&devices, 1);
+        let len = one
+            .read(b"/sys/devices/system/cpu/online", &mut output)
+            .unwrap();
+        assert_eq!(&output[..len], b"0\n");
+        // zero cpus: NotFound (fail-closed)
+        let zero = SysFs::new(&devices, 0);
+        assert_eq!(
+            zero.read(b"/sys/devices/system/cpu/online", &mut output),
+            Err(ViewError::NotFound)
+        );
+        // many cpus: upper bound is count-1
+        let many = SysFs::new(&devices, 4);
+        let len = many
+            .read(b"/sys/devices/system/cpu/online", &mut output)
+            .unwrap();
+        assert_eq!(&output[..len], b"0-3\n");
+    }
 }
