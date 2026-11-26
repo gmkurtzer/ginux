@@ -793,4 +793,23 @@ mod tests {
         assert_eq!(out[0].kind, DeviceKind::Zero);
         assert_eq!(registry.views(99, &mut out), 0);
     }
+
+    #[test]
+    fn receive_rejects_small_buffer_and_reports_closed_and_empty() {
+        let mut net: IsolatedNetwork<2> = IsolatedNetwork::new();
+        // empty queue
+        assert_eq!(net.receive(&mut [0; 8]), Err(DeviceError::QueueEmpty));
+        net.send(b"hello").unwrap();
+        // buffer too small for the queued frame
+        assert_eq!(net.receive(&mut [0; 4]), Err(DeviceError::InvalidPayload));
+        // exact-fit buffer succeeds
+        let mut buf = [0; 5];
+        assert_eq!(net.receive(&mut buf), Ok(5));
+        assert_eq!(&buf, b"hello");
+        // now empty again
+        assert_eq!(net.receive(&mut [0; 8]), Err(DeviceError::QueueEmpty));
+        // closed network rejects receive
+        net.close();
+        assert_eq!(net.receive(&mut [0; 8]), Err(DeviceError::Closed));
+    }
 }
