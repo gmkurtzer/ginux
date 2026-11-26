@@ -1004,4 +1004,25 @@ mod tests {
         assert!(!balanced_arguments_allowed(302, 1, 0, 0));
         assert!(!balanced_arguments_allowed(302, 0, 100, 0));
     }
+
+    #[test]
+    fn mmap_mprotect_reject_wx_and_wait4_rejects_pid_zero() {
+        for prot in 0u64..8 {
+            let wx = prot & 2 != 0 && prot & 4 != 0;
+            assert_eq!(
+                balanced_arguments_allowed(9, 0, 0x1000, prot),
+                !wx,
+                "mmap prot {prot}"
+            );
+            assert_eq!(
+                balanced_arguments_allowed(10, 0, 0x1000, prot),
+                !wx,
+                "mprotect prot {prot}"
+            );
+        }
+        assert!(!balanced_arguments_allowed(9, 0, 0x1000, 6 | 0x100));
+        assert!(!balanced_arguments_allowed(SYS_WAIT4, 0, 0, 0));
+        assert!(balanced_arguments_allowed(SYS_WAIT4, u64::MAX, 0, 0));
+        assert!(balanced_arguments_allowed(SYS_WAIT4, 1, 0, 0));
+    }
 }
