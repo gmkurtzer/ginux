@@ -912,4 +912,35 @@ mod tests {
         assert_eq!(a.read(1, za, &mut w), Ok(5));
         assert_eq!(w, [0u8; 5]);
     }
+
+    #[test]
+    fn device_write_policy_per_kind_is_exact() {
+        let mut registry: DeviceRegistry<8, 8> = DeviceRegistry::new();
+        for (backend, name, kind) in [
+            (10u64, &b"null"[..], DeviceKind::Null),
+            (11, &b"zero"[..], DeviceKind::Zero),
+            (12, &b"rand"[..], DeviceKind::Random),
+        ] {
+            registry
+                .assign(1, backend, DeviceName::new(name).unwrap(), kind)
+                .unwrap();
+        }
+        let null = registry.open(1, b"null").unwrap();
+        let zero = registry.open(1, b"zero").unwrap();
+        let rand = registry.open(1, b"rand").unwrap();
+        // null swallows writes and reports the full length
+        assert_eq!(registry.write(1, null, b"abc"), Ok(3));
+        assert_eq!(registry.write(1, null, b""), Ok(0));
+        // zero and random are read-only surfaces
+        assert_eq!(
+            registry.write(1, zero, b"abc"),
+            Err(DeviceError::PermissionDenied)
+        );
+        assert_eq!(
+            registry.write(1, rand, b"abc"),
+            Err(DeviceError::PermissionDenied)
+        );
+        // foreign instance cannot reach the descriptor
+        assert!(registry.write(2, null, b"abc").is_err());
+    }
 }
