@@ -824,4 +824,33 @@ mod tests {
         net.close();
         assert_eq!(net.receive(&mut [0; 8]), Err(DeviceError::Closed));
     }
+
+    #[test]
+    fn views_truncate_to_output_capacity_without_overflow() {
+        let mut registry: DeviceRegistry<8, 8> = DeviceRegistry::new();
+        for i in 0..4u64 {
+            let name = [b'a' + i as u8; 4];
+            registry
+                .assign(1, 10 + i, DeviceName::new(&name).unwrap(), DeviceKind::Null)
+                .unwrap();
+        }
+        // capacity 2: only first two projected, count capped at capacity
+        let pad = DeviceView {
+            name: DeviceName::new(b"pad").unwrap(),
+            kind: DeviceKind::Null,
+            major: 0,
+            minor: 0,
+        };
+        let mut small = [pad; 2];
+        assert_eq!(registry.views(1, &mut small), 2);
+        assert_eq!(small[0].name.as_bytes(), b"aaaa");
+        assert_eq!(small[1].name.as_bytes(), b"bbbb");
+        // zero capacity projects nothing
+        let mut none: [DeviceView; 0] = [];
+        assert_eq!(registry.views(1, &mut none), 0);
+        // full capacity sees all four in assignment order
+        let mut full = [pad; 4];
+        assert_eq!(registry.views(1, &mut full), 4);
+        assert_eq!(full[3].name.as_bytes(), b"dddd");
+    }
 }
