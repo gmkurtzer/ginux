@@ -287,9 +287,10 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
 
 - Working branch: `hdae/filesystem-mediation-complete`
 - Intended base: `main`
-- Pull request: explicitly requested by the human on 2026-11-26 at the partial
-  checkpoint; open as a draft referencing issue #290 and state the unresolved
-  FS-006/FS-007 namespace race without claiming Gate 53 has passed
+- Pull request: draft https://github.com/gmkurtzer/ginux/pull/349, explicitly
+  requested by the human on 2026-11-26 at the partial checkpoint; references
+  issue #290 and states the unresolved FS-006/FS-007 namespace race without
+  claiming Gate 53 has passed
 - Planned commits: gate and traceability baseline; resolver and immutable
   snapshots; observation/directory family; safe open and descriptor authority;
   descriptor/indirect I/O; single-path mutation; two-path mutation; special
@@ -298,7 +299,8 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
 - Actual commits: `284825c5` observation-family route; `931c701a` safe-open;
   `9504a1f0` descriptor/indirect-I/O; `e74af025` single-path mutation;
   `f120a51b` two-path/resolver; `440f1ae1` special interfaces and suites;
-  `57cf8a57` immutable pathname replay; delivery-state commit pending
+  `57cf8a57` immutable pathname replay; `aa64a297` partial-delivery direction;
+  pull-request record pending commit
 
 ## Review policy and outcome
 
@@ -310,3 +312,6 @@ verify, make signed commits, push the dedicated branch, and update the one
 referencing pull request. Stop after complete exact-head evidence for explicit
 human review. Do not merge the pull request, close issue #290, or move this gate
 to `gates-done` without explicit human acceptance.
+
+Draft pull request https://github.com/gmkurtzer/ginux/pull/349 was opened against
+`main` from the dedicated branch on 2026-11-26.

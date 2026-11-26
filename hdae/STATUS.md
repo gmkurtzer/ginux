@@ -72,6 +72,9 @@
   current partial checkpoint be pushed and made into a pull request. Open it as
   a draft against `main`, reference issue #290 without a closing keyword, state
   the unresolved FS-006/FS-007 race, and keep the gate in `gates-todo`.
+- Delivery: draft pull request https://github.com/gmkurtzer/ginux/pull/349 is
+  open against `main` from `hdae/filesystem-mediation-complete`. It states the
+  partial status and must not be merged or used to close issue #290.
 
 ## Prior checkpoint
 
