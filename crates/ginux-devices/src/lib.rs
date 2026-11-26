@@ -886,4 +886,30 @@ mod tests {
         // empty output
         assert_eq!(registry.views(1, &mut []), 0);
     }
+
+    #[test]
+    fn random_reads_are_deterministic_per_state_and_zero_fills() {
+        let mut a: DeviceRegistry<4, 4> = DeviceRegistry::new();
+        a.assign(1, 10, DeviceName::new(b"rand").unwrap(), DeviceKind::Random)
+            .unwrap();
+        a.assign(1, 11, DeviceName::new(b"zero").unwrap(), DeviceKind::Zero)
+            .unwrap();
+        let ra = a.open(1, b"rand").unwrap();
+        let za = a.open(1, b"zero").unwrap();
+        let mut b: DeviceRegistry<4, 4> = DeviceRegistry::new();
+        b.assign(1, 10, DeviceName::new(b"rand").unwrap(), DeviceKind::Random)
+            .unwrap();
+        let rb = b.open(1, b"rand").unwrap();
+        let mut x = [0u8; 8];
+        let mut y = [0u8; 8];
+        assert_eq!(a.read(1, ra, &mut x), Ok(8));
+        assert_eq!(b.read(1, rb, &mut y), Ok(8));
+        assert_eq!(x, y);
+        let mut z = [0u8; 8];
+        assert_eq!(a.read(1, ra, &mut z), Ok(8));
+        assert_ne!(x, z);
+        let mut w = [0xAAu8; 5];
+        assert_eq!(a.read(1, za, &mut w), Ok(5));
+        assert_eq!(w, [0u8; 5]);
+    }
 }
