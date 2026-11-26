@@ -2134,4 +2134,37 @@ mod tests {
         assert_eq!(ChildStatus::Signaled(128).word(), 0);
         assert_eq!(ChildStatus::Signaled(255).word(), 127);
     }
+
+    #[test]
+    fn create_pipe_rejects_fd_collisions_and_needs_two_slots() {
+        let mut pipes: PipeSpace<2, 4, 2> = PipeSpace::new();
+        let id = pipes.create_pipe(1, 0, 1, false).unwrap();
+        assert_eq!(pipes.pipe_ends(id), 2);
+        // colliding with an existing read or write end
+        assert_eq!(
+            pipes.create_pipe(1, 0, 2, false),
+            Err(ProcessError::InvalidState)
+        );
+        assert_eq!(
+            pipes.create_pipe(1, 2, 1, false),
+            Err(ProcessError::InvalidState)
+        );
+        // one free slot is not enough for a pair: must fail without consuming a pipe
+        let mut tight: PipeSpace<2, 3, 2> = PipeSpace::new();
+        let a = tight.create_pipe(1, 0, 1, false).unwrap();
+        assert_eq!(
+            tight.create_pipe(1, 2, 3, false),
+            Err(ProcessError::DescriptorFull)
+        );
+        assert_eq!(tight.pipe_ends(a), 2);
+        assert_eq!(tight.active_pipes(), 1);
+        // exactly two free slots fit one more pipe
+        let id2 = pipes.create_pipe(1, 2, 3, false).unwrap();
+        assert_ne!(id, id2);
+        assert_eq!(pipes.active_pipes(), 2);
+        assert_eq!(
+            pipes.create_pipe(1, 4, 5, false),
+            Err(ProcessError::DescriptorFull)
+        );
+    }
 }
