@@ -2187,4 +2187,29 @@ mod tests {
         // unknown task scrubs nothing
         assert_eq!(pipes.exec_scrub(99), 0);
     }
+
+    #[test]
+    fn unshare_copies_shared_table_and_solo_is_noop() {
+        let mut pipes: PipeSpace<4, 8, 4> = PipeSpace::new();
+        let id = pipes.create_pipe(1, 0, 1, false).unwrap();
+        assert_eq!(pipes.pipe_ends(id), 2);
+        // solo task: unshare must be a no-op (no extra retain, fds intact)
+        pipes.unshare(1).unwrap();
+        assert_eq!(pipes.pipe_ends(id), 2);
+        assert!(pipes.lookup(1, 0).is_some());
+        // share with task 2, then unshare task 1: private copy keeps both ends
+        pipes.share(2, 1).unwrap();
+        pipes.unshare(1).unwrap();
+        assert!(pipes.lookup(1, 0).is_some());
+        assert!(pipes.lookup(1, 1).is_some());
+        assert_eq!(pipes.pipe_ends(id), 4);
+        // task 2 still shares the original table; closing its ends frees only its refs
+        pipes.close(2, 0).unwrap();
+        pipes.close(2, 1).unwrap();
+        assert_eq!(pipes.pipe_ends(id), 2);
+        assert!(pipes.lookup(1, 0).is_some());
+        // unknown task: Ok, nothing allocated
+        pipes.unshare(99).unwrap();
+        assert_eq!(pipes.task_fds(99), 0);
+    }
 }
