@@ -3197,4 +3197,24 @@ failure = "stop"
             .is_err());
         assert_eq!(c.memory_mib, 16);
     }
+
+    #[test]
+    fn override_arms_apply_values_and_reject_unknown() {
+        let mut c = InstanceConfig::parse(VALID.as_bytes()).unwrap();
+        c.apply_override(b"instance.workdir", b"\"/work\"").unwrap();
+        assert_eq!(c.workdir.as_bytes(), b"/work");
+        c.apply_override(b"instance.environment", b"[\"A=1\"]")
+            .unwrap();
+        assert_eq!(c.environment.as_slice().len(), 1);
+        c.apply_override(b"contract.syscalls.control", b"\"selective\"")
+            .unwrap();
+        assert_eq!(c.dispatch_mode, DispatchMode::Selective);
+        // catalog is pinned to the compiled CATALOG_VERSION: valid re-set ok, wrong version rejected
+        c.apply_override(b"contract.catalog", b"2").unwrap();
+        assert_eq!(c.contract_catalog_version, 2);
+        assert!(c.apply_override(b"contract.catalog", b"3").is_err());
+        assert_eq!(c.contract_catalog_version, 2);
+        assert!(c.apply_override(b"no.such.key", b"\"x\"").is_err());
+        assert!(c.apply_override(b"contract.digest", b"\"x\"").is_err());
+    }
 }
