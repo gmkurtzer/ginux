@@ -3120,4 +3120,29 @@ failure = "stop"
         c.memory_mib = 15;
         assert!(c.validate().is_err());
     }
+
+    #[test]
+    fn validate_pins_identifier_and_hostname_edges() {
+        let src = VALID.replace(
+            "[resources]",
+            "[identity]\nhostname = \"host.example\"\n\n[resources]",
+        );
+        let mut c = InstanceConfig::parse(src.as_bytes()).unwrap();
+        assert_eq!(c.hostname.as_bytes(), b"host.example");
+        assert!(c.validate().is_ok());
+        // id edges: empty and space rejected, alnum accepted
+        c.id = Text::from_bytes(b"").unwrap();
+        assert!(c.validate().is_err());
+        c.id = Text::from_bytes(b"bad id").unwrap();
+        assert!(c.validate().is_err());
+        c.id = Text::from_bytes(b"demo").unwrap();
+        assert!(c.validate().is_ok());
+        // hostname edges are validated independently of id
+        c.hostname = Text::from_bytes(b"bad host").unwrap();
+        assert!(c.validate().is_err());
+        c.hostname = Text::from_bytes(b"").unwrap();
+        assert!(c.validate().is_err());
+        c.hostname = Text::from_bytes(b"host-2.example").unwrap();
+        assert!(c.validate().is_ok());
+    }
 }
