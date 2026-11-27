@@ -3106,4 +3106,18 @@ failure = "stop"
         assert!(!runtime.resources_acquired());
         assert!(!runtime.managed_task());
     }
+
+    #[test]
+    fn validate_enforces_vcpu_and_memory_bounds() {
+        let mut c = InstanceConfig::parse(VALID.as_bytes()).unwrap();
+        c.vcpus = 0;
+        assert!(c.validate().is_err());
+        c.vcpus = 65;
+        assert!(c.validate().is_err());
+        c.vcpus = 64;
+        c.memory_mib = 16;
+        assert!(c.validate().is_ok());
+        c.memory_mib = 15;
+        assert!(c.validate().is_err());
+    }
 }
