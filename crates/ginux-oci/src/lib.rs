@@ -842,4 +842,19 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
         fs::remove_dir_all(outside).unwrap();
     }
+
+    #[test]
+    fn select_manifest_requires_linux_amd64_no_variant() {
+        let good = serde_json::json!({"manifests":[{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":1,"platform":{"os":"linux","architecture":"amd64"}}]});
+        assert!(select_manifest(&good).unwrap().is_some());
+        // wrong OS must not be selected even if arch matches
+        let bad_os = serde_json::json!({"manifests":[{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":1,"platform":{"os":"windows","architecture":"amd64"}}]});
+        assert!(select_manifest(&bad_os).is_err());
+        // wrong arch must not be selected even if os matches
+        let bad_arch = serde_json::json!({"manifests":[{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":1,"platform":{"os":"linux","architecture":"arm64"}}]});
+        assert!(select_manifest(&bad_arch).is_err());
+        // non-empty variant must not match the plain amd64 slot
+        let variant = serde_json::json!({"manifests":[{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":1,"platform":{"os":"linux","architecture":"amd64","variant":"v8"}}]});
+        assert!(select_manifest(&variant).is_err());
+    }
 }
