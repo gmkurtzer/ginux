@@ -2187,4 +2187,24 @@ mod tests {
         // unknown task scrubs nothing
         assert_eq!(pipes.exec_scrub(99), 0);
     }
+
+    #[test]
+    fn pipe_ends_reports_zero_for_invalid_and_dead_pipes() {
+        let mut pipes: PipeSpace<2, 8, 2> = PipeSpace::new();
+        // pipe 0 is always invalid
+        assert_eq!(pipes.pipe_ends(0), 0);
+        // out-of-range pipe ids: far beyond and exactly one past the table
+        assert_eq!(pipes.pipe_ends(99), 0);
+        assert_eq!(pipes.pipe_ends(3), 0);
+        // create a pipe, verify ends=2
+        let id = pipes.create_pipe(1, 6, 7, false).unwrap();
+        assert_eq!(pipes.pipe_ends(id), 2);
+        // close both ends -> pipe freed, ends report 0
+        pipes.close(1, 6).unwrap();
+        pipes.close(1, 7).unwrap();
+        assert_eq!(pipes.pipe_ends(id), 0);
+        // re-create at same slot, verify fresh count
+        let id2 = pipes.create_pipe(1, 3, 4, false).unwrap();
+        assert_eq!(pipes.pipe_ends(id2), 2);
+    }
 }
