@@ -3180,4 +3180,21 @@ failure = "stop"
         assert!(c.apply_override(b"instance.id", b"bare").is_err());
         assert_eq!(c.id.as_bytes(), b"other");
     }
+
+    #[test]
+    fn memory_override_enforces_exact_bounds() {
+        let mut c = InstanceConfig::parse(VALID.as_bytes()).unwrap();
+        c.apply_override(b"resources.memory_mib", b"256").unwrap();
+        assert_eq!(c.memory_mib, 256);
+        // exact lower bound accepted, one below rejected without partial mutation
+        c.apply_override(b"resources.memory_mib", b"16").unwrap();
+        assert_eq!(c.memory_mib, 16);
+        assert!(c.apply_override(b"resources.memory_mib", b"15").is_err());
+        assert_eq!(c.memory_mib, 16);
+        // non-numeric values fail closed
+        assert!(c
+            .apply_override(b"resources.memory_mib", b"\"256\"")
+            .is_err());
+        assert_eq!(c.memory_mib, 16);
+    }
 }
