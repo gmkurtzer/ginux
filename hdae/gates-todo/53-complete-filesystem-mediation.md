@@ -125,12 +125,12 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
 - [x] Completed all locally runnable Gate 53 suites, security mutations,
       aggregate regressions, recovery, multi-instance, systemd, and RPM
       lifecycle verification at commit `27eb1777`.
+- [x] Exact-head workflow run 45923555245 passed `changes`,
+      `launch-integration`, and `static-and-unit` at `90714388`, including the
+      complete privileged native-supervision and filesystem commit schedule.
 
 ## Remaining work
 
-- [ ] Push the complete branch, update pull request #349 to close issue #290 on
-      merge, and run the required privileged native-supervision and complete CI
-      matrix at the exact final head.
 - [ ] Stop for human security review. Do not merge, close issue #290, or move
       this gate to `gates-done` before explicit acceptance.
 
@@ -326,7 +326,11 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
 - Local `sudo make test-native-supervision` is not runnable because this macOS
   host requires an interactive sudo password. The required PR workflow runs
   that privileged suite, including `test-native-fs-commit.py`, on Linux and is
-  the remaining exact-head evidence.
+  the authoritative exact-head evidence.
+- Exact-head workflow run 45923555245 at `90714388` passes `changes` in 11
+  seconds, `launch-integration` in 1 minute 21 seconds, and `static-and-unit`
+  in 3 minutes 31 seconds. This includes the complete privileged
+  native-supervision suite unavailable locally.
 
 ## Decisions and limitations
 
@@ -394,4 +398,6 @@ human review. Do not merge the pull request, close issue #290, or move this gate
 to `gates-done` without explicit human acceptance.
 
 Draft pull request https://github.com/gmkurtzer/ginux/pull/349 was opened against
-`main` from the dedicated branch on 2026-11-26.
+`main` from the dedicated branch on 2026-11-26. Gate 53 is technically passed
+and the pull request resolves issue #290 with `Closes #290`; it remains pending
+the final docs-only checkpoint CI and explicit human security acceptance.

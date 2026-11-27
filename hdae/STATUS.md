@@ -35,19 +35,23 @@
 - Local `sudo make test-native-supervision` is unavailable because the macOS
   host requires an interactive sudo password. Required PR CI supplies this
   privileged Linux run, including the deterministic native filesystem schedule.
+- Exact-head workflow run 45923555245 passes `changes`, `launch-integration`,
+  and `static-and-unit` at `90714388`, including complete privileged native
+  supervision. Gate 53 is technically passed.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
 - Open decisions or limitations: the host kernel remains trusted while the
   commit barrier holds the namespace generation stable; this is not complete
   VFS compatibility or a hardware boundary. Gate 53 may not merge, close issue
-  #290, or move to `gates-done` before exact-head CI and explicit acceptance.
-- Exact next action: commit this Gate 53 checkpoint, push the branch, update
-  pull request #349 with `Closes #290`, wait for exact-head required CI, repair
-  any failure, mark the PR ready, and stop for human security review.
+  #290, or move to `gates-done` before explicit acceptance.
+- Exact next action: commit and push this final evidence-only checkpoint, wait
+  for its exact-head required CI, mark pull request #349 ready, and stop for
+  human security review.
 - Delivery: draft pull request https://github.com/gmkurtzer/ginux/pull/349 is
-  open against `main` from `hdae/filesystem-mediation-complete`; it must not be
-  merged before the human accepts this checkpoint.
+  open against `main` from `hdae/filesystem-mediation-complete`, is mergeable,
+  and contains `Closes #290`; it must not be merged before the human accepts
+  this checkpoint.
 
 ## Prior checkpoint
 
