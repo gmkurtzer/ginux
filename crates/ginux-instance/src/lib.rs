@@ -3168,4 +3168,16 @@ failure = "stop"
         c.hostname = Text::from_bytes(b"host-2.example").unwrap();
         assert!(c.validate().is_ok());
     }
+
+    #[test]
+    fn override_instance_id_and_reject_unknown() {
+        let mut c = InstanceConfig::parse(VALID.as_bytes()).unwrap();
+        c.apply_override(b"instance.id", b"\"other\"").unwrap();
+        assert_eq!(c.id.as_bytes(), b"other");
+        // unknown keys fail closed without partial mutation
+        assert!(c.apply_override(b"instance.nope", b"\"x\"").is_err());
+        // unquoted value is a syntax error, not a silent accept
+        assert!(c.apply_override(b"instance.id", b"bare").is_err());
+        assert_eq!(c.id.as_bytes(), b"other");
+    }
 }
