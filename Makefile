@@ -11,7 +11,7 @@ BASELINE := target/$(X86_TARGET)/release/baseline-runner
 RUNTIME_FIXTURE := target/$(X86_TARGET)/release/runtime-fixture
 PROCESS_NATIVE_FIXTURE := target/$(X86_TARGET)/release/process-native-fixture
 
-.PHONY: doctor host-image-fetch host-image-verify host-boot-test run-host host-run host-reset test-host-lifecycle image-helper-fetch image-prepare instance-image-fetch instance-image-verify instance-image-prepare systemd-image-fetch systemd-image-verify systemd-image-prepare test-image test-oci-image test-generic-oci test-oci-layers test-vfs test-native-vfs image-cache-clean build check-name check-instance-terminology check-security-inventory check-security-findings check test-cli test-ci-changes fs-policy-doc contract-doc test-contract test-contract-runtime test test-unit test-intercept test-runtime test-config test-instance test-instance-terminology test-process build-process-fixtures test-process-native test-devices test-kernel-views test-systemd test-systemd-console-audit test-systemd-live test-systemd-interactive test-multi-instance test-gate19-native-examples test-gate975-network test-gate975-hooks test-gate125-lock test-cgroup test-block test-network test-security test-recovery test-allocator test-allocator-linux test-allocator-rocky allocator-report check-architecture-doc check-security-doc fuzz-security test-bench-compare test-gate15-report bench-prepare bench bench-baseline bench-compare bench-systemd bench-report bench-block bench-network bench-modes-prepare bench-modes bench-modes-report rpm-source rpm test-rpm-metadata test-rpm demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 demo-gate-5 demo-gate-6 demo-gate-7 demo-gate-8 demo-gate-9 demo-gate-9.5 demo-gate-9.75 demo-gate-10 demo-gate-10.25 demo-gate-10.5 demo-gate-11 demo-gate-12 demo-gate-12.1 demo-gate-12.25 demo-gate-12.5 demo-gate-13 demo-gate-15 demo-gate-17 demo-gate-19 demo-gate-25 demo-gate-26 clean
+.PHONY: doctor host-image-fetch host-image-verify host-boot-test run-host host-run host-reset test-host-lifecycle image-helper-fetch image-prepare instance-image-fetch instance-image-verify instance-image-prepare systemd-image-fetch systemd-image-verify systemd-image-prepare test-image test-oci-image test-generic-oci test-oci-layers test-vfs test-native-vfs test-fs-races test-fs-mutations test-fs-descriptors test-fs-special test-fs-indirect-io test-fs-faults image-cache-clean build check-name check-instance-terminology check-security-inventory check-security-findings check test-cli test-ci-changes fs-policy-doc contract-doc test-contract test-contract-runtime test test-unit test-intercept test-runtime test-config test-instance test-instance-terminology test-process build-process-fixtures test-process-native test-devices test-kernel-views test-systemd test-systemd-console-audit test-systemd-live test-systemd-interactive test-multi-instance test-gate19-native-examples test-gate975-network test-gate975-hooks test-gate125-lock test-cgroup test-block test-network test-security test-recovery test-allocator test-allocator-linux test-allocator-rocky allocator-report check-architecture-doc check-security-doc fuzz-security test-bench-compare test-gate15-report bench-prepare bench bench-baseline bench-compare bench-systemd bench-report bench-block bench-network bench-modes-prepare bench-modes bench-modes-report rpm-source rpm test-rpm-metadata test-rpm demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 demo-gate-5 demo-gate-6 demo-gate-7 demo-gate-8 demo-gate-9 demo-gate-9.5 demo-gate-9.75 demo-gate-10 demo-gate-10.25 demo-gate-10.5 demo-gate-11 demo-gate-12 demo-gate-12.1 demo-gate-12.25 demo-gate-12.5 demo-gate-13 demo-gate-15 demo-gate-17 demo-gate-19 demo-gate-25 demo-gate-26 clean
 
 doctor:
 	@./scripts/doctor.sh
@@ -243,7 +243,32 @@ test-vfs: build instance-image-prepare
 	@./scripts/with-rocky-host.sh ./scripts/test-vfs.sh
 
 test-native-vfs: build instance-image-prepare
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/fs-gate53 cargo test -p ginux-fs-policy --test gate53_suites fs_t01_
 	@./scripts/with-rocky-host.sh ./scripts/test-native-vfs.sh
+
+test-fs-races:
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/fs-gate53 cargo test -p ginux-fs-policy --test gate53_suites fs_t02_
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/fs-gate53 cargo test -p ginux-fs-policy --test host_effect_oracle acquired_object_survives_a_deterministic_path_replacement_race
+
+test-fs-mutations:
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/fs-gate53 cargo test -p ginux-fs-policy --test gate53_suites fs_t03_
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/fs-gate53 cargo test -p ginux-vfs create_unlink_and_failures_are_deterministic
+
+test-fs-descriptors:
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/fs-gate53 cargo test -p ginux-fs-policy --test gate53_suites fs_t04_
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/fs-gate53 cargo test -p ginux-vfs descriptor
+
+test-fs-special:
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/fs-gate53 cargo test -p ginux-fs-policy --test gate53_suites fs_t05_
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/fs-gate53 cargo test -p ginux-kernel-views -p ginux-devices
+
+test-fs-indirect-io:
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/fs-gate53 cargo test -p ginux-fs-policy --test gate53_suites fs_t06_
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/fs-gate53 cargo test -p ginux-runtime enforces_copy_and_mapping_boundaries
+
+test-fs-faults:
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/fs-gate53 cargo test -p ginux-fs-policy --test gate53_suites fs_t07_
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/fs-gate53 cargo test -p ginux-vfs failures
 
 test: check test-cli test-gate15-report test-host-lifecycle test-unit test-intercept test-runtime test-config test-instance test-image test-devices test-process test-kernel-views
 
@@ -302,6 +327,7 @@ test-security: check-security-doc
 	@printf '%s\n' 'test-security: PASS (malformed input, fuzz, authority, denial, host-view, range, exhaustion, teardown)'
 
 test-recovery:
+	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/fs-gate53 cargo test -p ginux-fs-policy --test gate53_suites fs_t09_
 	@$(MAKE) test-systemd-console-audit
 	@$(MAKE) test-native-vfs
 	@$(MAKE) test-contract-runtime
@@ -474,5 +500,6 @@ test-native-supervision:
 	python3 scripts/test-native-replay-signal.py $(GINUX) .artifacts/launch/native-fixture
 	python3 scripts/test-native-close-range-signal.py $(GINUX) .artifacts/launch/native-fixture
 	python3 scripts/test-native-close-range-gap.py $(GINUX) .artifacts/launch/native-fixture
+	python3 scripts/test-native-fs-commit.py $(GINUX) .artifacts/launch/native-fixture
 	python3 scripts/test-native-network-snapshot.py $(GINUX) .artifacts/launch/native-fixture
 	python3 scripts/test-native-unix-send-snapshot.py $(GINUX) .artifacts/launch/native-fixture

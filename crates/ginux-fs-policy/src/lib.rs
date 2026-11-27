@@ -1,5 +1,7 @@
 #![no_std]
 
+pub mod namespace_commit;
+
 #[cfg(test)]
 mod x86_64_filesystem_abi;
 
@@ -225,6 +227,23 @@ impl CallContext {
             )
             && self.contract.permits()
     }
+
+    pub fn complete_for_descriptor(self, required: Rights) -> bool {
+        self.abi == X86_64_AUDIT_ARCH
+            && self.task.host != 0
+            && self.task.virtual_id != 0
+            && self.task.generation != 0
+            && self.instance.identity != 0
+            && self.instance.lifetime != 0
+            && self.authority.descriptor_table.kind == CapabilityKind::DescriptorTable
+            && self.authority.descriptor_table.authorizes(
+                self.instance.identity,
+                self.instance.lifetime,
+                self.authority.descriptor_generation,
+                required,
+            )
+            && self.contract.permits()
+    }
 }
 
 pub const fn identity_token(bytes: &[u8]) -> u64 {
@@ -249,6 +268,62 @@ pub enum Owner {
     ProcessLane,
     VirtualKernel,
     ExplicitDeny,
+}
+
+/// Ordered Gate 53 operation families.  The order is security-significant:
+/// tests may enable a family only after every earlier family has retained its
+/// positive and negative evidence.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum OperationFamily {
+    Observation,
+    SafeOpen,
+    DescriptorIo,
+    SinglePathMutation,
+    TwoPathMutation,
+    Special,
+}
+
+impl OperationFamily {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Observation => "observation",
+            Self::SafeOpen => "safe-open",
+            Self::DescriptorIo => "descriptor-io",
+            Self::SinglePathMutation => "single-path",
+            Self::TwoPathMutation => "two-path",
+            Self::Special => "special",
+        }
+    }
+}
+
+/// The executor selected by the filesystem authority boundary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Executor {
+    /// Continue the tracee syscall.  The Linux kernel resolves it against the
+    /// tracee's already-pinned chroot/cwd/open-file objects; the supervisor
+    /// never converts the authorized request back into a host pathname.
+    ConfinedKernel,
+    /// The operation belongs to another explicit Ginux authority owner.
+    AccountableExternal,
+    /// The interface is unsupported and must fail before a host effect.
+    ExplicitDeny,
+}
+
+impl Executor {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::ConfinedKernel => "confined-kernel",
+            Self::AccountableExternal => "accountable-external",
+            Self::ExplicitDeny => "explicit-deny",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Route {
+    pub operation: &'static Operation,
+    pub family: OperationFamily,
+    pub executor: Executor,
 }
 
 impl Owner {
@@ -286,6 +361,21 @@ macro_rules! op {
             authority: $authority,
             executor: $executor,
             unsupported_errno: ENOSYS,
+        }
+    };
+}
+
+macro_rules! op_errno {
+    ($number:literal, $name:literal, $owner:ident, $arguments:literal, $flags:literal, $authority:literal, $executor:literal, $errno:literal) => {
+        Operation {
+            syscall: $number,
+            name: $name,
+            owner: Owner::$owner,
+            arguments: $arguments,
+            flags: $flags,
+            authority: $authority,
+            executor: $executor,
+            unsupported_errno: $errno,
         }
     };
 }
@@ -762,14 +852,15 @@ pub static OPERATIONS: &[Operation] = &[
         "instance root authority",
         "explicit denial"
     ),
-    op!(
+    op_errno!(
         162,
         "sync",
         ExplicitDeny,
         "none",
         "none",
         "host-global filesystem authority",
-        "explicit denial"
+        "explicit denial",
+        1
     ),
     op!(
         163,
@@ -783,20 +874,20 @@ pub static OPERATIONS: &[Operation] = &[
     op!(
         165,
         "mount",
-        ExplicitDeny,
+        VirtualKernel,
         "source,target,type,flags,data",
         "mount flags",
         "mount capability",
-        "explicit denial"
+        "virtual mount view"
     ),
     op!(
         166,
         "umount2",
-        ExplicitDeny,
+        VirtualKernel,
         "target,flags",
         "unmount flags",
         "mount capability",
-        "explicit denial"
+        "virtual mount view"
     ),
     op!(
         167,
@@ -1338,14 +1429,15 @@ pub static OPERATIONS: &[Operation] = &[
         "opaque handle authority",
         "explicit denial"
     ),
-    op!(
+    op_errno!(
         306,
         "syncfs",
         ExplicitDeny,
         "fd",
         "none",
         "host-global filesystem authority",
-        "explicit denial"
+        "explicit denial",
+        1
     ),
     op!(
         313,
@@ -1634,6 +1726,113 @@ pub fn operation(syscall: u64) -> Option<&'static Operation> {
         .find(|operation| operation.syscall == syscall)
 }
 
+/// Const lane classifier used by the freestanding dispatch table.  The unit
+/// test below pins it to `OPERATIONS`, so this list cannot drift silently.
+pub const fn filesystem_lane_owns(syscall: u64) -> bool {
+    matches!(
+        syscall,
+        2 | 4
+            | 6
+            | 21
+            | 76
+            | 79
+            | 80
+            | 82..=90
+            | 92
+            | 94
+            | 132
+            | 133
+            | 137
+            | 188
+            | 189
+            | 191
+            | 192
+            | 194
+            | 195
+            | 197
+            | 198
+            | 257..=269
+            | 280
+            | 316
+            | 332
+            | 437
+            | 439
+            | 452
+    )
+}
+
+/// Bit set for each syscall argument that native supervision must replace
+/// with one supervisor-owned immutable C-string snapshot. This includes the
+/// filesystem lane plus admitted executable replacement and inotify paths.
+/// `getcwd` is the only filesystem-lane call without an input pathname.
+pub const fn path_snapshot_arguments(syscall: u64) -> u8 {
+    match syscall {
+        2 | 4 | 6 | 21 | 59 | 76 | 80 | 83 | 84 | 85 | 87 | 89 | 90 | 92 | 94 | 132 | 133 | 137
+        | 194 | 195 => 1 << 0,
+        82 | 86 | 88 | 188 | 189 | 191 | 192 | 197 | 198 => (1 << 0) | (1 << 1),
+        254 | 257 | 258 | 259 | 260 | 261 | 262 | 263 | 267 | 268 | 269 | 280 | 322 | 332 | 437
+        | 439 | 452 => 1 << 1,
+        264 | 265 | 316 => (1 << 1) | (1 << 3),
+        266 => (1 << 0) | (1 << 2),
+        _ => 0,
+    }
+}
+
+/// Path arguments for which Linux defines a null-pointer descriptor form.
+/// They remain part of the immutable snapshot plan when non-null, while the
+/// null value itself is ABI data and must be replayed unchanged.
+pub const fn nullable_path_snapshot_arguments(syscall: u64) -> u8 {
+    match syscall {
+        280 => 1 << 1,
+        _ => 0,
+    }
+}
+
+pub const fn operation_family(operation: &Operation) -> OperationFamily {
+    match operation.owner {
+        Owner::DescriptorCore => OperationFamily::DescriptorIo,
+        Owner::ProcessLane | Owner::VirtualKernel | Owner::ExplicitDeny => OperationFamily::Special,
+        Owner::FilesystemLane => match operation.syscall {
+            // Two-path calls are kept separate even when one form is an
+            // older ABI spelling.  Every endpoint and replacement object is
+            // independently resolved by the same kernel operation.
+            82 | 86 | 264 | 265 | 316 => OperationFamily::TwoPathMutation,
+            // Opening returns descriptor authority.  `creat` is an open
+            // spelling, not a generic single-path mutation.
+            2 | 85 | 257 | 437 => OperationFamily::SafeOpen,
+            // Read-only namespace and metadata observation.
+            4 | 6 | 21 | 79 | 89 | 137 | 191 | 192 | 194 | 195 | 262 | 267 | 332 | 439 => {
+                OperationFamily::Observation
+            }
+            _ => OperationFamily::SinglePathMutation,
+        },
+    }
+}
+
+pub const fn operation_executor(operation: &Operation) -> Executor {
+    match operation.owner {
+        Owner::FilesystemLane => Executor::ConfinedKernel,
+        Owner::ExplicitDeny => Executor::ExplicitDeny,
+        Owner::DescriptorCore | Owner::ProcessLane | Owner::VirtualKernel => {
+            Executor::AccountableExternal
+        }
+    }
+}
+
+/// Return the one accountable route for any pinned filesystem-capable ABI
+/// entry.  Unknown ABI values and unknown syscalls never acquire a route.
+pub fn accountable_route(context: &CallContext) -> Result<Route, i32> {
+    if context.abi != X86_64_AUDIT_ARCH {
+        return Err(ENOSYS);
+    }
+    let operation = operation(context.syscall).ok_or(ENOSYS)?;
+    Ok(Route {
+        operation,
+        family: operation_family(operation),
+        executor: operation_executor(operation),
+    })
+}
+
 /// Fail-closed inventory lookup for the filesystem lane. Unknown ABI entries
 /// cannot acquire a default owner or host executor.
 pub fn filesystem_operation(context: &CallContext) -> Result<&'static Operation, i32> {
@@ -1643,6 +1842,50 @@ pub fn filesystem_operation(context: &CallContext) -> Result<&'static Operation,
     operation(context.syscall)
         .filter(|operation| operation.owner == Owner::FilesystemLane)
         .ok_or(ENOSYS)
+}
+
+/// Validate a filesystem-lane continuation.  The tracee's root/cwd/file
+/// objects are already held by the kernel, so a successful result authorizes
+/// that exact syscall continuation; it never authorizes a supervisor reopen.
+pub fn confined_kernel_route(
+    context: &CallContext,
+    confinement_permits: bool,
+) -> Result<Route, i32> {
+    if !filesystem_hook_authorized(context, confinement_permits) {
+        return Err(ENOSYS);
+    }
+    let route = accountable_route(context)?;
+    if route.executor != Executor::ConfinedKernel {
+        return Err(ENOSYS);
+    }
+    Ok(route)
+}
+
+/// Rights required at the descriptor-table boundary. The kernel retains the
+/// per-open-file access mode and resolves the numeric descriptor atomically;
+/// this map prevents an alternate API family from bypassing the operation's
+/// table-level authority.
+pub const fn descriptor_required_rights(context: &CallContext) -> Rights {
+    match context.syscall {
+        1 | 18 | 20 | 74 | 75 | 77 | 91 | 93 | 190 | 199 | 296 | 328 => Rights::WRITE,
+        40 | 275 | 326 => Rights::READ.union(Rights::WRITE),
+        9 if context.arguments[2] & 2 != 0 && context.arguments[3] & 1 != 0 => {
+            Rights::READ.union(Rights::WRITE)
+        }
+        22 | 32 | 33 | 213 | 232 | 233 | 291 | 292 | 293 | 294 | 319 | 435 | 436 => Rights::CREATE,
+        5 | 8 | 16 | 72 | 73 | 138 | 221 | 451 => Rights::METADATA,
+        _ => Rights::READ,
+    }
+}
+
+pub fn descriptor_kernel_route(context: &CallContext) -> Result<Route, i32> {
+    let route = accountable_route(context)?;
+    if route.operation.owner != Owner::DescriptorCore
+        || !context.complete_for_descriptor(descriptor_required_rights(context))
+    {
+        return Err(ENOSYS);
+    }
+    Ok(route)
 }
 
 /// Shared fail-closed guard for every future filesystem hook. Inventory
@@ -1790,7 +2033,14 @@ mod tests {
             assert!(!operation.flags.is_empty());
             assert!(!operation.authority.is_empty());
             assert!(!operation.executor.is_empty());
-            assert_eq!(operation.unsupported_errno, ENOSYS);
+            assert_eq!(
+                operation.unsupported_errno,
+                if matches!(operation.syscall, 162 | 306) {
+                    1
+                } else {
+                    ENOSYS
+                }
+            );
             assert!(!OPERATIONS[..index]
                 .iter()
                 .any(|other| other.syscall == operation.syscall));
@@ -1812,15 +2062,95 @@ mod tests {
                 Some(Owner::FilesystemLane)
             );
         }
+        for operation in OPERATIONS {
+            assert_eq!(
+                filesystem_lane_owns(operation.syscall),
+                operation.owner == Owner::FilesystemLane,
+                "const filesystem owner drift for {}",
+                operation.name
+            );
+        }
         for syscall in [
-            155, 161, 162, 165, 179, 206, 209, 300, 304, 313, 425, 426, 427, 428, 438, 442, 444,
-            445, 446, 457, 458,
+            155, 161, 162, 179, 206, 209, 300, 304, 313, 425, 426, 427, 428, 438, 442, 444, 445,
+            446, 457, 458,
         ] {
             assert_eq!(
                 operation(syscall).map(|entry| entry.owner),
                 Some(Owner::ExplicitDeny)
             );
         }
+        for syscall in [165, 166] {
+            assert_eq!(
+                operation(syscall).map(|entry| entry.owner),
+                Some(Owner::VirtualKernel)
+            );
+        }
+    }
+
+    #[test]
+    fn operation_families_follow_the_gate_order() {
+        for (syscall, expected) in [
+            (4, OperationFamily::Observation),
+            (2, OperationFamily::SafeOpen),
+            (0, OperationFamily::DescriptorIo),
+            (83, OperationFamily::SinglePathMutation),
+            (316, OperationFamily::TwoPathMutation),
+            (165, OperationFamily::Special),
+        ] {
+            let operation = operation(syscall).unwrap();
+            assert_eq!(operation_family(operation), expected);
+        }
+        for operation in OPERATIONS {
+            let context = CallContext {
+                syscall: operation.syscall,
+                ..path_admission_context()
+            };
+            let route = accountable_route(&context).unwrap();
+            assert_eq!(route.operation.syscall, operation.syscall);
+            assert_eq!(route.executor, operation_executor(operation));
+        }
+    }
+
+    #[test]
+    fn descriptor_routes_require_current_table_and_api_equivalent_rights() {
+        let mut context = path_admission_context();
+        context.syscall = 0;
+        context.authority.descriptor_table = Capability::new(
+            CapabilityKind::DescriptorTable,
+            context.instance.identity,
+            context.instance.lifetime,
+            context.authority.descriptor_generation,
+            ObjectId {
+                device: context.instance.identity,
+                inode: context.authority.descriptor_generation,
+            },
+            Rights::LOOKUP
+                .union(Rights::READ)
+                .union(Rights::WRITE)
+                .union(Rights::CREATE)
+                .union(Rights::METADATA),
+        );
+        assert!(descriptor_kernel_route(&context).is_ok());
+
+        context.syscall = 9;
+        context.arguments[2] = 2;
+        context.arguments[3] = 1;
+        assert_eq!(
+            descriptor_required_rights(&context),
+            Rights::READ.union(Rights::WRITE)
+        );
+        assert!(descriptor_kernel_route(&context).is_ok());
+
+        context.authority.descriptor_generation += 1;
+        assert!(descriptor_kernel_route(&context).is_err());
+
+        context = path_admission_context();
+        context.syscall = 425;
+        assert_eq!(
+            accountable_route(&context).unwrap().executor,
+            Executor::ExplicitDeny
+        );
+        assert!(descriptor_kernel_route(&context).is_err());
     }
 
     #[test]
@@ -2005,5 +2335,32 @@ mod tests {
             inode: 9
         }
         .is_available());
+    }
+
+    #[test]
+    fn every_filesystem_path_shape_has_an_immutable_snapshot_plan() {
+        for operation in OPERATIONS
+            .iter()
+            .filter(|operation| operation.owner == Owner::FilesystemLane)
+        {
+            assert_eq!(
+                operation.syscall == 79,
+                path_snapshot_arguments(operation.syscall) == 0,
+                "syscall {}",
+                operation.syscall
+            );
+        }
+        for syscall in [82, 86, 88, 188, 189, 191, 192, 197, 198, 264, 265, 266, 316] {
+            assert_eq!(
+                path_snapshot_arguments(syscall).count_ones(),
+                2,
+                "syscall {syscall}"
+            );
+        }
+        assert_eq!(path_snapshot_arguments(59), 1 << 0);
+        assert_eq!(path_snapshot_arguments(254), 1 << 1);
+        assert_eq!(path_snapshot_arguments(322), 1 << 1);
+        assert_eq!(nullable_path_snapshot_arguments(280), 1 << 1);
+        assert_eq!(nullable_path_snapshot_arguments(257), 0);
     }
 }

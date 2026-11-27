@@ -174,6 +174,11 @@ replace it.
 51. **Gate-ledger reconciliation**: verify current `main`, reconcile every
     technically delivered open gate, preserve locked history, and present one
     consolidated human checkpoint before Gate 43 execution.
+53. **Complete filesystem mediation**: satisfy issue #290's complete FS-001
+    through FS-019 boundary across all x86-64 filesystem-capable entries,
+    enabling operation families in evidence-gated order and proving FS-T01
+    through FS-T09 with independent host-effect oracles before human security
+    review.
 
 Gates are stored in `hdae/gates-todo/` and remain there until they pass and are
 accepted at their checkpoint. Closed gate records move unchanged to
@@ -255,6 +260,8 @@ define their expected result.
   passing it does not by itself authorize changing the default allocator.
 - Shared-network socket policy remains attached to the underlying socket object
   across descriptor aliases and table sharing through Gate 47.
+- Complete filesystem authority is established by Gate 31's foundation and
+  Gate 53's FS-001 through FS-019 operation-family implementation and evidence.
 
 ## Deferred roadmap
 

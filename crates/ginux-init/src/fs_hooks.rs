@@ -2,14 +2,17 @@
 //!
 //! Gate 31 supplies the complete immutable call context and operation
 //! inventory required before this lane can safely claim an operation. The
-//! lane still declines every call; operation-family gates enable it later.
+//! Gate 53 routes every filesystem-lane entry through the shared authority
+//! guard before the kernel continues the already-confined operation.
 
 use ginux_fs_policy::CallContext;
 
-/// Lane membership by syscall number. Reserved for G06+.
+/// Lane membership comes from the independently checked operation inventory.
 pub const fn claims(syscall: u64) -> bool {
-    let _ = syscall;
-    false
+    // Every earlier family has passed its widening checkpoint. Two-path calls
+    // use the same stopped-syscall continuation after both pathname policies
+    // have independently authorized their operands and parents.
+    ginux_fs_policy::filesystem_lane_owns(syscall)
 }
 
 /// Result of asking the filesystem lane to own an entry.
@@ -17,28 +20,28 @@ pub const fn claims(syscall: u64) -> bool {
 pub enum Claim {
     /// This syscall is not owned by the filesystem lane.
     Unclaimed,
+    /// Continue the original syscall against its pinned kernel root/cwd/fd
+    /// objects.  No supervisor pathname executor is involved.
+    Continue,
     /// The lane owns the syscall but validation failed before any host effect.
     Denied(i64),
 }
 
 const EPERM: i64 = 1;
-const ENOSYS: i64 = 38;
 
 fn evaluate(context: &CallContext, confinement_permits: bool, claimed: bool) -> Claim {
     if !claimed {
         return Claim::Unclaimed;
     }
-    if !ginux_fs_policy::filesystem_hook_authorized(context, confinement_permits) {
+    if ginux_fs_policy::confined_kernel_route(context, confinement_permits).is_err() {
         return Claim::Denied(-EPERM);
     }
-    // A future operation-family gate must replace this explicit denial with
-    // its handler. Ownership can never fall through to a legacy executor.
-    Claim::Denied(-ENOSYS)
+    Claim::Continue
 }
 
-/// Ask the filesystem lane to own an entry. Claimed operations always return
-/// either a handled result or an explicit denial; only genuinely unclaimed
-/// operations may fall through to the shared contract executor.
+/// Ask the filesystem lane to own an entry. Claimed operations return an
+/// explicitly authorized confined-kernel continuation or a pre-effect denial;
+/// only genuinely unclaimed operations use another inventory owner.
 pub fn claim(context: &CallContext, confinement_permits: bool) -> Claim {
     evaluate(context, confinement_permits, claims(context.syscall))
 }
@@ -96,7 +99,7 @@ mod tests {
     #[test]
     fn claimed_operation_never_falls_through() {
         let context = open_context();
-        assert_eq!(evaluate(&context, true, true), Claim::Denied(-ENOSYS));
+        assert_eq!(evaluate(&context, true, true), Claim::Continue);
 
         let mut stale = context;
         stale.authority.descriptor_generation += 1;
@@ -107,5 +110,17 @@ mod tests {
     #[test]
     fn only_unowned_operation_is_unclaimed() {
         assert_eq!(evaluate(&open_context(), true, false), Claim::Unclaimed);
+    }
+
+    #[test]
+    fn every_inventory_owned_filesystem_entry_is_enabled() {
+        for operation in ginux_fs_policy::OPERATIONS {
+            assert_eq!(
+                claims(operation.syscall),
+                operation.owner == ginux_fs_policy::Owner::FilesystemLane,
+                "claim drift for {}",
+                operation.name
+            );
+        }
     }
 }

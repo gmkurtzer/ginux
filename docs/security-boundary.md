@@ -49,14 +49,14 @@ The retained root descriptor and ptrace relationship remain security-critical
 Ginux authority; a defect in their validation or use can violate the intended
 boundary.
 
-### Filesystem mediation foundation
+### Filesystem mediation
 
-The native filesystem lane currently claims no syscall. Before later gates can
-enable an operation family, both configured native routes now provide one
-immutable x86-64 call context containing all six syscall arguments, virtual and
+The native filesystem lane claims every path operation assigned to it by the
+independently pinned x86-64 inventory. Both configured native routes provide
+one immutable call context containing all six syscall arguments, virtual and
 host task identity, instance lifetime and root generation, descriptor-table
 generation, typed root/cwd/descriptor authority, and the effective contract
-decision. A filesystem hook is eligible only when contract permission,
+decision. A filesystem operation is eligible only when contract permission,
 route-local confinement, operation ownership, object identity, rights, and
 current generations all agree.
 
@@ -65,8 +65,14 @@ assigns every currently identified filesystem-capable ABI entry to one owner or
 explicit denial. Unknown ABI entries, unknown operations, incomplete authority,
 stale generations, and contract denials fail closed. The retained root is
 identified from its already-open descriptor; path text cannot replace that
-identity. This foundation does not itself add filesystem compatibility or
-authorize any new host effect.
+identity. Path inputs are replayed from supervisor-owned read-only mappings.
+A per-instance read/write commit barrier keeps policy resolution and kernel
+execution on one stable namespace generation, including admitted exec and
+inotify paths. Successful exec retires the owning replay state and lease;
+separate-process death can release only its own lease, while interruption of a
+shared-address-space private replay fails the instance closed. The detailed
+support, denial, resource, liveness, and issue #290
+traceability record is [filesystem-mediation.md](filesystem-mediation.md).
 
 ## Trusted and excluded components
 

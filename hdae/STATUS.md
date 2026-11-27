@@ -2,6 +2,59 @@
 
 ## Current checkpoint
 
+### Gate 53 complete filesystem mediation
+
+- Gate 53 implements issue #290's complete FS-001 through FS-019 boundary on
+  `hdae/filesystem-mediation-complete`; it remains a human security checkpoint
+  in `gates-todo`.
+- Every inventory-owned filesystem path now uses the Gate 31 immutable context,
+  typed root/cwd/descriptor authority, generation checks, protected pathname
+  replay, and one per-instance namespace commit barrier from policy resolution
+  through host syscall completion.
+- Read operations share a stable generation; namespace, metadata, cwd, and
+  `fchdir` changes are exclusive. A deterministic native FIFO/open and rename
+  schedule proves waiting-writer ordering, later-reader liveness, ptrace-stop
+  stability, exact object movement, and safe task-death cleanup.
+- Exec/execveat, inotify, shared-address-space teardown, task-table reuse,
+  null-path `utimensat`, contract-specific denial errno, and replay signal-mask
+  lifecycle gaps found during review are fixed. Replay addresses use a bounded
+  monotonic task-lifetime slot; shared-VM interruption fails the instance
+  closed.
+- `docs/filesystem-mediation.md` records supported and denied forms, exact
+  bounds, residual risks, and FS-001 through FS-019 enforcement/evidence
+  traceability. `docs/security-boundary.md` now describes the implemented lane.
+- Fresh local evidence passes `make check`, `make test-unit`, all six focused
+  filesystem suites, `make test-contract`, every aggregate `make test`
+  prerequisite, `make test-security`, `make test-recovery`,
+  `make test-multi-instance`, isolated `make test-native-vfs`, the complete
+  `make test-systemd` matrix, and `make test-rpm`.
+- The aggregate Gate 2 image check required a temporary worktree-local cache
+  because Docker cannot follow this worktree's absolute shared-cache symlink;
+  with that topology corrected it passed all eight checks, and the original
+  cache link was restored unchanged.
+- Local `sudo make test-native-supervision` is unavailable because the macOS
+  host requires an interactive sudo password. Required PR CI supplies this
+  privileged Linux run, including the deterministic native filesystem schedule.
+- Exact-head workflow run 45923555245 passes `changes`, `launch-integration`,
+  and `static-and-unit` at `90714388`, including complete privileged native
+  supervision. Gate 53 is technically passed.
+- Active skill: `hdae-development`
+- Skill path: `.agents/skills/hdae-development/SKILL.md`
+- Reload after context shift: required
+- Open decisions or limitations: the host kernel remains trusted while the
+  commit barrier holds the namespace generation stable; this is not complete
+  VFS compatibility or a hardware boundary. Gate 53 may not merge, close issue
+  #290, or move to `gates-done` before explicit acceptance.
+- Exact next action: commit and push this final evidence-only checkpoint, wait
+  for its exact-head required CI, mark pull request #349 ready, and stop for
+  human security review.
+- Delivery: draft pull request https://github.com/gmkurtzer/ginux/pull/349 is
+  open against `main` from `hdae/filesystem-mediation-complete`, is mergeable,
+  and contains `Closes #290`; it must not be merged before the human accepts
+  this checkpoint.
+
+## Prior checkpoint
+
 ### Gate 52 native replay signal semantics
 
 - The human approved the three-phase signal design for issue #316 on
@@ -35,18 +88,14 @@
   byte before the second sendmmsg replay. The partial-progress fixture now uses
   a connected full Unix-stream peer, which cannot drain without a reader; local
   x86-64 syntax checks and all ten Rocky cases pass with that transport.
-- Signed implementation commit `a9f39e83` is pushed and delivered in open pull
-  request https://github.com/gmkurtzer/ginux/pull/338.
-- Reciprocal summaries are posted on issue #316 and pull request #338 without
-  closing or merging either item.
+- Pull request https://github.com/gmkurtzer/ginux/pull/338 merged into `main` as
+  `0d668ffd`; fresh integrated-main workflow run 45708975262 passed.
+- Issue #316 is closed with the verified result and Gate 52 is in
+  `gates-done`.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Exact next action: integrate pull request #338 at its exact accepted head,
-  require fresh post-integration CI, then close issue #316 with the verified
-  result.
-
-## Prior checkpoint
+- Exact next action: none; Gate 52 is closed.
 
 ### Gate 51 HDAE gate-ledger reconciliation
 

@@ -54,6 +54,14 @@ pub fn decide_native(context: &CallContext) -> NativeDecision {
             action: Action::Deny(errno),
         });
     }
+    if let Some(operation) = ginux_fs_policy::operation(syscall) {
+        if operation.owner == ginux_fs_policy::Owner::ExplicitDeny {
+            return NativeDecision::Contract(Decision {
+                syscall,
+                action: Action::Deny(operation.unsupported_errno),
+            });
+        }
+    }
     // Neither caller traces children, so a host fork would leave the child
     // running unsupervised.
     if syscall == SYS_FORK {
@@ -80,6 +88,7 @@ pub fn decide_native(context: &CallContext) -> NativeDecision {
                 lane: Lane::Filesystem,
                 result,
             },
+            crate::fs_hooks::Claim::Continue => NativeDecision::Contract(decide_balanced(syscall)),
             crate::fs_hooks::Claim::Unclaimed => NativeDecision::Contract(decide_balanced(syscall)),
         },
         Lane::Channel => match crate::channel_hooks::claim(
@@ -94,7 +103,19 @@ pub fn decide_native(context: &CallContext) -> NativeDecision {
             },
             None => NativeDecision::Contract(decide_balanced(syscall)),
         },
-        Lane::Contract => NativeDecision::Contract(decide_balanced(syscall)),
+        Lane::Contract => {
+            if ginux_fs_policy::operation(syscall)
+                .is_some_and(|operation| operation.owner == ginux_fs_policy::Owner::DescriptorCore)
+                && ginux_fs_policy::descriptor_kernel_route(context).is_err()
+            {
+                NativeDecision::Contract(Decision {
+                    syscall,
+                    action: Action::Deny(1),
+                })
+            } else {
+                NativeDecision::Contract(decide_balanced(syscall))
+            }
+        }
     }
 }
 

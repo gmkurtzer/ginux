@@ -72,6 +72,12 @@ boundary and limitations remain authoritative in
     confinement, typed object authority, required rights, and current instance,
     root, cwd, and descriptor generations. Path text and numeric descriptors
     are not authority.
+12. A confined native pathname operation holds a per-instance namespace commit
+    lease from policy resolution through kernel completion. Observations and
+    opens may share a stable generation; component, metadata, and filesystem
+    context mutations are exclusive. Conflicting stopped tasks remain under
+    supervisor control until the lease is released, and task death cannot
+    release another task's lease.
 
 ## Major components
 

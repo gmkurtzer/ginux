@@ -23,6 +23,7 @@ mod fs_hooks;
 mod launch;
 mod native_clone;
 mod native_network;
+mod native_path;
 mod process_hooks;
 mod supervisor;
 
@@ -3389,12 +3390,23 @@ fn native_tracee_setup_fail(code: usize) -> ! {
 #[derive(Clone, Copy)]
 struct NativeSupervisorTask {
     host_pid: usize,
+    // Unique for this task lifetime. A successful exec from CLONE_VM leaves
+    // its replay mapping in the siblings' old mm, so task-table slots cannot
+    // safely double as reusable mapping identities.
+    path_snapshot_slot: usize,
     clone_call: native_clone::Pending,
     network_call: native_network::Pending,
+    path_call: native_path::Pending,
+    filesystem_lease: ginux_fs_policy::namespace_commit::Lease,
+    filesystem_wait: ginux_fs_policy::namespace_commit::Lease,
     replay_signal_mask: NativeReplaySignalMask,
     lifetime_pidfd: isize,
     virtual_id: TaskId,
     start_ticks: u64,
+    // A CLONE event shares the caller's address space. Private replay
+    // mappings can disappear with an ordinary forked task, but a shared-VM
+    // task cannot leave one behind for a sibling.
+    shared_vm: bool,
     awaiting_exit: bool,
     override_exit: bool,
     override_result: i64,
@@ -3570,7 +3582,28 @@ const EMPTY_NATIVE_DESCRIPTOR_TABLE: NativeDescriptorTable = NativeDescriptorTab
 fn native_descriptor_barrier_syscall(syscall: u64) -> bool {
     matches!(
         syscall,
-        2 | 3 | 16 | 32 | 33 | 47 | 56 | 57 | 58 | 59 | 72 | 257 | 292 | 293 | 299 | 435 | 436
+        2 | 3
+            | 16
+            | 32
+            | 33
+            | 47
+            | 56
+            | 57
+            | 58
+            | 59
+            | 72
+            | 81
+            | 85
+            | 257..=269
+            | 280
+            | 292
+            | 293
+            | 299
+            | 316
+            | 332
+            | 435..=437
+            | 439
+            | 452
     )
 }
 
@@ -5848,10 +5881,16 @@ fn supervise_native(
         root_object,
         Rights::LOOKUP.union(Rights::READ),
     );
-    let cwd_capability = Capability::unavailable(
+    // The tracee kernel fs context owns cwd.  Ginux never reconstructs it
+    // from a host pathname; chdir/fchdir and CLONE_FS operate on that same
+    // same-instance kernel object under continuous supervision.
+    let cwd_capability = Capability::new(
         CapabilityKind::WorkingDirectory,
         instance_token,
         instance_start_ns.max(1),
+        1,
+        root_object,
+        Rights::LOOKUP,
     );
 
     let mut status = 0i32;
@@ -5933,6 +5972,8 @@ fn supervise_native(
     let mut tasks: [Option<NativeSupervisorTask>; 128] = [None; 128];
     let mut network_buffers: [native_network::Buffer; 128] =
         core::array::from_fn(|_| native_network::Buffer::empty());
+    let mut path_buffers: [native_path::Buffer; 128] =
+        core::array::from_fn(|_| native_path::Buffer::empty());
     let mut retired_credentials = [EMPTY_RETIRED_CREDENTIAL; 128];
     let mut next_retired_credential = 0usize;
     let mut virtual_kernel_fds = [EMPTY_VIRTUAL_KERNEL_FD; NATIVE_VIRTUAL_KERNEL_FD_LIMIT];
@@ -5962,15 +6003,22 @@ fn supervise_native(
         mutation_owner: 0,
     };
     let mut next_descriptor_generation = 2u64;
+    let mut next_path_snapshot_slot = 1usize;
     let mut deferred_stops = [0i32; 128];
+    let mut filesystem_barrier = ginux_fs_policy::namespace_commit::Barrier::new();
     tasks[0] = Some(NativeSupervisorTask {
         host_pid: pid,
+        path_snapshot_slot: 0,
         clone_call: native_clone::Pending::empty(),
         network_call: native_network::Pending::empty(),
+        path_call: native_path::Pending::empty(),
+        filesystem_lease: ginux_fs_policy::namespace_commit::Lease::None,
+        filesystem_wait: ginux_fs_policy::namespace_commit::Lease::None,
         replay_signal_mask: EMPTY_REPLAY_SIGNAL_MASK,
         lifetime_pidfd: -1,
         virtual_id: root_virtual,
         start_ticks: 0,
+        shared_vm: false,
         awaiting_exit: false,
         override_exit: false,
         override_result: 0,
@@ -6015,18 +6063,24 @@ fn supervise_native(
         limits: native_default_limits(),
     });
     loop {
+        let deferred_ready = |slot: usize, status: &i32| {
+            if *status == 0 {
+                return false;
+            }
+            tasks[slot].is_some_and(|candidate| {
+                let owner = descriptor_tables[candidate.descriptor_table].mutation_owner;
+                (owner == 0 || owner == candidate.host_pid)
+                    && filesystem_barrier.can_acquire(
+                        slot,
+                        candidate.host_pid,
+                        candidate.filesystem_wait,
+                    )
+            })
+        };
         let ready_deferred = deferred_stops
             .iter()
             .enumerate()
-            .position(|(slot, status)| {
-                if *status == 0 {
-                    return false;
-                }
-                tasks[slot].is_some_and(|candidate| {
-                    let owner = descriptor_tables[candidate.descriptor_table].mutation_owner;
-                    owner == 0 || owner == candidate.host_pid
-                })
-            });
+            .position(|(slot, status)| deferred_ready(slot, status));
         let waited = if let Some(slot) = ready_deferred {
             status = deferred_stops[slot];
             deferred_stops[slot] = 0;
@@ -6098,6 +6152,24 @@ fn supervise_native(
                     b"native clone interrupted during private setup",
                 );
             }
+            if task.path_call.phase != native_path::Phase::Idle && task.shared_vm {
+                native_fail(
+                    instance,
+                    pid,
+                    b"native shared path interrupted during private setup",
+                );
+            }
+            // A non-CLONE child has a private mm. Its immutable replay mapping
+            // is destroyed with the task, so no tracee cleanup syscall is
+            // required before releasing the task-owned lease.
+            task.path_call = native_path::Pending::empty();
+            if task.filesystem_lease != ginux_fs_policy::namespace_commit::Lease::None
+                && !filesystem_barrier.release(task_index, task.host_pid, task.filesystem_lease)
+            {
+                native_fail(instance, pid, b"native filesystem barrier release failed");
+            }
+            task.filesystem_lease = ginux_fs_policy::namespace_commit::Lease::None;
+            task.filesystem_wait = ginux_fs_policy::namespace_commit::Lease::None;
             let exit_status = if status & 0x7f == 0 {
                 status >> 8
             } else {
@@ -6277,18 +6349,28 @@ fn supervise_native(
                 descriptor_tables[table].mutation_owner = 0;
                 table
             };
+            if next_path_snapshot_slot >= native_path::MAX_SLOTS {
+                native_fail(instance, pid, b"native path snapshot lifetime limit");
+            }
+            let child_path_snapshot_slot = next_path_snapshot_slot;
+            next_path_snapshot_slot += 1;
             tasks[child_slot] = Some(NativeSupervisorTask {
                 host_pid: child_host_pid,
+                path_snapshot_slot: child_path_snapshot_slot,
                 clone_call: if task.clone_call.phase == native_clone::Phase::Call {
                     task.clone_call.child()
                 } else {
                     native_clone::Pending::empty()
                 },
                 network_call: native_network::Pending::empty(),
+                path_call: native_path::Pending::empty(),
+                filesystem_lease: ginux_fs_policy::namespace_commit::Lease::None,
+                filesystem_wait: ginux_fs_policy::namespace_commit::Lease::None,
                 replay_signal_mask: EMPTY_REPLAY_SIGNAL_MASK,
                 lifetime_pidfd,
                 virtual_id: child_virtual,
                 start_ticks: child_start_ticks,
+                shared_vm: event == PTRACE_EVENT_CLONE,
                 awaiting_exit: false,
                 override_exit: false,
                 override_result: 0,
@@ -6359,6 +6441,35 @@ fn supervise_native(
             continue;
         }
         if event == PTRACE_EVENT_EXEC {
+            // The successful exec destroyed the old private pathname mapping.
+            // Release the read generation here because Linux reports the exec
+            // event instead of the ordinary syscall-exit cleanup path.
+            if task.path_call.phase != native_path::Phase::Idle {
+                task.path_call = native_path::Pending::empty();
+            }
+            if task.filesystem_lease != ginux_fs_policy::namespace_commit::Lease::None {
+                if !filesystem_barrier.release(task_index, task.host_pid, task.filesystem_lease) {
+                    native_fail(instance, pid, b"native exec filesystem barrier lost");
+                }
+                task.filesystem_lease = ginux_fs_policy::namespace_commit::Lease::None;
+            }
+            // The real exec ran with the caller's signal mask restored.  It
+            // replaces the old address space before the private cleanup phase,
+            // so there is no mapping to unmap and no blocked mask to restore;
+            // only the supervisor bookkeeping remains to be retired.
+            if task.replay_signal_mask.active {
+                if task.replay_signal_mask.blocked {
+                    native_fail(instance, pid, b"native exec replay mask remained blocked");
+                }
+                task.replay_signal_mask = EMPTY_REPLAY_SIGNAL_MASK;
+            }
+            // PTRACE_EVENT_EXEC replaces the successful exec's ordinary
+            // syscall-exit stop. The new program therefore has no host call
+            // pending when it begins, including if a signal stop arrives
+            // before its first seccomp entry.
+            task.awaiting_exit = false;
+            task.override_exit = false;
+            task.shared_vm = false;
             let _ = processes.exec(task.virtual_id);
             if mode == 3 {
                 native_virtual_kernel_exec(&mut virtual_kernel_fds, host_pid);
@@ -6576,21 +6687,6 @@ fn supervise_native(
             continue;
         }
 
-        if entry_syscall.is_some_and(native_descriptor_barrier_syscall)
-            && task.descriptor_barrier == usize::MAX
-        {
-            let table = task.descriptor_table;
-            if descriptor_tables[table].mutation_owner != 0 {
-                native_fail(
-                    instance,
-                    pid,
-                    b"native descriptor mutation barrier collision",
-                );
-            }
-            descriptor_tables[table].mutation_owner = task.host_pid;
-            task.descriptor_barrier = table;
-        }
-
         if task.initial_exec_pending && entry_syscall == Some(59) {
             let mut listener = -1isize;
             if !direct_yield {
@@ -6710,6 +6806,58 @@ fn supervise_native(
             unsafe { registers.assume_init() }
         };
 
+        // A mode-3 pathname's first stop only snapshots its caller bytes. Its
+        // replay stop is the policy/commit boundary. Acquire namespace and
+        // descriptor protection there, before restoring the caller's signal
+        // mask for the real operation. A conflicting replay remains safely in
+        // its private blocked-mask phase while deferred.
+        let starts_path_snapshot = seccomp_entry
+            && mode == 3
+            && task.path_call.phase == native_path::Phase::Idle
+            && native_path::has_snapshot(registers.orig_rax);
+        if seccomp_entry && !starts_path_snapshot {
+            let syscall = registers.orig_rax;
+            let requested_filesystem_lease = if task.filesystem_wait.is_waiting() {
+                task.filesystem_wait
+            } else {
+                ginux_fs_policy::namespace_commit::lease_for(syscall)
+            };
+            if task.filesystem_lease == ginux_fs_policy::namespace_commit::Lease::None
+                && requested_filesystem_lease.is_waiting()
+            {
+                if !filesystem_barrier.acquire(
+                    task_index,
+                    task.host_pid,
+                    requested_filesystem_lease,
+                ) {
+                    if deferred_stops[task_index] != 0 {
+                        native_fail(instance, pid, b"native filesystem stop already deferred");
+                    }
+                    task.filesystem_wait = requested_filesystem_lease;
+                    deferred_stops[task_index] = status;
+                    tasks[task_index] = Some(task);
+                    continue;
+                }
+                task.filesystem_lease = requested_filesystem_lease;
+                task.filesystem_wait = ginux_fs_policy::namespace_commit::Lease::None;
+            }
+            // Namespace acquisition precedes descriptor-table acquisition.
+            // The reverse order can deadlock when a shared-table sibling owns
+            // the namespace generation and must reach its exit stop.
+            if native_descriptor_barrier_syscall(syscall) && task.descriptor_barrier == usize::MAX {
+                let table = task.descriptor_table;
+                if descriptor_tables[table].mutation_owner != 0 {
+                    native_fail(
+                        instance,
+                        pid,
+                        b"native descriptor mutation barrier collision",
+                    );
+                }
+                descriptor_tables[table].mutation_owner = task.host_pid;
+                task.descriptor_barrier = table;
+            }
+        }
+
         if seccomp_entry
             && matches!(
                 task.clone_call.phase,
@@ -6751,6 +6899,27 @@ fn supervise_native(
                 native_fail(instance, pid, b"native network replay resume failed");
             }
             continue;
+        }
+        if seccomp_entry
+            && matches!(
+                task.path_call.phase,
+                native_path::Phase::Call | native_path::Phase::Unmap
+            )
+        {
+            if !task.path_call.matches_entry(&registers) {
+                native_fail(instance, pid, b"native path replay mismatch");
+            }
+            if task.path_call.phase == native_path::Phase::Unmap {
+                task.awaiting_exit = true;
+                tasks[task_index] = Some(task);
+                if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
+                    native_fail(instance, pid, b"native path cleanup resume failed");
+                }
+                continue;
+            }
+            if !native_replay_signal_enter_call(host_pid, &mut task.replay_signal_mask) {
+                native_fail(instance, pid, b"native path call mask restore failed");
+            }
         }
         if seccomp_entry && task.close_range_split.stage == NativeCloseRangeStage::Upper {
             // The upper part of a close_range that spans the protected
@@ -6838,6 +7007,60 @@ fn supervise_native(
                 );
             }
             continue;
+        }
+
+        if !seccomp_entry && task.awaiting_exit && task.path_call.phase != native_path::Phase::Idle
+        {
+            use native_path::Phase;
+            match task.path_call.phase {
+                Phase::Map => {
+                    task.path_call
+                        .mapped(host_pid, &path_buffers[task_index], &mut registers)
+                        .unwrap_or_else(|_| {
+                            native_fail(instance, pid, b"native path snapshot write failed")
+                        });
+                    task.awaiting_exit = false;
+                    tasks[task_index] = Some(task);
+                    if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                        || ptrace(PTRACE_CONT, host_pid, 0, 0) < 0
+                    {
+                        native_fail(instance, pid, b"native path snapshot resume failed");
+                    }
+                    continue;
+                }
+                Phase::Call => {
+                    if !native_replay_signal_enter_private(host_pid, &mut task.replay_signal_mask) {
+                        native_fail(instance, pid, b"native path cleanup mask failed");
+                    }
+                    let result = if task.override_exit {
+                        task.override_result
+                    } else {
+                        registers.rax as i64
+                    };
+                    task.path_call.unmap(&mut registers, result);
+                    task.awaiting_exit = false;
+                    task.override_exit = false;
+                    tasks[task_index] = Some(task);
+                    if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                        || ptrace(PTRACE_CONT, host_pid, 0, 0) < 0
+                    {
+                        native_fail(instance, pid, b"native path cleanup start failed");
+                    }
+                    continue;
+                }
+                Phase::Unmap => {
+                    if registers.rax as i64 != 0 {
+                        native_fail(instance, pid, b"native path snapshot cleanup failed");
+                    }
+                    let _reissued = task.path_call.restore(&mut registers);
+                    if !native_replay_signal_finish(host_pid, &mut task.replay_signal_mask) {
+                        native_fail(instance, pid, b"native path mask restore failed");
+                    }
+                    task.override_exit = true;
+                    task.override_result = registers.rax as i64;
+                }
+                Phase::Idle => {}
+            }
         }
 
         let mut network_reissued = false;
@@ -7584,6 +7807,12 @@ fn supervise_native(
                 }
                 task.descriptor_barrier = usize::MAX;
             }
+            if task.filesystem_lease != ginux_fs_policy::namespace_commit::Lease::None {
+                if !filesystem_barrier.release(task_index, task.host_pid, task.filesystem_lease) {
+                    native_fail(instance, pid, b"native filesystem barrier lost");
+                }
+                task.filesystem_lease = ginux_fs_policy::namespace_commit::Lease::None;
+            }
             if close_range_upper && task.descriptor_barrier == usize::MAX {
                 descriptor_tables[task.descriptor_table].mutation_owner = task.host_pid;
                 task.descriptor_barrier = task.descriptor_table;
@@ -7625,6 +7854,50 @@ fn supervise_native(
             native_fail(instance, pid, b"unexpected native syscall-exit stop");
         }
 
+        if seccomp_entry
+            && mode == 3
+            && task.path_call.phase == native_path::Phase::Idle
+            && native_path::has_snapshot(registers.orig_rax)
+        {
+            match native_path::Pending::snapshot(
+                host_pid,
+                task.path_snapshot_slot,
+                &registers,
+                &mut path_buffers[task_index],
+            ) {
+                Ok(snapshot) => {
+                    task.path_call = snapshot;
+                    if !native_replay_signal_begin(host_pid, &mut task.replay_signal_mask) {
+                        native_fail(instance, pid, b"native path mask block failed");
+                    }
+                    task.path_call.map(&mut registers);
+                    task.awaiting_exit = true;
+                    tasks[task_index] = Some(task);
+                    if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                        || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+                    {
+                        native_fail(instance, pid, b"native path snapshot setup failed");
+                    }
+                    continue;
+                }
+                Err(error) => {
+                    sequence += 1;
+                    task.syscall = registers.orig_rax;
+                    registers.orig_rax = u64::MAX;
+                    task.awaiting_exit = true;
+                    task.override_exit = true;
+                    task.override_result = error;
+                    line(b"emulate surface=immutable-filesystem-path result=invalid");
+                    tasks[task_index] = Some(task);
+                    if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
+                        || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+                    {
+                        native_fail(instance, pid, b"native path snapshot denial failed");
+                    }
+                    continue;
+                }
+            }
+        }
         sequence += 1;
         let syscall = entry_syscall.unwrap_or_else(|| {
             native_fail(instance, pid, b"native syscall entry missing seccomp event")
@@ -8142,14 +8415,24 @@ fn supervise_native(
                         host_pid,
                         AT_FDCWD as u64,
                         registers.rdi as usize,
+                        true,
                     )
                 }
-                76 | 83 | 84 | 85 | 87 | 90 | 133 => native_write_path_denied(
+                76 | 85 | 90 => native_write_path_denied(
                     instance.config(),
                     root_descriptor,
                     host_pid,
                     AT_FDCWD as u64,
                     registers.rdi as usize,
+                    true,
+                ),
+                83 | 84 | 87 | 133 => native_write_path_denied(
+                    instance.config(),
+                    root_descriptor,
+                    host_pid,
+                    AT_FDCWD as u64,
+                    registers.rdi as usize,
+                    false,
                 ),
                 82 | 86 => {
                     native_write_path_denied(
@@ -8158,12 +8441,14 @@ fn supervise_native(
                         host_pid,
                         AT_FDCWD as u64,
                         registers.rdi as usize,
+                        false,
                     ) || native_write_path_denied(
                         instance.config(),
                         root_descriptor,
                         host_pid,
                         AT_FDCWD as u64,
                         registers.rsi as usize,
+                        false,
                     )
                 }
                 88 => native_write_path_denied(
@@ -8172,6 +8457,7 @@ fn supervise_native(
                     host_pid,
                     AT_FDCWD as u64,
                     registers.rsi as usize,
+                    false,
                 ),
                 91 => {
                     if registers.rdi <= 2 {
@@ -8193,14 +8479,24 @@ fn supervise_native(
                         host_pid,
                         registers.rdi,
                         registers.rsi as usize,
+                        true,
                     )
                 }
-                258 | 259 | 263 | 268 | 452 => native_write_path_denied(
+                258 | 259 | 263 => native_write_path_denied(
                     instance.config(),
                     root_descriptor,
                     host_pid,
                     registers.rdi,
                     registers.rsi as usize,
+                    false,
+                ),
+                268 | 452 => native_write_path_denied(
+                    instance.config(),
+                    root_descriptor,
+                    host_pid,
+                    registers.rdi,
+                    registers.rsi as usize,
+                    syscall != 452 || registers.r10 & 0x100 == 0,
                 ),
                 264 | 316 => {
                     native_write_path_denied(
@@ -8209,12 +8505,14 @@ fn supervise_native(
                         host_pid,
                         registers.rdi,
                         registers.rsi as usize,
+                        false,
                     ) || native_write_path_denied(
                         instance.config(),
                         root_descriptor,
                         host_pid,
                         registers.rdx,
                         registers.r10 as usize,
+                        false,
                     )
                 }
                 265 => {
@@ -8224,12 +8522,14 @@ fn supervise_native(
                         host_pid,
                         registers.rdi,
                         registers.rsi as usize,
+                        registers.r8 & 0x400 != 0,
                     ) || native_write_path_denied(
                         instance.config(),
                         root_descriptor,
                         host_pid,
                         registers.rdx,
                         registers.r10 as usize,
+                        false,
                     )
                 }
                 266 => native_write_path_denied(
@@ -8238,6 +8538,7 @@ fn supervise_native(
                     host_pid,
                     registers.rsi,
                     registers.rdx as usize,
+                    false,
                 ),
                 _ => false,
             };
@@ -8292,8 +8593,10 @@ fn supervise_native(
         let clone_memory_denied = mode == 3 && native_clone::changes_snapshot(syscall, &registers);
         let network_memory_denied =
             mode == 3 && native_network::changes_snapshot(syscall, &registers);
+        let path_memory_denied = mode == 3 && native_path::changes_snapshot(syscall, &registers);
         let local_policy_denied = clone_memory_denied
             || network_memory_denied
+            || path_memory_denied
             || path_policy_denied
             || setid_policy_denied
             || device_node_policy_denied;
@@ -8303,6 +8606,8 @@ fn supervise_native(
                 b"clone-arguments"
             } else if network_memory_denied {
                 b"network-arguments"
+            } else if path_memory_denied {
+                b"filesystem-path-snapshot"
             } else if path_policy_denied {
                 b"filesystem-write"
             } else if setid_policy_denied {
@@ -8395,42 +8700,66 @@ fn supervise_native(
                 root: root_capability,
                 cwd: cwd_capability,
                 descriptor_table: descriptor_capability,
-                cwd_generation: 0,
+                cwd_generation: 1,
                 descriptor_generation: table_generation,
             },
             ContractAuthorization::from(contract_action),
         );
-        let implementation_decision =
-            if local_policy_denied || matches!(contract_action, ContractAction::Deny(_)) {
+        // Preserve the contract's exact unsupported errno. Descriptor
+        // authority is an additional guard only for admitted operations; a
+        // contract denial must not be rewritten to EPERM merely because the
+        // route correctly refuses a denied authorization.
+        let descriptor_authority_denied = !matches!(contract_action, ContractAction::Deny(_))
+            && ginux_fs_policy::operation(syscall)
+                .is_some_and(|operation| operation.owner == ginux_fs_policy::Owner::DescriptorCore)
+            && ginux_fs_policy::descriptor_kernel_route(&call).is_err();
+        let explicit_filesystem_denial = ginux_fs_policy::operation(syscall)
+            .filter(|operation| operation.owner == ginux_fs_policy::Owner::ExplicitDeny)
+            .map(|operation| operation.unsupported_errno);
+        let implementation_decision = if local_policy_denied
+            || descriptor_authority_denied
+            || matches!(contract_action, ContractAction::Deny(_))
+        {
+            NativeDecision::Contract(ginux_core::Decision {
+                syscall,
+                action: Action::Deny(EPERM as i32),
+            })
+        } else if let Some(errno) = explicit_filesystem_denial {
+            NativeDecision::Contract(ginux_core::Decision {
+                syscall,
+                action: Action::Deny(errno),
+            })
+        } else if mode == 3 {
+            if fs_hooks::claims(syscall) {
+                match fs_hooks::claim(&call, !local_policy_denied) {
+                    fs_hooks::Claim::Denied(result) => NativeDecision::Hooked {
+                        lane: Lane::Filesystem,
+                        result,
+                    },
+                    fs_hooks::Claim::Continue => {
+                        NativeDecision::Contract(decide_systemd(syscall, shared_network))
+                    }
+                    fs_hooks::Claim::Unclaimed => {
+                        NativeDecision::Contract(decide_systemd(syscall, shared_network))
+                    }
+                }
+            } else if let Some(result) =
+                process_hooks::claim(syscall, registers.rdi, registers.rsi, registers.rdx)
+            {
                 NativeDecision::Contract(ginux_core::Decision {
                     syscall,
-                    action: Action::Deny(EPERM as i32),
+                    action: Action::Deny((-result) as i32),
                 })
-            } else if mode == 3 {
-                if fs_hooks::claims(syscall) {
-                    match fs_hooks::claim(&call, !local_policy_denied) {
-                        fs_hooks::Claim::Denied(result) => NativeDecision::Hooked {
-                            lane: Lane::Filesystem,
-                            result,
-                        },
-                        fs_hooks::Claim::Unclaimed => {
-                            NativeDecision::Contract(decide_systemd(syscall, shared_network))
-                        }
-                    }
-                } else if let Some(result) =
-                    process_hooks::claim(syscall, registers.rdi, registers.rsi, registers.rdx)
-                {
-                    NativeDecision::Contract(ginux_core::Decision {
-                        syscall,
-                        action: Action::Deny((-result) as i32),
-                    })
-                } else {
-                    NativeDecision::Contract(decide_systemd(syscall, shared_network))
-                }
             } else {
-                decide_native(&call)
-            };
-        if !local_policy_denied && !matches!(contract_action, ContractAction::Deny(_)) {
+                NativeDecision::Contract(decide_systemd(syscall, shared_network))
+            }
+        } else {
+            decide_native(&call)
+        };
+        if !local_policy_denied
+            && !descriptor_authority_denied
+            && !matches!(contract_action, ContractAction::Deny(_))
+        {
             if let NativeDecision::Hooked { lane, result } = implementation_decision {
                 let lane_name: &[u8] = match lane {
                     Lane::Process => b"process",
@@ -8456,7 +8785,7 @@ fn supervise_native(
                 continue;
             }
         }
-        let decision = if local_policy_denied {
+        let decision = if local_policy_denied || descriptor_authority_denied {
             ginux_core::Decision {
                 syscall,
                 action: Action::Deny(EPERM as i32),
@@ -10912,7 +11241,7 @@ fn supervise_native(
                 task.pending_console_open = !null_device;
                 task.pending_console_cloexec = flags & O_CLOEXEC != 0;
                 line(b"mediate surface=virtual-device result=pending");
-                task.pending_device_arguments = Some([registers.rdi, registers.rsi, registers.rdx]);
+                task.pending_device_arguments = Some(task.path_call.caller_arguments(&registers));
                 // The open becomes a copy of the instance device descriptor.
                 // Of its flags only close-on-exec belongs to the new
                 // descriptor rather than to the device's shared open file,
@@ -10955,13 +11284,20 @@ fn supervise_native(
                 }
             }
             Action::Mediate if mode == 3 && syscall == 254 && inotify_host_path_len.is_some() => {
-                let path_address = (registers.rsp as usize).saturating_sub(512);
                 let path_len = inotify_host_path_len.unwrap_or(0);
-                if !write_tracee_bytes(host_pid, path_address, &inotify_host_path[..=path_len]) {
+                if task
+                    .path_call
+                    .install_translated_c_string(
+                        host_pid,
+                        1,
+                        &inotify_host_path[..=path_len],
+                        &mut registers,
+                    )
+                    .is_err()
+                {
                     native_fail(instance, pid, b"native inotify path translation failed");
                 }
                 line(b"translate surface=virtual-inotify-path result=pending");
-                registers.rsi = path_address as u64;
                 task.awaiting_exit = true;
                 if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
                     || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
@@ -13158,151 +13494,157 @@ fn native_instance_path(
         }
     }
     native_buffer_append(&mut joined, &mut joined_len, &raw[..raw_len])?;
-
-    native_normalize_instance_path(&joined[..joined_len], output)
-}
-
-fn native_normalize_instance_path(input: &[u8], output: &mut [u8]) -> Option<usize> {
-    let mut length = 1usize;
-    if output.is_empty() {
+    if joined_len > output.len() {
         return None;
     }
-    output[0] = b'/';
-    for component in input.split(|byte| *byte == b'/') {
-        if component.is_empty() || component == b"." {
-            continue;
-        }
-        if component == b".." {
-            if length > 1 {
-                length -= 1;
-                while length > 1 && output[length - 1] != b'/' {
-                    length -= 1;
-                }
-            }
-            continue;
-        }
-        if length > 1 {
-            if length >= output.len() {
-                return None;
-            }
-            output[length] = b'/';
-            length += 1;
-        }
-        if length + component.len() >= output.len() {
-            return None;
-        }
-        output[length..length + component.len()].copy_from_slice(component);
-        length += component.len();
-    }
-    Some(length)
+    output[..joined_len].copy_from_slice(&joined[..joined_len]);
+    Some(joined_len)
 }
 
 fn native_resolve_instance_path(
     root_descriptor: usize,
     path: &[u8],
     output: &mut [u8],
+    follow_final: bool,
 ) -> Option<usize> {
     const SYS_NEWFSTATAT_HOST: usize = 262;
     const AT_SYMLINK_NOFOLLOW: usize = 0x100;
     const S_IFMT: u32 = 0o170000;
     const S_IFLNK: u32 = 0o120000;
-    const MAX_SYMLINKS: usize = 16;
+    const MAX_SYMLINKS: usize = 40;
+    const MAX_COMPONENTS: usize = 256;
 
     let mut pending = [0u8; 1024];
-    let mut pending_len = native_normalize_instance_path(path, &mut pending)?;
-    for _ in 0..MAX_SYMLINKS {
-        let mut current = [0u8; 512];
-        let mut current_len = 0usize;
-        let mut offset = 1usize;
-        let mut followed = false;
-        while offset < pending_len {
-            let component_end = pending[offset..pending_len]
-                .iter()
-                .position(|byte| *byte == b'/')
-                .map_or(pending_len, |position| offset + position);
-            let component = &pending[offset..component_end];
-            if current_len != 0 {
-                current[current_len] = b'/';
-                current_len += 1;
+    if path.len() > pending.len() {
+        return None;
+    }
+    pending[..path.len()].copy_from_slice(path);
+    let mut pending_len = path.len();
+    let mut pending_offset = 0usize;
+    let mut resolved = [0u8; 512];
+    let mut resolved_len = 1usize;
+    resolved[0] = b'/';
+    let mut links = 0usize;
+    let mut components = 0usize;
+
+    while pending_offset < pending_len {
+        while pending_offset < pending_len && pending[pending_offset] == b'/' {
+            pending_offset += 1;
+        }
+        if pending_offset == pending_len {
+            break;
+        }
+        let component_end = pending[pending_offset..pending_len]
+            .iter()
+            .position(|byte| *byte == b'/')
+            .map_or(pending_len, |position| pending_offset + position);
+        let component = &pending[pending_offset..component_end];
+        pending_offset = component_end;
+        components = components.checked_add(1)?;
+        if components > MAX_COMPONENTS {
+            return None;
+        }
+        if component == b"." {
+            continue;
+        }
+        if component == b".." {
+            if resolved_len > 1 {
+                resolved_len -= 1;
+                while resolved_len > 1 && resolved[resolved_len - 1] != b'/' {
+                    resolved_len -= 1;
+                }
             }
-            if current_len + component.len() + 1 > current.len() {
+            continue;
+        }
+
+        let has_later_component = pending[pending_offset..pending_len]
+            .split(|byte| *byte == b'/')
+            .any(|later| !later.is_empty() && later != b".");
+        if !follow_final && !has_later_component {
+            if resolved_len > 1 {
+                native_buffer_append(&mut resolved, &mut resolved_len, b"/")?;
+            }
+            native_buffer_append(&mut resolved, &mut resolved_len, component)?;
+            break;
+        }
+
+        let mut candidate = [0u8; 512];
+        let mut candidate_len = 0usize;
+        if resolved_len > 1 {
+            native_buffer_append(
+                &mut candidate,
+                &mut candidate_len,
+                &resolved[1..resolved_len],
+            )?;
+            native_buffer_append(&mut candidate, &mut candidate_len, b"/")?;
+        }
+        native_buffer_append(&mut candidate, &mut candidate_len, component)?;
+        if candidate_len >= candidate.len() {
+            return None;
+        }
+        candidate[candidate_len] = 0;
+
+        let mut stat = [0u8; 144];
+        let result = unsafe {
+            syscall4(
+                SYS_NEWFSTATAT_HOST,
+                root_descriptor,
+                candidate.as_ptr() as usize,
+                stat.as_mut_ptr() as usize,
+                AT_SYMLINK_NOFOLLOW,
+            )
+        };
+        let mode = if result < 0 {
+            0
+        } else {
+            u32::from_ne_bytes([stat[24], stat[25], stat[26], stat[27]])
+        };
+        if result >= 0 && mode & S_IFMT == S_IFLNK {
+            links = links.checked_add(1)?;
+            if links > MAX_SYMLINKS {
                 return None;
             }
-            current[current_len..current_len + component.len()].copy_from_slice(component);
-            current_len += component.len();
-            current[current_len] = 0;
-
-            let mut stat = [0u8; 144];
-            let result = unsafe {
+            let mut target = [0u8; 512];
+            let target_len = unsafe {
                 syscall4(
-                    SYS_NEWFSTATAT_HOST,
+                    ginux_core::SYS_READLINKAT as usize,
                     root_descriptor,
-                    current.as_ptr() as usize,
-                    stat.as_mut_ptr() as usize,
-                    AT_SYMLINK_NOFOLLOW,
+                    candidate.as_ptr() as usize,
+                    target.as_mut_ptr() as usize,
+                    target.len(),
                 )
             };
-            if result < 0 {
-                if pending_len > output.len() {
-                    return None;
-                }
-                output[..pending_len].copy_from_slice(&pending[..pending_len]);
-                return Some(pending_len);
-            }
-            let mode = u32::from_ne_bytes([stat[24], stat[25], stat[26], stat[27]]);
-            if mode & S_IFMT == S_IFLNK {
-                let mut target = [0u8; 512];
-                let target_len = unsafe {
-                    syscall4(
-                        ginux_core::SYS_READLINKAT as usize,
-                        root_descriptor,
-                        current.as_ptr() as usize,
-                        target.as_mut_ptr() as usize,
-                        target.len(),
-                    )
-                };
-                if target_len <= 0 {
-                    return None;
-                }
-                let target_len = target_len as usize;
-                let mut joined = [0u8; 1024];
-                let mut joined_len = 0usize;
-                if target[0] != b'/' {
-                    native_buffer_append(&mut joined, &mut joined_len, b"/")?;
-                    if let Some(separator) = current[..current_len]
-                        .iter()
-                        .rposition(|byte| *byte == b'/')
-                    {
-                        native_buffer_append(
-                            &mut joined,
-                            &mut joined_len,
-                            &current[..separator + 1],
-                        )?;
-                    }
-                }
-                native_buffer_append(&mut joined, &mut joined_len, &target[..target_len])?;
-                native_buffer_append(
-                    &mut joined,
-                    &mut joined_len,
-                    &pending[component_end..pending_len],
-                )?;
-                let mut next = [0u8; 1024];
-                pending_len = native_normalize_instance_path(&joined[..joined_len], &mut next)?;
-                pending[..pending_len].copy_from_slice(&next[..pending_len]);
-                followed = true;
-                break;
-            }
-            offset = component_end.saturating_add(1);
-        }
-        if !followed {
-            if pending_len > output.len() {
+            if target_len <= 0 {
                 return None;
             }
-            output[..pending_len].copy_from_slice(&pending[..pending_len]);
-            return Some(pending_len);
+            let target_len = target_len as usize;
+            let mut next = [0u8; 1024];
+            let mut next_len = 0usize;
+            native_buffer_append(&mut next, &mut next_len, &target[..target_len])?;
+            native_buffer_append(
+                &mut next,
+                &mut next_len,
+                &pending[pending_offset..pending_len],
+            )?;
+            pending = next;
+            pending_len = next_len;
+            pending_offset = 0;
+            if target[0] == b'/' {
+                resolved_len = 1;
+            }
+            continue;
         }
+
+        if resolved_len > 1 {
+            native_buffer_append(&mut resolved, &mut resolved_len, b"/")?;
+        }
+        native_buffer_append(&mut resolved, &mut resolved_len, component)?;
     }
-    None
+    if resolved_len > output.len() {
+        return None;
+    }
+    output[..resolved_len].copy_from_slice(&resolved[..resolved_len]);
+    Some(resolved_len)
 }
 
 fn native_write_path_denied(
@@ -13311,6 +13653,7 @@ fn native_write_path_denied(
     host_pid: usize,
     dirfd: u64,
     address: usize,
+    follow_final: bool,
 ) -> bool {
     if config.filesystem_write_deny.as_slice().is_empty() {
         return false;
@@ -13320,9 +13663,12 @@ fn native_write_path_denied(
         return true;
     };
     let mut resolved = [0u8; 512];
-    let Some(resolved_len) =
-        native_resolve_instance_path(root_descriptor, &path[..length], &mut resolved)
-    else {
+    let Some(resolved_len) = native_resolve_instance_path(
+        root_descriptor,
+        &path[..length],
+        &mut resolved,
+        follow_final,
+    ) else {
         return true;
     };
     let denied = config.filesystem_write_denied(&resolved[..resolved_len]);
@@ -13353,7 +13699,7 @@ fn native_setid_path_denied(
     };
     let mut resolved = [0u8; 512];
     let Some(resolved_len) =
-        native_resolve_instance_path(root_descriptor, &path[..length], &mut resolved)
+        native_resolve_instance_path(root_descriptor, &path[..length], &mut resolved, true)
     else {
         return true;
     };
@@ -13388,7 +13734,7 @@ fn native_device_create_denied(
     };
     let mut resolved = [0u8; 512];
     let Some(resolved_len) =
-        native_resolve_instance_path(root_descriptor, &path[..length], &mut resolved)
+        native_resolve_instance_path(root_descriptor, &path[..length], &mut resolved, false)
     else {
         return true;
     };
