@@ -2167,4 +2167,24 @@ mod tests {
             Err(ProcessError::DescriptorFull)
         );
     }
+
+    #[test]
+    fn exec_scrub_drops_only_cloexec_ends_and_releases_pipes() {
+        let mut pipes: PipeSpace<2, 8, 2> = PipeSpace::new();
+        let keep = pipes.create_pipe(1, 0, 1, false).unwrap();
+        let drop_me = pipes.create_pipe(1, 2, 3, true).unwrap();
+        assert_eq!(pipes.active_pipes(), 2);
+        // scrub closes both cloexec ends of the second pipe only
+        assert_eq!(pipes.exec_scrub(1), 2);
+        assert_eq!(pipes.pipe_ends(drop_me), 0);
+        assert_eq!(pipes.pipe_ends(keep), 2);
+        assert_eq!(pipes.active_pipes(), 1);
+        // surviving fds remain usable; scrubbed ones are gone
+        assert!(pipes.lookup(1, 0).is_some());
+        assert!(pipes.lookup(1, 2).is_none());
+        // idempotent: nothing left to scrub
+        assert_eq!(pipes.exec_scrub(1), 0);
+        // unknown task scrubs nothing
+        assert_eq!(pipes.exec_scrub(99), 0);
+    }
 }
