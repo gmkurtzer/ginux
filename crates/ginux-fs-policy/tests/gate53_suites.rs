@@ -274,6 +274,12 @@ fn fs_t08_every_supported_route_has_positive_and_negative_control() {
             }
         }
     }
+    // Pathname resolution owned by another lane still participates in the
+    // same immutable snapshot and namespace-generation protocol.
+    for syscall in [59, 254, 322] {
+        assert_eq!(lease_for(syscall), Lease::Read);
+        assert_ne!(ginux_fs_policy::path_snapshot_arguments(syscall), 0);
+    }
 }
 
 #[test]

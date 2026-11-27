@@ -12,6 +12,7 @@ const SNAPSHOT_SIZE: usize = 16 * 1024;
 const STRIDE: u64 = SNAPSHOT_SIZE as u64;
 const END: u64 = BASE + 128 * STRIDE;
 const MAX_STRING: usize = 4096;
+const TRANSLATED_STRING_OFFSET: usize = 12 * 1024;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Phase {
@@ -171,6 +172,40 @@ impl Pending {
             arguments(regs)
         };
         [args[0], args[1], args[2]]
+    }
+
+    /// Install a supervisor-produced path in the private read-only replay
+    /// mapping and make the running call consume it. This is used when an
+    /// accountable owner translates a virtual path after the caller's input
+    /// has already been snapshotted.
+    pub fn install_translated_c_string(
+        &mut self,
+        pid: usize,
+        argument: usize,
+        bytes: &[u8],
+        regs: &mut UserRegs,
+    ) -> Result<(), i64> {
+        if self.phase != Phase::Call
+            || argument >= self.replay.len()
+            || bytes.is_empty()
+            || bytes.len() > MAX_STRING
+            || bytes.last() != Some(&0)
+        {
+            return Err(-EINVAL);
+        }
+        let end = TRANSLATED_STRING_OFFSET
+            .checked_add(bytes.len())
+            .ok_or(-EFAULT)?;
+        if end > SNAPSHOT_SIZE {
+            return Err(-7);
+        }
+        let address = self.address + TRANSLATED_STRING_OFFSET as u64;
+        poke_tracee_bytes(pid, address as usize, bytes)?;
+        self.replay[argument] = address;
+        let mut args = arguments(regs);
+        args[argument] = address;
+        set_call(regs, self.syscall, args);
+        Ok(())
     }
 
     pub fn unmap(&mut self, regs: &mut UserRegs, result: i64) {

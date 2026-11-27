@@ -88,8 +88,14 @@ impl Barrier {
 /// the exclusive generation. `fchdir` is descriptor-owned but changes the
 /// same filesystem context.
 pub fn lease_for(syscall: u64) -> Lease {
-    if syscall == 81 {
-        return Lease::Write;
+    match syscall {
+        // fchdir changes filesystem context even though its authority is
+        // descriptor-owned.
+        81 => return Lease::Write,
+        // Executable replacement and inotify watch installation resolve a
+        // pathname through their accountable process/descriptor owners.
+        59 | 254 | 322 => return Lease::Read,
+        _ => {}
     }
     let Some(operation) = crate::operation(syscall) else {
         return Lease::None;
@@ -157,6 +163,9 @@ mod tests {
             }
         }
         assert_eq!(lease_for(81), Lease::Write);
+        for syscall in [59, 254, 322] {
+            assert_eq!(lease_for(syscall), Lease::Read);
+        }
         assert_eq!(lease_for(0), Lease::None);
     }
 }

@@ -100,7 +100,7 @@ create = ["/"]
             # The FIFO reader is now inside the host open syscall and holds a
             # shared namespace lease. This is a kernel-observed barrier, not a
             # probabilistic loop count.
-            wait_until("blocked FIFO open", lambda: next(
+            first_reader = wait_until("blocked FIFO open", lambda: next(
                 (pid for pid in descendants(proc.pid) if syscall_number(pid) == 2), None))
             proc.stdin.write(b"1")
             proc.stdin.flush()
@@ -116,18 +116,41 @@ create = ["/"]
             # At this point the exchange child has no syscall between its
             # report write and renameat2. Observe the same task in a persistent
             # ptrace stop: Ginux deferred the conflicting writer before effect.
-            stopped = None
+            stable_stops = None
             for _ in range(5):
                 current = {pid for pid in descendants(proc.pid) if state(pid) == "t"}
-                stopped = next(iter(current), None) if stopped is None else stopped
-                if stopped not in current:
-                    stopped = None
-                    break
+                stable_stops = current if stable_stops is None else stable_stops & current
                 time.sleep(0.02)
-            if stopped is None:
+            if not stable_stops:
                 raise RuntimeError("rename exchange was not held at a persistent tracing stop")
 
             proc.stdin.write(b"2")
+
+            # The fixture now starts a second blocked reader. Release its
+            # conflicting rename, prove that writer is stopped, then kill the
+            # exact reader task. Task-death cleanup must release its lease and
+            # allow the rename to commit.
+            death_reader = wait_until("second blocked FIFO open", lambda: next(
+                (pid for pid in descendants(proc.pid)
+                 if pid != first_reader and syscall_number(pid) == 2), None))
+            proc.stdin.write(b"3")
+            proc.stdin.flush()
+
+            def death_exchange_announced():
+                for key, _ in selector.select(timeout=0):
+                    chunk = os.read(key.fd, 65536)
+                    output.extend(chunk)
+                return b"GINUX_FIXTURE: fs-commit-death-exchange-entering=1\n" in output
+
+            wait_until("death exchange entry announcement", death_exchange_announced)
+            stable_stops = None
+            for _ in range(5):
+                current = {pid for pid in descendants(proc.pid) if state(pid) == "t"}
+                stable_stops = current if stable_stops is None else stable_stops & current
+                time.sleep(0.02)
+            if not stable_stops:
+                raise RuntimeError("death exchange was not held at a persistent tracing stop")
+            os.kill(death_reader, 9)
             proc.stdin.close()
             proc.stdin = None
             remainder, _ = proc.communicate(timeout=20)
@@ -145,6 +168,8 @@ create = ["/"]
             b"GINUX_FIXTURE: fs-commit-peer=1\n",
             b"GINUX_FIXTURE: fs-commit-exchange=1\n",
             b"GINUX_FIXTURE: fs-commit-object-moved-after=1\n",
+            b"GINUX_FIXTURE: fs-commit-death-reader-reaped=1\n",
+            b"GINUX_FIXTURE: fs-commit-death-release=1\n",
             b"GINUX_NATIVE_CHECK: PASS\n",
         ]
         if proc.returncode != 0 or any(line not in output for line in required):

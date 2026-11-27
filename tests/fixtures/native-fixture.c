@@ -482,7 +482,55 @@ long native_fixture_main(const word *stack)
         print_result("GINUX_FIXTURE: fs-commit-peer=", statuses[1] == 0);
         print_result("GINUX_FIXTURE: fs-commit-exchange=", statuses[2] == 0);
         print_result("GINUX_FIXTURE: fs-commit-object-moved-after=", moved == 0);
-        return passed ? 0 : 100;
+        if (!passed) return 100;
+
+        /* A task killed while blocked in the host open syscall must release
+         * only its own read lease. The waiting rename then commits without a
+         * stale owner or a replacement task inheriting authority. */
+        static const char death_first[] = "/tmp/ginux-fs-c";
+        static const char death_second[] = "/tmp/ginux-fs-d";
+        static const char death_fifo[] = "/tmp/ginux-fs-c/gate";
+        static const char death_moved_fifo[] = "/tmp/ginux-fs-d/gate";
+        int death_report[2] = {-1, -1}, death_statuses[2] = {0, 0};
+        if (call3(83, (word)death_first, 0700, 0) < 0
+            || call3(83, (word)death_second, 0700, 0) < 0
+            || call3(133, (word)death_fifo, 0010600, 0) < 0
+            || call3(293, (word)death_report, 0, 0) < 0)
+            return 101;
+
+        long doomed_reader = call3(57, 0, 0, 0);
+        if (doomed_reader == 0) {
+            (void)call3(2, (word)death_fifo, 0, 0);
+            call3(231, 102, 0, 0);
+        }
+        if (doomed_reader < 0) return 103;
+
+        long death_exchange = call3(57, 0, 0, 0);
+        if (death_exchange == 0) {
+            call3(3, death_report[0], 0, 0);
+            if (call3(0, 0, (word)&byte, 1) != 1
+                || call3(1, death_report[1], (word)"d", 1) != 1)
+                call3(231, 104, 0, 0);
+            long result = call3(82, (word)death_first, (word)death_second, 0);
+            call3(231, result == 0 ? 0 : 105, 0, 0);
+        }
+        if (death_exchange < 0) return 106;
+        call3(3, death_report[1], 0, 0);
+        if (call3(0, death_report[0], (word)&byte, 1) != 1) return 107;
+        print("GINUX_FIXTURE: fs-commit-death-exchange-entering=1\n");
+
+        long waited_doomed = call4(61, doomed_reader, (word)&death_statuses[0], 0, 0);
+        long waited_death_exchange = call4(61, death_exchange, (word)&death_statuses[1], 0, 0);
+        long death_moved = call4(262, at_fdcwd, (word)death_moved_fifo, (word)stat, 0);
+        int death_passed = waited_doomed == doomed_reader
+                           && waited_death_exchange == death_exchange
+                           && death_statuses[0] != 0 && death_statuses[1] == 0
+                           && death_moved == 0;
+        print_result("GINUX_FIXTURE: fs-commit-death-reader-reaped=",
+                     waited_doomed == doomed_reader && death_statuses[0] != 0);
+        print_result("GINUX_FIXTURE: fs-commit-death-release=",
+                     death_statuses[1] == 0 && death_moved == 0);
+        return death_passed ? 0 : 108;
     }
     case 'f': {
         /* fork: the native loop has no child supervision, so it must be denied. */

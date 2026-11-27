@@ -1761,17 +1761,17 @@ pub const fn filesystem_lane_owns(syscall: u64) -> bool {
     )
 }
 
-/// Bit set for each syscall argument that the native filesystem lane must
-/// replace with one supervisor-owned immutable C-string snapshot. `getcwd`
-/// is the only filesystem-lane call without an input pathname.
+/// Bit set for each syscall argument that native supervision must replace
+/// with one supervisor-owned immutable C-string snapshot. This includes the
+/// filesystem lane plus admitted executable replacement and inotify paths.
+/// `getcwd` is the only filesystem-lane call without an input pathname.
 pub const fn path_snapshot_arguments(syscall: u64) -> u8 {
     match syscall {
-        2 | 4 | 6 | 21 | 76 | 80 | 83 | 84 | 85 | 87 | 89 | 90 | 92 | 94 | 132 | 133 | 137
+        2 | 4 | 6 | 21 | 59 | 76 | 80 | 83 | 84 | 85 | 87 | 89 | 90 | 92 | 94 | 132 | 133 | 137
         | 194 | 195 => 1 << 0,
         82 | 86 | 88 | 188 | 189 | 191 | 192 | 197 | 198 => (1 << 0) | (1 << 1),
-        257 | 258 | 259 | 260 | 261 | 262 | 263 | 267 | 268 | 269 | 280 | 332 | 437 | 439 | 452 => {
-            1 << 1
-        }
+        254 | 257 | 258 | 259 | 260 | 261 | 262 | 263 | 267 | 268 | 269 | 280 | 322 | 332 | 437
+        | 439 | 452 => 1 << 1,
         264 | 265 | 316 => (1 << 1) | (1 << 3),
         266 => (1 << 0) | (1 << 2),
         _ => 0,
@@ -2347,5 +2347,8 @@ mod tests {
                 "syscall {syscall}"
             );
         }
+        assert_eq!(path_snapshot_arguments(59), 1 << 0);
+        assert_eq!(path_snapshot_arguments(254), 1 << 1);
+        assert_eq!(path_snapshot_arguments(322), 1 << 1);
     }
 }

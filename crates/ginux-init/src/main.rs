@@ -3399,6 +3399,10 @@ struct NativeSupervisorTask {
     lifetime_pidfd: isize,
     virtual_id: TaskId,
     start_ticks: u64,
+    // A CLONE event shares the caller's address space. Private replay
+    // mappings can disappear with an ordinary forked task, but a shared-VM
+    // task cannot leave one behind for a sibling.
+    shared_vm: bool,
     awaiting_exit: bool,
     override_exit: bool,
     override_result: i64,
@@ -6008,6 +6012,7 @@ fn supervise_native(
         lifetime_pidfd: -1,
         virtual_id: root_virtual,
         start_ticks: 0,
+        shared_vm: false,
         awaiting_exit: false,
         override_exit: false,
         override_result: 0,
@@ -6141,13 +6146,17 @@ fn supervise_native(
                     b"native clone interrupted during private setup",
                 );
             }
-            if task.path_call.phase != native_path::Phase::Idle {
+            if task.path_call.phase != native_path::Phase::Idle && task.shared_vm {
                 native_fail(
                     instance,
                     pid,
-                    b"native path interrupted during private setup",
+                    b"native shared path interrupted during private setup",
                 );
             }
+            // A non-CLONE child has a private mm. Its immutable replay mapping
+            // is destroyed with the task, so no tracee cleanup syscall is
+            // required before releasing the task-owned lease.
+            task.path_call = native_path::Pending::empty();
             if task.filesystem_lease != ginux_fs_policy::namespace_commit::Lease::None
                 && !filesystem_barrier.release(task_index, task.host_pid, task.filesystem_lease)
             {
@@ -6349,6 +6358,7 @@ fn supervise_native(
                 lifetime_pidfd,
                 virtual_id: child_virtual,
                 start_ticks: child_start_ticks,
+                shared_vm: event == PTRACE_EVENT_CLONE,
                 awaiting_exit: false,
                 override_exit: false,
                 override_result: 0,
@@ -6419,6 +6429,19 @@ fn supervise_native(
             continue;
         }
         if event == PTRACE_EVENT_EXEC {
+            // The successful exec destroyed the old private pathname mapping.
+            // Release the read generation here because Linux reports the exec
+            // event instead of the ordinary syscall-exit cleanup path.
+            if task.path_call.phase != native_path::Phase::Idle {
+                task.path_call = native_path::Pending::empty();
+            }
+            if task.filesystem_lease != ginux_fs_policy::namespace_commit::Lease::None {
+                if !filesystem_barrier.release(task_index, task.host_pid, task.filesystem_lease) {
+                    native_fail(instance, pid, b"native exec filesystem barrier lost");
+                }
+                task.filesystem_lease = ginux_fs_policy::namespace_commit::Lease::None;
+            }
+            task.shared_vm = false;
             let _ = processes.exec(task.virtual_id);
             if mode == 3 {
                 native_virtual_kernel_exec(&mut virtual_kernel_fds, host_pid);
@@ -11228,13 +11251,20 @@ fn supervise_native(
                 }
             }
             Action::Mediate if mode == 3 && syscall == 254 && inotify_host_path_len.is_some() => {
-                let path_address = (registers.rsp as usize).saturating_sub(512);
                 let path_len = inotify_host_path_len.unwrap_or(0);
-                if !write_tracee_bytes(host_pid, path_address, &inotify_host_path[..=path_len]) {
+                if task
+                    .path_call
+                    .install_translated_c_string(
+                        host_pid,
+                        1,
+                        &inotify_host_path[..=path_len],
+                        &mut registers,
+                    )
+                    .is_err()
+                {
                     native_fail(instance, pid, b"native inotify path translation failed");
                 }
                 line(b"translate surface=virtual-inotify-path result=pending");
-                registers.rsi = path_address as u64;
                 task.awaiting_exit = true;
                 if ptrace(PTRACE_SETREGS, host_pid, 0, &registers as *const _ as usize) < 0
                     || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
