@@ -3120,4 +3120,27 @@ failure = "stop"
         c.memory_mib = 15;
         assert!(c.validate().is_err());
     }
+
+    #[test]
+    fn create_only_filesystem_grants_derive_write() {
+        let recipe = VALID.replace(
+            "[storage]",
+            "[contract.filesystem]\ndefault = \"deny\"\nread = []\nwrite = []\ncreate = [\"/tmp\"]\ndeny = []\n[contract.kernel]\ndefault = \"deny\"\nproc_read = [\"/\"]\nproc_write = []\nsys_read = [\"/\"]\nsys_write = []\n[storage]",
+        );
+        let c = InstanceConfig::parse(recipe.as_bytes()).unwrap();
+        assert!(c.filesystem_write.as_slice().is_empty());
+        assert_eq!(c.filesystem_create.as_slice().len(), 1);
+        // create-only policy must still mediate writes (create implies write path)
+        assert!(c
+            .contract_write
+            .as_slice()
+            .iter()
+            .any(|t| t.as_bytes() == b"filesystem.**"));
+        // read stays empty: no read grant without read policy
+        assert!(!c
+            .contract_read
+            .as_slice()
+            .iter()
+            .any(|t| t.as_bytes() == b"filesystem.**"));
+    }
 }
