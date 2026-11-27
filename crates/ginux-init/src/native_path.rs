@@ -10,7 +10,8 @@ use crate::supervisor::{poke_tracee_bytes, ptrace, UserRegs, EFAULT, EINVAL, PTR
 const BASE: u64 = 0x6200_0000_0000;
 const SNAPSHOT_SIZE: usize = 16 * 1024;
 const STRIDE: u64 = SNAPSHOT_SIZE as u64;
-const END: u64 = BASE + 128 * STRIDE;
+pub const MAX_SLOTS: usize = 4096;
+const END: u64 = BASE + MAX_SLOTS as u64 * STRIDE;
 const MAX_STRING: usize = 4096;
 const TRANSLATED_STRING_OFFSET: usize = 12 * 1024;
 
@@ -100,20 +101,27 @@ impl Pending {
 
     pub fn snapshot(
         pid: usize,
-        slot: usize,
+        snapshot_slot: usize,
         regs: &UserRegs,
         buffer: &mut Buffer,
     ) -> Result<Self, i64> {
         let mask = ginux_fs_policy::path_snapshot_arguments(regs.orig_rax);
+        let nullable = ginux_fs_policy::nullable_path_snapshot_arguments(regs.orig_rax);
         if mask == 0 {
             return Err(-EINVAL);
         }
         buffer.reset();
-        let address = BASE + slot as u64 * STRIDE;
+        if snapshot_slot >= MAX_SLOTS {
+            return Err(-7);
+        }
+        let address = BASE + snapshot_slot as u64 * STRIDE;
         let original = arguments(regs);
         let mut replay = original;
         for index in 0..6 {
             if mask & (1 << index) != 0 {
+                if original[index] == 0 && nullable & (1 << index) != 0 {
+                    continue;
+                }
                 let offset = buffer.snapshot_c_string(pid, original[index])?;
                 replay[index] = address + offset as u64;
             }

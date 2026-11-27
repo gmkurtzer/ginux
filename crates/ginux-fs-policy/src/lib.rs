@@ -1778,6 +1778,16 @@ pub const fn path_snapshot_arguments(syscall: u64) -> u8 {
     }
 }
 
+/// Path arguments for which Linux defines a null-pointer descriptor form.
+/// They remain part of the immutable snapshot plan when non-null, while the
+/// null value itself is ABI data and must be replayed unchanged.
+pub const fn nullable_path_snapshot_arguments(syscall: u64) -> u8 {
+    match syscall {
+        280 => 1 << 1,
+        _ => 0,
+    }
+}
+
 pub const fn operation_family(operation: &Operation) -> OperationFamily {
     match operation.owner {
         Owner::DescriptorCore => OperationFamily::DescriptorIo,
@@ -2350,5 +2360,7 @@ mod tests {
         assert_eq!(path_snapshot_arguments(59), 1 << 0);
         assert_eq!(path_snapshot_arguments(254), 1 << 1);
         assert_eq!(path_snapshot_arguments(322), 1 << 1);
+        assert_eq!(nullable_path_snapshot_arguments(280), 1 << 1);
+        assert_eq!(nullable_path_snapshot_arguments(257), 0);
     }
 }

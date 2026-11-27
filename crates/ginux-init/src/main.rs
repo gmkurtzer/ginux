@@ -3390,6 +3390,10 @@ fn native_tracee_setup_fail(code: usize) -> ! {
 #[derive(Clone, Copy)]
 struct NativeSupervisorTask {
     host_pid: usize,
+    // Unique for this task lifetime. A successful exec from CLONE_VM leaves
+    // its replay mapping in the siblings' old mm, so task-table slots cannot
+    // safely double as reusable mapping identities.
+    path_snapshot_slot: usize,
     clone_call: native_clone::Pending,
     network_call: native_network::Pending,
     path_call: native_path::Pending,
@@ -5999,10 +6003,12 @@ fn supervise_native(
         mutation_owner: 0,
     };
     let mut next_descriptor_generation = 2u64;
+    let mut next_path_snapshot_slot = 1usize;
     let mut deferred_stops = [0i32; 128];
     let mut filesystem_barrier = ginux_fs_policy::namespace_commit::Barrier::new();
     tasks[0] = Some(NativeSupervisorTask {
         host_pid: pid,
+        path_snapshot_slot: 0,
         clone_call: native_clone::Pending::empty(),
         network_call: native_network::Pending::empty(),
         path_call: native_path::Pending::empty(),
@@ -6343,8 +6349,14 @@ fn supervise_native(
                 descriptor_tables[table].mutation_owner = 0;
                 table
             };
+            if next_path_snapshot_slot >= native_path::MAX_SLOTS {
+                native_fail(instance, pid, b"native path snapshot lifetime limit");
+            }
+            let child_path_snapshot_slot = next_path_snapshot_slot;
+            next_path_snapshot_slot += 1;
             tasks[child_slot] = Some(NativeSupervisorTask {
                 host_pid: child_host_pid,
+                path_snapshot_slot: child_path_snapshot_slot,
                 clone_call: if task.clone_call.phase == native_clone::Phase::Call {
                     task.clone_call.child()
                 } else {
@@ -6441,6 +6453,22 @@ fn supervise_native(
                 }
                 task.filesystem_lease = ginux_fs_policy::namespace_commit::Lease::None;
             }
+            // The real exec ran with the caller's signal mask restored.  It
+            // replaces the old address space before the private cleanup phase,
+            // so there is no mapping to unmap and no blocked mask to restore;
+            // only the supervisor bookkeeping remains to be retired.
+            if task.replay_signal_mask.active {
+                if task.replay_signal_mask.blocked {
+                    native_fail(instance, pid, b"native exec replay mask remained blocked");
+                }
+                task.replay_signal_mask = EMPTY_REPLAY_SIGNAL_MASK;
+            }
+            // PTRACE_EVENT_EXEC replaces the successful exec's ordinary
+            // syscall-exit stop. The new program therefore has no host call
+            // pending when it begins, including if a signal stop arrives
+            // before its first seccomp entry.
+            task.awaiting_exit = false;
+            task.override_exit = false;
             task.shared_vm = false;
             let _ = processes.exec(task.virtual_id);
             if mode == 3 {
@@ -7833,7 +7861,7 @@ fn supervise_native(
         {
             match native_path::Pending::snapshot(
                 host_pid,
-                task_index,
+                task.path_snapshot_slot,
                 &registers,
                 &mut path_buffers[task_index],
             ) {
@@ -8677,8 +8705,13 @@ fn supervise_native(
             },
             ContractAuthorization::from(contract_action),
         );
-        let descriptor_authority_denied = ginux_fs_policy::operation(syscall)
-            .is_some_and(|operation| operation.owner == ginux_fs_policy::Owner::DescriptorCore)
+        // Preserve the contract's exact unsupported errno. Descriptor
+        // authority is an additional guard only for admitted operations; a
+        // contract denial must not be rewritten to EPERM merely because the
+        // route correctly refuses a denied authorization.
+        let descriptor_authority_denied = !matches!(contract_action, ContractAction::Deny(_))
+            && ginux_fs_policy::operation(syscall)
+                .is_some_and(|operation| operation.owner == ginux_fs_policy::Owner::DescriptorCore)
             && ginux_fs_policy::descriptor_kernel_route(&call).is_err();
         let explicit_filesystem_denial = ginux_fs_policy::operation(syscall)
             .filter(|operation| operation.owner == ginux_fs_policy::Owner::ExplicitDeny)
