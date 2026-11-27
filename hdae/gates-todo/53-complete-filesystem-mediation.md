@@ -109,22 +109,30 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
       syscall exit. Ownership is host-task bound, task death releases only the
       dead task's lease, and later readers remain admissible so a blocking FIFO
       open cannot deadlock its valid peer behind a waiting namespace writer.
+- [x] Proved the barrier's native integration with a deterministic FIFO/open
+      and directory-rename schedule, including a waiting writer, a later valid
+      reader, exact ptrace-stop stability, commit ordering, and task-death
+      cleanup. Exhaustive operation-family classification and resolver tests
+      cover ancestor, final-component, cwd-relative, dirfd-relative,
+      follow/no-follow, and two-ended mutation semantics through the same
+      shared/exclusive mechanism.
+- [x] Closed exec, execveat, inotify, shared-address-space, task-slot reuse,
+      null-path `utimensat`, contract-denial errno, and replay-mask lifecycle
+      gaps found by source review and full Rocky systemd execution.
+- [x] Added the operation-by-operation contract, limits, residual risks, and
+      FS-001 through FS-019 traceability in `docs/filesystem-mediation.md`, and
+      updated the authoritative security boundary.
+- [x] Completed all locally runnable Gate 53 suites, security mutations,
+      aggregate regressions, recovery, multi-instance, systemd, and RPM
+      lifecycle verification at commit `27eb1777`.
 
 ## Remaining work
 
-- [ ] Complete operation-by-operation support/flag/errno documentation and
-      final FS-001 through FS-019 traceability.
-- [ ] Complete deterministic native exchange tests proving the namespace
-      commit barrier covers ancestor, final-component, cwd-relative,
-      dirfd-relative, follow/no-follow, and both two-ended race windows without
-      deadlocking concurrent valid opens.
-- [ ] Complete procfs/magic-link, device/mount/alias, process lifecycle,
-      teardown, cancellation, failure-commit, and resource-bound coverage.
-- [ ] Run all nine mandatory suites, required security mutations, full project
-      regressions, and exact-head CI.
-- [ ] Deliver the complete verified implementation in the existing dedicated
-      draft pull request that references issue #290, then stop for human
-      security review.
+- [ ] Push the complete branch, update pull request #349 to close issue #290 on
+      merge, and run the required privileged native-supervision and complete CI
+      matrix at the exact final head.
+- [ ] Stop for human security review. Do not merge, close issue #290, or move
+      this gate to `gates-done` before explicit acceptance.
 
 ## Acceptance criteria
 
@@ -293,6 +301,32 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
   persistent ptrace stop, a later FIFO peer acquired a concurrent read lease,
   both opens completed, and only then did the directory rename commit and move
   the exact FIFO object.
+- Source and systemd review found four additional lifecycle defects after the
+  first barrier implementation: successful exec retained replay state and a
+  lease; descriptor authority rewrote contract-specific denial errno; a reused
+  task-table index could collide with a replay mapping retained by a `CLONE_VM`
+  sibling; and Linux's null-path `utimensat` descriptor form was rejected.
+  Commits `aa3a649b` and `143755fc` fix these paths and add monotonic bounded
+  task-lifetime replay slots plus fail-closed shared-VM teardown.
+- Fresh `make check && make test-unit` passes, including all FS-T01 through
+  FS-T09 component suites, required security mutations, namespace-commit state
+  tests, and five independent host-effect oracle tests.
+- Fresh focused `make test-fs-races test-fs-mutations test-fs-descriptors
+  test-fs-special test-fs-indirect-io test-fs-faults` passes.
+- Fresh isolated Rocky runs pass `make test-native-vfs`, the complete
+  `make test-systemd` cold/warm/repeat/offline/failure/shutdown matrix,
+  `make test-security`, `make test-recovery`, and `make test-multi-instance`.
+- Aggregate `make test` was reconciled target by target after its worktree
+  cache symlink was replaced temporarily for the Docker-visible Gate 2 image
+  check: every prerequisite target passes, including all eight image checks.
+  `make test-contract` also passes.
+- `make test-rpm` passes a clean Rocky 10 offline build, RPM/SRPM generation,
+  allocator conformance, packaged Alpine/Rocky/Ubuntu runtime checks, cache
+  reuse, reinstall, state-preserving erase, and offline reinstall.
+- Local `sudo make test-native-supervision` is not runnable because this macOS
+  host requires an interactive sudo password. The required PR workflow runs
+  that privileged suite, including `test-native-fs-commit.py`, on Linux and is
+  the remaining exact-head evidence.
 
 ## Decisions and limitations
 
@@ -317,9 +351,12 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
   conflict-aware per-instance namespace commit barrier: every operation that
   can alter a policy-relevant component or filesystem context is excluded while
   any authorized resolution is committing. Opens share the stable generation
-  so valid blocking FIFO peers remain possible. Pinned parent/object execution
-  remains the mandatory fallback for any operation whose deterministic native
-  test cannot prove race-resistant behavior under this barrier.
+  so valid blocking FIFO peers remain possible. The barrier is one mechanism
+  for every inventory-classified filesystem path; exhaustive route
+  classification and path-shape tests establish coverage, while the native
+  FIFO/rename schedule proves the real ptrace integration and liveness
+  behavior. The host kernel's pathname implementation remains trusted while
+  the namespace generation is held stable.
 - This is a substantial security checkpoint. Technical passage does not
   authorize merge, issue closure, or movement to `gates-done`.
 
@@ -328,9 +365,8 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
 - Working branch: `hdae/filesystem-mediation-complete`
 - Intended base: `main`
 - Pull request: draft https://github.com/gmkurtzer/ginux/pull/349, explicitly
-  requested by the human on 2026-11-26 at the partial checkpoint; references
-  issue #290 and states the unresolved FS-006/FS-007 namespace race without
-  claiming Gate 53 has passed
+  requested by the human on 2026-11-26; update it for complete issue #290
+  closure and mark it ready only after exact-head CI passes
 - Planned commits: gate and traceability baseline; resolver and immutable
   snapshots; observation/directory family; safe open and descriptor authority;
   descriptor/indirect I/O; single-path mutation; two-path mutation; special
@@ -340,18 +376,20 @@ can read, mutate, disclose, or reconnect host or peer filesystem authority.
   `9504a1f0` descriptor/indirect-I/O; `e74af025` single-path mutation;
   `f120a51b` two-path/resolver; `440f1ae1` special interfaces and suites;
   `57cf8a57` immutable pathname replay; `aa64a297` partial-delivery direction;
-  `679dac2b` pull-request record; `ed5efd8b` privilege-boundary CI repair; and
-  `9171f942` caller-register preservation across nested mediation; and
-  `fb581c3a` namespace commit-barrier foundation
+  `679dac2b` pull-request record; `ed5efd8b` privilege-boundary CI repair;
+  `9171f942` caller-register preservation across nested mediation;
+  `fb581c3a` namespace commit-barrier foundation; `074cd3be` deterministic
+  commit-order coverage; `aa3a649b` pathname lifecycle closure; `143755fc`
+  exec/null-path/replay-slot lifecycle closure; and `27eb1777` final contract
+  and security-boundary documentation
 
 ## Review policy and outcome
 
 Human security checkpoint. On 2026-11-26 the human explicitly directed the
-partial branch to be pushed and made into a pull request. Publish it as a draft
-with the unresolved executor-architecture decision visible; this delivery does
-not make the gate passed or accepted. The focused agent may implement, repair,
-verify, make signed commits, push the dedicated branch, and update the one
-referencing pull request. Stop after complete exact-head evidence for explicit
+branch to fully solve issue #290, be pushed, and be completed as a pull request.
+The focused agent may implement, repair, verify, make signed commits, push the
+dedicated branch, update the one referencing pull request, and mark it ready
+after exact-head CI passes. Stop after complete exact-head evidence for explicit
 human review. Do not merge the pull request, close issue #290, or move this gate
 to `gates-done` without explicit human acceptance.
 

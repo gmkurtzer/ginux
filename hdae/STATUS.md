@@ -4,100 +4,50 @@
 
 ### Gate 53 complete filesystem mediation
 
-- On 2026-11-25 the human approved one comprehensive gate covering every
-  FS-001 through FS-019 requirement in issue #290, not only the observation
-  family.
-- Gate 53 is active on `hdae/filesystem-mediation-complete` from current
-  `main` at `e545062b`.
-- Gate 31's immutable context, inventory, typed authority, route interlocks,
-  and independent oracle are the accepted foundation; the new gate must reuse
-  them while enabling every supported filesystem operation family.
-- Scope includes all nine mandatory suites FS-T01 through FS-T09, deterministic
-  races, fault injection, security mutations, every advertised confined native
-  route, exact unsupported behavior, and final documentation/security review.
-- Interfaces outside the accepted instance contract may remain unsupported
-  only through explicit, tested denial; blanket denial of supported filesystem
-  behavior cannot pass.
-- Baseline main workflow run 45708975262 is green. The inventory now records
-  ordered operation families and one accountable executor per entry. The
-  confined path executor is the tracee kernel's already-pinned chroot/cwd/open
-  object state, so the supervisor never reopens an authorized pathname.
-- The observation/directory-state family is enabled through the complete
-  contract, capability, generation, and confinement guard. Fresh `make check`
-  and an isolated Rocky 10 x86-64 `test-native-vfs` run pass.
-- Safe open/openat is enabled through the same route. Unsupported safe-open
-  spellings retain explicit `ENOSYS`; a second `make check` and isolated Rocky
-  `test-native-vfs` run pass, including loader/open success, mutating-open
-  refusal, and immutable-image verification.
-- Descriptor and indirect-I/O routes now require the current
-  instance/lifetime/table generation and API-equivalent rights. Writable
-  shared mappings and two-descriptor transfers require read plus write.
-  `make check`, `make test-unit`, and a third isolated Rocky
-  `test-native-vfs` run pass with this guard active.
-- Every single-path mutation spelling is now owned after the earlier families.
-  Contract-write and immutable-image checks still precede the confined kernel
-  continuation. Fresh `make check` and the isolated Rocky 10 x86-64
-  `test-systemd` cold/warm/repeat, offline, controlled-shutdown, immutable-base
-  DNF-failure, and startup-failure matrix pass.
-- The final rename/link family is enabled after independent source and
-  destination checks. Policy resolution now follows each symlink before later
-  parent components and distinguishes follow from entry operations. Fresh
-  `make check` and a second isolated Rocky `test-systemd` matrix pass after
-  this final path-family widening.
-- Special interfaces now have explicit accountable routes, and the generated
-  inventory distinguishes virtual mount state, host-global `EPERM`, and
-  unsupported `ENOSYS` behavior. Named FS-T01 through FS-T09 tests and the six
-  focused Make targets are present; T01 through T09 and the required mutation
-  test pass in focused/component runs.
-- Every filesystem-lane pathname is now copied once into a bounded
-  supervisor-owned buffer, replayed from a per-task read-only mapping, and
-  protected across map/call/unmap plus signal and task-death cleanup. `make
-  check`, its snapshot-plan unit test, isolated `test-native-vfs`, and the full
-  isolated `test-systemd` matrix pass with replay active.
+- Gate 53 implements issue #290's complete FS-001 through FS-019 boundary on
+  `hdae/filesystem-mediation-complete`; it remains a human security checkpoint
+  in `gates-todo`.
+- Every inventory-owned filesystem path now uses the Gate 31 immutable context,
+  typed root/cwd/descriptor authority, generation checks, protected pathname
+  replay, and one per-instance namespace commit barrier from policy resolution
+  through host syscall completion.
+- Read operations share a stable generation; namespace, metadata, cwd, and
+  `fchdir` changes are exclusive. A deterministic native FIFO/open and rename
+  schedule proves waiting-writer ordering, later-reader liveness, ptrace-stop
+  stability, exact object movement, and safe task-death cleanup.
+- Exec/execveat, inotify, shared-address-space teardown, task-table reuse,
+  null-path `utimensat`, contract-specific denial errno, and replay signal-mask
+  lifecycle gaps found during review are fixed. Replay addresses use a bounded
+  monotonic task-lifetime slot; shared-VM interruption fails the instance
+  closed.
+- `docs/filesystem-mediation.md` records supported and denied forms, exact
+  bounds, residual risks, and FS-001 through FS-019 enforcement/evidence
+  traceability. `docs/security-boundary.md` now describes the implemented lane.
+- Fresh local evidence passes `make check`, `make test-unit`, all six focused
+  filesystem suites, `make test-contract`, every aggregate `make test`
+  prerequisite, `make test-security`, `make test-recovery`,
+  `make test-multi-instance`, isolated `make test-native-vfs`, the complete
+  `make test-systemd` matrix, and `make test-rpm`.
+- The aggregate Gate 2 image check required a temporary worktree-local cache
+  because Docker cannot follow this worktree's absolute shared-cache symlink;
+  with that topology corrected it passed all eight checks, and the original
+  cache link was restored unchanged.
+- Local `sudo make test-native-supervision` is unavailable because the macOS
+  host requires an interactive sudo password. Required PR CI supplies this
+  privileged Linux run, including the deterministic native filesystem schedule.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Open decisions or limitations: on 2026-11-26 the human directed Gate 53 to
-  fully solve issue #290 and complete its pull request. A conflict-aware
-  per-instance namespace commit barrier is now implemented as the primary
-  FS-006/FS-007 correction, with pinned parent/object execution retained as the
-  required fallback wherever deterministic native evidence cannot prove the
-  barrier sufficient. Native scheduled exchange coverage and the remaining
-  FS-001 through FS-019 closure matrix are not yet complete. Gate 53 remains a
-  final human security checkpoint and may not merge or close issue #290 before
-  that evidence and explicit acceptance.
-- Exact next action: add deterministic native exchange/liveness coverage for
-  the namespace commit barrier, repair any uncovered operation with pinned
-  execution, then complete the remaining Gate 53 matrix and exact-head CI.
-- Current local evidence: fresh `make check`, `make test-unit`, and an isolated
-  Rocky 10 x86-64 `make test-native-vfs` pass with the namespace commit barrier
-  active. These checks establish compilation, state-machine behavior, and the
-  ordinary native path, but do not replace the remaining scheduled exchange
-  tests.
-- A new deterministic Rocky native test now pauses an admitted FIFO reader in
-  the host kernel, proves a conflicting directory rename remains at a stable
-  ptrace stop, admits a second reader needed for FIFO liveness, and proves the
-  rename moves the object only after both opens complete. Its first run exposed
-  and drove correction of replay-mask ordering; the corrected run passes.
-- Delivery direction: on 2026-11-26 the human explicitly requested that the
-  current partial checkpoint be pushed and made into a pull request. Open it as
-  a draft against `main`, reference issue #290 without a closing keyword, state
-  the unresolved FS-006/FS-007 race, and keep the gate in `gates-todo`.
+- Open decisions or limitations: the host kernel remains trusted while the
+  commit barrier holds the namespace generation stable; this is not complete
+  VFS compatibility or a hardware boundary. Gate 53 may not merge, close issue
+  #290, or move to `gates-done` before exact-head CI and explicit acceptance.
+- Exact next action: commit this Gate 53 checkpoint, push the branch, update
+  pull request #349 with `Closes #290`, wait for exact-head required CI, repair
+  any failure, mark the PR ready, and stop for human security review.
 - Delivery: draft pull request https://github.com/gmkurtzer/ginux/pull/349 is
-  open against `main` from `hdae/filesystem-mediation-complete`. It states the
-  partial status and must not be merged or used to close issue #290.
-- Draft CI found one harness-only failure: `sudo make
-  test-native-supervision` attempted to run the FS-T08 Rust component test with
-  Cargo absent from the privileged PATH. The component suite already belongs
-  to unprivileged `make test-unit`; the repair keeps privileged execution
-  limited to the native integration scripts.
-- Refreshed CI then exposed a real composition regression: virtual-device open
-  saved the private immutable-path replay pointer as the caller's argument.
-  The repair now restores the original syscall arguments across that nested
-  mediation. Fresh disposable-clone `make check && make test-unit` passes.
-  Exact-head workflow run 45867768467 at `9171f942` is green for `changes`,
-  `static-and-unit`, and `launch-integration`, including the complete privileged
-  native-supervision case that local `sudo` could not run noninteractively.
+  open against `main` from `hdae/filesystem-mediation-complete`; it must not be
+  merged before the human accepts this checkpoint.
 
 ## Prior checkpoint
 
