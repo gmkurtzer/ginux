@@ -441,4 +441,29 @@ mod tests {
         cgroups.write(b"/b/pids.max", b"1\n", 0).unwrap();
         assert_eq!(cgroups.attach(b"/b", 8, 0), Err(ViewError::LimitExceeded));
     }
+
+    #[test]
+    fn remove_busy_only_for_active_children_not_inactive_slots() {
+        let mut cg: CgroupFs<4> = CgroupFs::new();
+        cg.create(b"/a.slice", 0).unwrap();
+        cg.create(b"/a.slice/child", 0).unwrap();
+        // active child blocks parent removal (Busy), even with zero members
+        assert_eq!(cg.remove(b"/a.slice", 0), Err(ViewError::Busy));
+        // leaf with no children and no members removes cleanly
+        cg.remove(b"/a.slice/child", 0).unwrap();
+        cg.remove(b"/a.slice", 0).unwrap();
+        // freed slots are inactive: must not block re-creation or sibling removal
+        cg.create(b"/b.slice", 0).unwrap();
+        cg.create(b"/b.slice/kid", 0).unwrap();
+        cg.remove(b"/b.slice/kid", 0).unwrap();
+        cg.remove(b"/b.slice", 0).unwrap();
+        // root is never removable; non-root uid denied
+        assert_eq!(cg.remove(b"/", 0), Err(ViewError::PermissionDenied));
+        cg.create(b"/c.slice", 0).unwrap();
+        assert_eq!(
+            cg.remove(b"/c.slice", 1000),
+            Err(ViewError::PermissionDenied)
+        );
+        cg.remove(b"/c.slice", 0).unwrap();
+    }
 }
