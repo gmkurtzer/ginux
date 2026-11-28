@@ -1025,4 +1025,23 @@ mod tests {
         assert!(balanced_arguments_allowed(SYS_WAIT4, u64::MAX, 0, 0));
         assert!(balanced_arguments_allowed(SYS_WAIT4, 1, 0, 0));
     }
+
+    #[test]
+    fn write_admission_rejects_stdin_and_netlink_requires_ack_kind() {
+        // write(1) is console-only: stdin (fd 0) must never be admitted
+        assert!(!balanced_arguments_allowed(1, 0, 0x1000, 1));
+        assert!(balanced_arguments_allowed(1, 1, 0x1000, 1));
+        assert!(balanced_arguments_allowed(1, 2, 0x1000, 1));
+        assert!(!balanced_arguments_allowed(1, 3, 0x1000, 1));
+        // a well-formed non-ACK message (kind=3) must not retire a sequence
+        let mut msg = [0u8; 20];
+        msg[0..4].copy_from_slice(&20u32.to_ne_bytes());
+        msg[4..6].copy_from_slice(&3u16.to_ne_bytes());
+        msg[8..12].copy_from_slice(&7u32.to_ne_bytes());
+        msg[16..20].copy_from_slice(&0i32.to_ne_bytes());
+        assert_eq!(loopback_netlink_ack_index(&msg, &[7]), Ok(None));
+        // same bytes with kind=2 do retire it
+        msg[4..6].copy_from_slice(&2u16.to_ne_bytes());
+        assert_eq!(loopback_netlink_ack_index(&msg, &[7]), Ok(Some(0)));
+    }
 }
