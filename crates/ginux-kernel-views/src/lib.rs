@@ -761,4 +761,41 @@ mod tests {
             .unwrap();
         assert_eq!(&output[..len], b"0-3\n");
     }
+
+    #[test]
+    fn procfs_stat_labels_init_and_managed_and_running_state() {
+        let (views, count) = fixture();
+        let tasks = &views[..count];
+        let mounts: [MountView<'_>; 0] = [];
+        let procfs = ProcFs::new(
+            tasks,
+            2,
+            12_340_000_000,
+            MemoryView {
+                total_bytes: 512 * 1024 * 1024,
+                available_bytes: 384 * 1024 * 1024,
+            },
+            IdentityView {
+                hostname: b"instance-a",
+                machine_id: b"0123456789abcdef0123456789abcdef",
+                boot_id: b"11111111-2222-3333-4444-555555555555",
+            },
+            &mounts,
+        );
+        let mut out = [0u8; 256];
+        let len = procfs.read(b"/proc/1/stat", &mut out).unwrap();
+        assert!(
+            out[..len].windows(8).any(|w| w == b" (init) "),
+            "init label missing"
+        );
+        let len = procfs.read(b"/proc/2/stat", &mut out).unwrap();
+        assert!(
+            out[..len].windows(11).any(|w| w == b" (managed) "),
+            "managed label missing"
+        );
+        assert!(
+            out[..len].windows(3).any(|w| w == b" R "),
+            "running state missing"
+        );
+    }
 }
