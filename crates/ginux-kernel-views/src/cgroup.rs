@@ -466,4 +466,23 @@ mod tests {
         );
         cg.remove(b"/c.slice", 0).unwrap();
     }
+
+    #[test]
+    fn parse_controllers_accumulates_and_skips_empty_tokens() {
+        // single controller
+        assert_eq!(parse_controllers(b"+cpu"), Ok(CPU));
+        // multiple controllers accumulate via OR
+        assert_eq!(parse_controllers(b"+cpu +memory"), Ok(CPU | MEMORY));
+        assert_eq!(
+            parse_controllers(b"+cpu +memory +pids"),
+            Ok(CPU | MEMORY | PIDS)
+        );
+        // trailing/double spaces produce empty tokens that must be skipped, not error
+        assert_eq!(parse_controllers(b"+cpu "), Ok(CPU));
+        assert_eq!(parse_controllers(b"+cpu  +pids"), Ok(CPU | PIDS));
+        // unknown token rejected
+        assert_eq!(parse_controllers(b"+io"), Err(ViewError::PermissionDenied));
+        // empty input yields zero controllers
+        assert_eq!(parse_controllers(b""), Ok(0));
+    }
 }
