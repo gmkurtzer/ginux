@@ -1285,4 +1285,38 @@ mod tests {
         c[16..20].copy_from_slice(&99u32.to_le_bytes());
         assert_eq!(Index::new(&c).err(), Some(VfsError::InvalidIndex));
     }
+
+    #[test]
+    fn decode_record_accepts_exact_path_and_link_bounds() {
+        let mut buf = [0u8; HEADER_SIZE + RECORD_SIZE];
+        encode_header(1, (&mut buf[..HEADER_SIZE]).try_into().unwrap());
+        {
+            let rec = &mut buf[HEADER_SIZE..];
+            rec[2] = 3; // symlink
+            rec[0..2].copy_from_slice(&(MAX_PATH as u16).to_le_bytes());
+            rec[32..34].copy_from_slice(&(MAX_LINK as u16).to_le_bytes());
+            rec[40] = b'/';
+            for b in &mut rec[41..40 + MAX_PATH] {
+                *b = b'a';
+            }
+            for b in &mut rec[40 + MAX_PATH..40 + MAX_PATH + MAX_LINK] {
+                *b = b'b';
+            }
+        }
+        // exact MAX_PATH path and MAX_LINK link must decode (boundary inclusive)
+        assert!(Index::new(&buf).is_ok());
+        {
+            let rec = &mut buf[HEADER_SIZE..];
+            rec[32..34].copy_from_slice(&((MAX_LINK + 1) as u16).to_le_bytes());
+        }
+        // one past MAX_LINK must be rejected at decode time
+        assert_eq!(Index::new(&buf).err(), Some(VfsError::InvalidIndex));
+        {
+            let rec = &mut buf[HEADER_SIZE..];
+            rec[32..34].copy_from_slice(&(MAX_LINK as u16).to_le_bytes());
+            rec[0..2].copy_from_slice(&0u16.to_le_bytes());
+        }
+        // zero-length path rejected
+        assert_eq!(Index::new(&buf).err(), Some(VfsError::InvalidIndex));
+    }
 }
