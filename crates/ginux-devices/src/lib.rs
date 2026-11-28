@@ -943,4 +943,26 @@ mod tests {
         // foreign instance cannot reach the descriptor
         assert!(registry.write(2, null, b"abc").is_err());
     }
+
+    #[test]
+    fn random_read_pins_xorshift_sequence() {
+        let mut registry: DeviceRegistry<8, 8> = DeviceRegistry::new();
+        registry
+            .assign(
+                1,
+                10,
+                DeviceName::new(b"random").unwrap(),
+                DeviceKind::Random,
+            )
+            .unwrap();
+        let fd = registry.open(1, b"random").unwrap();
+        let mut buf = [0u8; 4];
+        registry.read(1, fd, &mut buf).unwrap();
+        // pin first four bytes of xorshift64 from actual default seed 0x6a09_e667_f3bc_c909
+        assert_eq!(buf, [0xdb, 0xbe, 0xcd, 0xea]);
+        // second read continues the sequence (state persists)
+        let mut buf2 = [0u8; 4];
+        registry.read(1, fd, &mut buf2).unwrap();
+        assert_ne!(buf, buf2);
+    }
 }
