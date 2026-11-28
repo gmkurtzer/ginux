@@ -857,4 +857,16 @@ mod tests {
         let variant = serde_json::json!({"manifests":[{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":1,"platform":{"os":"linux","architecture":"amd64","variant":"v8"}}]});
         assert!(select_manifest(&variant).is_err());
     }
+
+    #[test]
+    fn human_size_scales_units_and_caps_at_gib() {
+        assert_eq!(human_size(0), "0 B");
+        assert_eq!(human_size(512), "512 B");
+        assert_eq!(human_size(1024), "1.0 KiB");
+        assert_eq!(human_size(1536), "1.5 KiB");
+        assert_eq!(human_size(1024 * 1024), "1.0 MiB");
+        assert_eq!(human_size(1024 * 1024 * 1024), "1.0 GiB");
+        // beyond GiB stays in GiB (unit cap)
+        assert_eq!(human_size(2 * 1024 * 1024 * 1024), "2.0 GiB");
+    }
 }
