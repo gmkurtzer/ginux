@@ -2254,4 +2254,31 @@ mod tests {
         poll.remove(5).unwrap();
         poll.add(5, EVENT_WRITE).unwrap();
     }
+
+    #[test]
+    fn timer_update_one_shot_stops_and_periodic_catches_up_exactly() {
+        let mut timers: TimerTable<4> = TimerTable::new();
+        // one-shot (interval 0): a single expiration, then permanently idle
+        let one = timers.create().unwrap();
+        timers.arm(one, 0, 10, 0).unwrap();
+        timers.update(10);
+        assert_eq!(timers.read(one), Ok(1));
+        timers.update(1_000);
+        assert_eq!(timers.read(one), Err(ProcessError::WouldBlock));
+        // periodic: elapsed 100 with deadline 10 / interval 25 => 1 + 3 = 4
+        let per = timers.create().unwrap();
+        timers.arm(per, 0, 10, 25).unwrap();
+        timers.update(100);
+        assert_eq!(timers.read(per), Ok(4));
+        // no further time passed: nothing new
+        timers.update(100);
+        assert_eq!(timers.read(per), Err(ProcessError::WouldBlock));
+        // before the deadline nothing fires
+        let early = timers.create().unwrap();
+        timers.arm(early, 100, 50, 0).unwrap();
+        timers.update(149);
+        assert_eq!(timers.read(early), Err(ProcessError::WouldBlock));
+        timers.update(150);
+        assert_eq!(timers.read(early), Ok(1));
+    }
 }
