@@ -2232,4 +2232,26 @@ mod tests {
         pipes.unshare(99).unwrap();
         assert_eq!(pipes.task_fds(99), 0);
     }
+
+    #[test]
+    fn event_poll_add_rejects_zero_invalid_and_duplicate() {
+        let mut poll: EventPoll<4> = EventPoll::new();
+        // descriptor 0 rejected even with valid events
+        assert_eq!(poll.add(0, EVENT_READ), Err(ProcessError::InvalidEvent));
+        // zero events rejected even with valid descriptor
+        assert_eq!(poll.add(5, 0), Err(ProcessError::InvalidEvent));
+        // unsupported high bit rejected
+        assert_eq!(
+            poll.add(5, EVENT_READ | 0x80),
+            Err(ProcessError::InvalidEvent)
+        );
+        // valid single-bit and combined accepted
+        poll.add(5, EVENT_READ).unwrap();
+        poll.add(6, EVENT_READ | EVENT_WRITE).unwrap();
+        // duplicate active descriptor rejected
+        assert_eq!(poll.add(5, EVENT_WRITE), Err(ProcessError::InvalidEvent));
+        // removed slot can be re-added
+        poll.remove(5).unwrap();
+        poll.add(5, EVENT_WRITE).unwrap();
+    }
 }
