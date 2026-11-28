@@ -869,4 +869,25 @@ mod tests {
         // beyond GiB stays in GiB (unit cap)
         assert_eq!(human_size(2 * 1024 * 1024 * 1024), "2.0 GiB");
     }
+
+    #[test]
+    fn remove_path_unlinks_symlink_without_following_target() {
+        let base = temp_dir("remove-symlink");
+        let outside = temp_dir("remove-outside");
+        fs::write(outside.join("victim"), b"keep").unwrap();
+        let link = base.join("link");
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+        // removing the link must unlink it, never recurse into the target
+        remove_path(&link).unwrap();
+        assert!(!link.exists());
+        assert!(outside.join("victim").exists());
+        // missing path is a no-op; a real directory is removed recursively
+        remove_path(&base.join("absent")).unwrap();
+        fs::create_dir_all(base.join("d/sub")).unwrap();
+        fs::write(base.join("d/sub/f"), b"x").unwrap();
+        remove_path(&base.join("d")).unwrap();
+        assert!(!base.join("d").exists());
+        fs::remove_dir_all(&base).unwrap();
+        fs::remove_dir_all(&outside).unwrap();
+    }
 }
