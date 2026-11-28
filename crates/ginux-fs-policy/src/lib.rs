@@ -2363,4 +2363,14 @@ mod tests {
         assert_eq!(nullable_path_snapshot_arguments(280), 1 << 1);
         assert_eq!(nullable_path_snapshot_arguments(257), 0);
     }
+
+    #[test]
+    fn identity_token_matches_fnv1a_reference_values() {
+        // Exact FNV-1a reference values (offset basis + prime per spec)
+        assert_eq!(identity_token(b""), 0xcbf2_9ce4_8422_2325);
+        assert_eq!(identity_token(b"rocky"), 0xb6d6_c546_5985_e177);
+        assert_eq!(identity_token(b"peer"), 0xdff7_710d_d73b_9849);
+        // zero-hash fallback to 1 is preserved
+        assert_ne!(identity_token(b""), 0);
+    }
 }
