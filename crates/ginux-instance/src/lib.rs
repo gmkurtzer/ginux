@@ -3217,4 +3217,15 @@ failure = "stop"
         assert!(c.apply_override(b"no.such.key", b"\"x\"").is_err());
         assert!(c.apply_override(b"contract.digest", b"\"x\"").is_err());
     }
+
+    #[test]
+    fn finish_preserves_explicit_workdir_and_rejects_partial_recipe() {
+        let src = VALID.replace("id = \"demo\"", "id = \"demo\"\nworkdir = \"/custom\"");
+        let c = InstanceConfig::parse(src.as_bytes()).unwrap();
+        assert_eq!(c.workdir.as_bytes(), b"/custom");
+        let d = InstanceConfig::parse(VALID.as_bytes()).unwrap();
+        assert_eq!(d.workdir.as_bytes(), b"/work");
+        let partial = VALID.replace("default = \"deny\"\n", "");
+        assert!(InstanceConfig::parse(partial.as_bytes()).is_err());
+    }
 }
