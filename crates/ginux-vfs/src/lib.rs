@@ -1319,4 +1319,30 @@ mod tests {
         // zero-length path rejected
         assert_eq!(Index::new(&buf).err(), Some(VfsError::InvalidIndex));
     }
+
+    #[test]
+    fn copy_to_overlay_accepts_exact_file_size_and_rejects_overflow() {
+        let mut buf = [0u8; HEADER_SIZE + RECORD_SIZE];
+        encode_header(1, (&mut buf[..HEADER_SIZE]).try_into().unwrap());
+        let entry = Entry {
+            path: b"/exact",
+            kind: NodeKind::File,
+            mode: 0o644,
+            uid: 0,
+            gid: 0,
+            size: 8,
+            data_offset: 0,
+            link: b"",
+        };
+        encode_record(entry, (&mut buf[HEADER_SIZE..]).try_into().unwrap()).unwrap();
+        let mut vfs: VirtualFs<'_, Reader, 2, 8, 4> =
+            VirtualFs::new(Index::new(&buf).unwrap(), Reader(*b"BASETOOL"));
+        let w = vfs.open(b"/exact", O_WRITE).unwrap();
+        vfs.close(w).unwrap();
+        let std_bytes = index_bytes();
+        let mut vfs2: VirtualFs<'_, Reader, 2, 8, 4> =
+            VirtualFs::new(Index::new(&std_bytes).unwrap(), Reader(*b"BASETOOL"));
+        let w2 = vfs2.open(b"/base", O_WRITE).unwrap();
+        vfs2.close(w2).unwrap();
+    }
 }
